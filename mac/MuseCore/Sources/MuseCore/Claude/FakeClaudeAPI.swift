@@ -293,12 +293,15 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     /// Step 6b: the demo's model list (the server's, in short), so the panel shows its model line in demo mode too.
     public func claudeModels() async throws -> ClaudeModelList {
         ClaudeModelList(models: [
-            ClaudeModelInfo(id: "claude-opus-5-5", name: "Claude Opus 5.5", speed: "Steady", cost: "Standard cost", good: "Most work"),
-            ClaudeModelInfo(id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", speed: "Fast", cost: "About half of Opus", good: "Everyday questions"),
-            ClaudeModelInfo(id: "claude-haiku-5-5", name: "Claude Haiku 5.5", speed: "Fastest", cost: "Lowest cost", good: "Short answers"),
-        ], default: nil, studioDefault: "claude-opus-5-5")
+            ClaudeModelInfo(id: "claude-opus-5-5", name: "Claude Opus 5.5", speed: "Steady", cost: "Standard cost", good: "Most work", efforts: ClaudeEffort.all, defaultEffort: "medium"),
+            ClaudeModelInfo(id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", speed: "Fast", cost: "About half of Opus", good: "Everyday questions", efforts: ClaudeEffort.all, defaultEffort: "high"),
+            ClaudeModelInfo(id: "claude-haiku-5-5", name: "Claude Haiku 5.5", speed: "Fastest", cost: "Lowest cost", good: "Short answers", efforts: ClaudeEffort.all, defaultEffort: "medium"),
+        ], default: nil, studioDefault: "claude-opus-5-5", defaultEffort: locked { lastEffort })
     }
     public func setChatModel(_ id: String, model: String?) async throws {}
+    /// Demo: a chat's effort pick is remembered as the last choice (as the server does).
+    private var lastEffort: String?
+    public func setChatEffort(_ id: String, effort: String?) async throws { if let effort { locked { lastEffort = effort } } }
     public func setDefaultModel(_ model: String?) async throws {}
 
     public func apiTurn(threadId: String, text: String) -> AsyncThrowingStream<ChatEvent, Error> {
@@ -338,6 +341,14 @@ public final class ClaudeScriptedLauncher: ClaudeLauncher, @unchecked Sendable {
     private let script: @Sendable (String) -> [String]
     public let delay: Double
     public private(set) var launches: [(arguments: [String], cwd: URL, stdin: String, config: String?)] = []
+    /// Every scripted launch's arguments in this process (demo mode makes a launcher per turn; the review checks read it).
+    public static let recent = Recent()
+    public final class Recent: @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [[String]] = []
+        func add(_ a: [String]) { lock.lock(); all.append(a); if all.count > 50 { all.removeFirst() }; lock.unlock() }
+        public var arguments: [[String]] { lock.lock(); defer { lock.unlock() }; return all }
+    }
 
     /// `script` gets the user's text and returns the lines to print.
     public init(delay: Double = 0, script: @escaping @Sendable (String) -> [String] = { ClaudeDemoScript.lines($0) }) {
@@ -352,6 +363,7 @@ public final class ClaudeScriptedLauncher: ClaudeLauncher, @unchecked Sendable {
         lock.lock()
         launches.append((arguments, cwd, stdin, config))
         lock.unlock()
+        Self.recent.add(arguments)
         let text: String = {
             guard let d = stdin.data(using: .utf8), case .object(let o)? = try? JSONDecoder().decode(JSONValue.self, from: d),
                   case .object(let m)? = o["message"] else { return "" }

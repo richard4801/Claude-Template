@@ -134,7 +134,7 @@ public actor ClaudeRelay {
     public func remember(threadId: String, claudeSessionId: String?, brief: ClaudeBrief? = nil) {
         if let s = claudeSessionId, !s.isEmpty { sessions[threadId] = s }
         if let p = brief?.systemPrompt { briefs[threadId] = p }
-        if let brief { models[threadId] = brief.model ?? "" }
+        if let brief { models[threadId] = brief.model ?? ""; efforts[threadId] = brief.effort ?? "" }
     }
 
     /// Step 6b: each chat's own model ("" = none: the person's default), and the person's default.
@@ -143,6 +143,28 @@ public actor ClaudeRelay {
     public func setDefaultModel(_ m: String?) { defaultModel = m }
     public func setModel(threadId: String, _ m: String?) { models[threadId] = m ?? "" }
     func model(threadId: String) -> String? { models[threadId].flatMap { $0.isEmpty ? nil : $0 } ?? defaultModel }
+
+    /// Effort: each chat's own ("" = none), the person's last choice, and the models (which levels each takes, its
+    /// default). The model a chat shows without one of its own is the studio's (`studioModel`).
+    private var efforts: [String: String] = [:]
+    private var lastEffort: String?
+    private var catalog: [String: ClaudeModelInfo] = [:]
+    private var studioModel: String?
+    public func setEffortCatalog(_ list: ClaudeModelList) {
+        catalog = Dictionary(list.models.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        studioModel = list.studioDefault
+        lastEffort = list.defaultEffort
+    }
+    public func setLastEffort(_ e: String?) { lastEffort = e }
+    public func setEffort(threadId: String, _ e: String?) { efforts[threadId] = e ?? "" }
+    /// The level for the chat's next turn: picked for the chat, else the last choice, else the model's default; none
+    /// when the model takes no effort setting. Before the models are known, only a level picked for the chat is sent.
+    func effort(threadId: String) -> String? {
+        let own = efforts[threadId].flatMap { $0.isEmpty ? nil : $0 }
+        guard !catalog.isEmpty else { return own.flatMap { ClaudeEffort.valid($0) ? $0 : nil } }
+        guard let id = model(threadId: threadId) ?? studioModel, let m = catalog[id] else { return own ?? lastEffort }
+        return ClaudeEffort.resolve(m, own: own, last: lastEffort)
+    }
 
     /// The thread's brief as a system prompt (recreate and edit threads); "" = looked up, none.
     private var briefs: [String: String] = [:]
@@ -244,11 +266,13 @@ public actor ClaudeRelay {
             if sessions[tid] == nil, let s = d.thread.claudeSessionId, !s.isEmpty { sessions[tid] = s }
             briefs[tid] = d.thread.brief?.systemPrompt ?? ""
             models[tid] = d.thread.brief?.model ?? ""
+            if efforts[tid] == nil { efforts[tid] = d.thread.brief?.effort ?? "" } // a pick made on this Mac already
         }
         var req = ClaudeRunRequest(threadId: tid, turnId: job.turnId, text: ClaudeAttachmentPrompt.text(job.text, images), resume: sessions[tid],
                                    blender: await blender(), systemPrompt: systemPrompt(threadId: tid))
         req.shownText = job.text
         req.model = model(threadId: tid)
+        req.effort = effort(threadId: tid)
         req.files = job.turnId == nil ? await files() : false
         req.uploadIds = job.files.map(\.uploadId).filter { !$0.isEmpty }
         if !images.isEmpty { req.readDirectory = ClaudeAttachmentCache.directory(threadId: tid).path }

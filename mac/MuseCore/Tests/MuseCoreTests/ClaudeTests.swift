@@ -117,6 +117,45 @@ final class ClaudeTests: XCTestCase {
 
     // MARK: Command
 
+    /// Effort: a known level goes to Claude Code as --effort; anything else is left out.
+    func testCommandPassesOnlyAKnownEffort() {
+        var c = ClaudeCommand(mcpURL: "https://muse.test/mcp", token: "t")
+        c.model = "claude-opus-5-5"
+        c.effort = "xhigh"
+        XCTAssertEqual(Array(c.arguments(configPath: "/x").suffix(4)), ["--model", "claude-opus-5-5", "--effort", "xhigh"])
+        c.effort = "high --dangerously-skip-permissions"
+        XCTAssertFalse(c.arguments(configPath: "/x").contains("--effort"))
+        c.effort = nil
+        XCTAssertFalse(c.arguments(configPath: "/x").contains("--effort"))
+    }
+
+    /// The chat's own level, else the last choice, else the model's default; only levels the model takes; none for a
+    /// model without effort.
+    func testEffortResolvesPerModel() {
+        let opus = ClaudeModelInfo(id: "claude-opus-5-5", name: "Claude Opus 5.5", speed: "", cost: "", good: "", efforts: ClaudeEffort.all, defaultEffort: "medium")
+        let some = ClaudeModelInfo(id: "m", name: "M", speed: "", cost: "", good: "", efforts: ["max", "low", "bogus"], defaultEffort: "low")
+        let none = ClaudeModelInfo(id: "n", name: "N", speed: "", cost: "", good: "", efforts: nil, defaultEffort: nil)
+        XCTAssertEqual(ClaudeEffort.resolve(opus, own: nil, last: nil), "medium")
+        XCTAssertEqual(ClaudeEffort.resolve(opus, own: nil, last: "max"), "max")
+        XCTAssertEqual(ClaudeEffort.resolve(opus, own: "high", last: "max"), "high")
+        XCTAssertEqual(ClaudeEffort.levels(some), ["low", "max"])
+        XCTAssertEqual(ClaudeEffort.resolve(some, own: "high", last: nil), "low")
+        XCTAssertNil(ClaudeEffort.resolve(none, own: "high", last: "high"))
+        XCTAssertTrue(ClaudeEffort.levels(none).isEmpty)
+        XCTAssertEqual(ClaudeEffort.all.map(ClaudeEffort.name), ["Low", "Medium", "High", "Extra high", "Max"])
+    }
+
+    /// The server's model list and brief carry effort; an older server's (without) still decodes.
+    func testModelListAndBriefDecodeEffort() throws {
+        let j = #"{"models":[{"id":"claude-opus-5-5","name":"Claude Opus 5.5","speed":"Steady","cost":"Standard","good":"Most","efforts":["low","medium","high","xhigh","max"],"defaultEffort":"medium"},{"id":"x","name":"X","speed":"s","cost":"c","good":"g"}],"default":null,"studioDefault":"claude-opus-5-5","defaultEffort":"high"}"#
+        let list = try JSONDecoder().decode(ClaudeModelList.self, from: Data(j.utf8))
+        XCTAssertEqual(list.defaultEffort, "high")
+        XCTAssertEqual(list.models[0].defaultEffort, "medium")
+        XCTAssertNil(list.models[1].efforts)
+        let b = try JSONDecoder().decode(ClaudeBrief.self, from: Data(#"{"prompt":"p","tools":[],"chatId":"ct_1","effort":"max"}"#.utf8))
+        XCTAssertEqual(b.effort, "max")
+    }
+
     /// Step 6b: a chat's model goes to Claude Code as --model; anything that isn't a plain model id is left out.
     func testCommandPassesOnlyAPlainModelId() {
         var c = ClaudeCommand(mcpURL: "https://muse.test/mcp", token: "t")

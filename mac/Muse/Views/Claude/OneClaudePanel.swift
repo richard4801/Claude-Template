@@ -82,6 +82,7 @@ struct OneClaudePanel: View {
                     .help(o.current?.shownTitle ?? "New chat")
                 Spacer(minLength: Space.s2)
                 modelMenu
+                effortMenu
                 Button { Task { await store.newOneClaudeChat() } } label: {
                     Ph("plus", 16).foregroundStyle(r.ink2).frame(width: 28, height: 28).contentShape(Rectangle())
                 }
@@ -161,8 +162,9 @@ struct OneClaudePanel: View {
             } label: {
                 // A Menu label drops custom image sizing (owner bug, build 530: a ~300 pt chip icon pushed the header into the
                 // editor), so no Phosphor image here: text and the system chevron, sized by the font, as ChatSessionsBar does.
+                // The header already says Claude: the chip names the model without it ("Opus 5.5"), so effort fits beside it.
                 HStack(spacing: Space.s1) {
-                    Text(cur.info?.name ?? "Claude").lineLimit(1).fixedSize()
+                    Text(Self.shortName(cur.info?.name) ?? "Claude").lineLimit(1).fixedSize()
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                 }
                 .font(t.scale.caption.font).foregroundStyle(r.ink2)
@@ -187,6 +189,43 @@ struct OneClaudePanel: View {
             .help("Loading the models to choose from. Click to try again.")
             .accessibilityLabel("Claude model: default. Load the models to choose from")
             .task { if store.oneClaude.models == nil { await store.loadClaudeModels() } }
+        }
+    }
+
+    static func shortName(_ name: String?) -> String? {
+        guard let name else { return nil }
+        return name.hasPrefix("Claude ") ? String(name.dropFirst(7)) : name
+    }
+
+    // MARK: Effort beside the model: the levels the chat's model takes, per chat; hidden when the model takes none
+
+    @ViewBuilder private var effortMenu: some View {
+        let r = t.roles
+        let e = store.oneClaudeEffort
+        if let cur = e.current, !e.levels.isEmpty {
+            Menu {
+                Section("Effort for this chat") {
+                    ForEach(e.levels, id: \.self) { level in
+                        Button { Task { await store.setOneClaudeEffort(level) } } label: {
+                            let words = ClaudeEffort.name(level) + (level == e.modelDefault ? " (default)" : "")
+                            if level == cur { Label(words, systemImage: "checkmark") } else { Text(words) }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: Space.s1) {
+                    Text(ClaudeEffort.name(cur)).lineLimit(1).fixedSize()
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                }
+                .font(t.scale.caption.font).foregroundStyle(r.ink2)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude effort line") } }
+            .help("Effort. Higher thinks longer and uses more of your Claude plan.")
+            .accessibilityLabel("Effort: \(ClaudeEffort.name(cur)). Change it")
         }
     }
 

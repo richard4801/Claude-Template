@@ -18,6 +18,8 @@ public struct ClaudeRunRequest: Hashable, Sendable {
     public var readDirectory: String?
     /// Step 6b: the chat's Claude model (`--model`).
     public var model: String?
+    /// The chat's effort level (`--effort`).
+    public var effort: String?
     /// Files on this Mac (ask every time). Only the Mac's own turns: a phone turn has nobody at the Mac to answer.
     public var files = false
 
@@ -124,6 +126,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
             var cmd = ClaudeCommand(mcpURL: token.mcpUrl.isEmpty ? "" : token.mcpUrl, token: token.token, blender: req.blender, resume: req.resume, appendSystemPrompt: req.systemPrompt)
             cmd.readDirectory = req.readDirectory
             cmd.model = req.model
+            cmd.effort = req.effort
             cmd.files = req.files && req.turnId == nil
             try Self.writePrivate(cmd.mcpConfigJSON(), to: config)
         } catch {
@@ -151,6 +154,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
         var cmd = ClaudeCommand(mcpURL: token.mcpUrl, token: token.token, blender: req.blender, resume: resume, appendSystemPrompt: req.systemPrompt)
         cmd.readDirectory = req.readDirectory
         cmd.model = req.model
+        cmd.effort = req.effort
         cmd.files = req.files && req.turnId == nil
         let (lines, cont) = AsyncStream<String>.makeStream(bufferingPolicy: .unbounded)
         let exit = ExitBox()

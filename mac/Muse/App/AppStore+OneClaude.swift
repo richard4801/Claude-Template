@@ -573,6 +573,7 @@ extension AppStore {
         guard let api = oneClaudeAPI, let list = try? await api.claudeModels() else { return }
         oneClaude.models = list
         await ClaudeCodeService.shared.relayDefaultModel(list.default)
+        await ClaudeCodeService.shared.relayEffortCatalog(list)
     }
 
     /// The model the open chat runs on, and whether it is the person's default.
@@ -592,6 +593,29 @@ extension AppStore {
             await ClaudeCodeService.shared.relayChatModel(threadId: chat, id)
         } catch {
             showToast("Couldn't change the model. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
+        }
+    }
+
+    /// The open chat's effort: the levels its model takes (empty: no effort setting, the picker hides), the level the
+    /// next turn runs at, and whether it is the chat's own pick.
+    var oneClaudeEffort: (levels: [String], current: String?, isOwn: Bool, modelDefault: String?) {
+        let info = oneClaudeModel.info
+        let levels = ClaudeEffort.levels(info)
+        let own = oneClaude.current?.effort.flatMap { levels.contains($0) ? $0 : nil }
+        return (levels, ClaudeEffort.resolve(info, own: own, last: oneClaude.models?.defaultEffort), own != nil, info?.defaultEffort)
+    }
+
+    /// Picks the open chat's effort level (nil: back to the last choice / the model's default). The next message uses
+    /// it; a pick is also the person's last choice, so new chats start from it.
+    func setOneClaudeEffort(_ e: String?) async {
+        guard let api = oneClaudeAPI, let chat = oneClaude.chatId else { return }
+        do {
+            try await api.setChatEffort(chat, effort: e)
+            if let i = oneClaude.chats.firstIndex(where: { $0.id == chat }) { oneClaude.chats[i].effort = e }
+            if let e { oneClaude.models?.defaultEffort = e }
+            await ClaudeCodeService.shared.relayChatEffort(threadId: chat, e, last: oneClaude.models?.defaultEffort)
+        } catch {
+            showToast("Couldn't change the effort. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
         }
     }
 
