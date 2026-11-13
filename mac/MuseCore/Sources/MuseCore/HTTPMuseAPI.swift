@@ -471,6 +471,12 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         try await call("POST", "\(es(sessionId))/pending/\(Self.pathKey(pendingId))", ApproveBody(approve: approve))
     }
     public func closeEditSession(id: String) async throws { let _: OkReply = try await call("POST", "\(es(id))/close", Empty()) }
+    public func recentEditSessions(limit: Int) async throws -> [EditSession] {
+        try await call("GET", "v1/edit-sessions?recent=1&limit=\(max(1, min(50, limit)))")
+    }
+    public func saveEditSessionView(sessionId: String, _ view: EditSessionView) async throws {
+        let _: EditSessionViewReply = try await call("POST", "\(es(sessionId))/view", EditSessionViewRequest(view: view))
+    }
     // End edit sessions (workstream 3)
 
     // MARK: Video editor (edited versions of a take)

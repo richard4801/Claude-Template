@@ -480,6 +480,22 @@ struct TimelineCanvas: View {
             if !locked { session.view { $0.selection = id } }
         }
         .gesture(moveGesture(b, row: row, locked: locked))
+        .overlay(alignment: .bottomLeading) {
+            // Continue a draft: the clip's file is gone (a deleted take, a lost upload). The edit still opens; this says why
+            // the clip shows nothing.
+            if let id = b.itemId, isMissing(row.trackId, id) {
+                HStack(spacing: Space.s1) {
+                    Ph("warning", 12)
+                    if w >= 64 { Text("Missing").font(t.scale.micro.font).lineLimit(1) }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, Space.s1 + 2).padding(.vertical, 2)
+                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .offset(x: x + 4, y: 2)
+                .help("This clip's file is missing")
+                .accessibilityHidden(true)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if let id = b.itemId, let badge = MaskBadge(session.project.track(row.trackId)?.item(id)), w >= 36 {
                 maskBadge(badge, itemId: id, locked: locked).offset(x: x, y: 6)
@@ -499,9 +515,16 @@ struct TimelineCanvas: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.label): \(b.label)\(b.itemId.flatMap { MaskBadge(session.project.track(row.trackId)?.item($0)) }.map { ", \($0.text)" } ?? "")")
+        .accessibilityLabel("\(row.label): \(b.label)\(b.itemId.flatMap { MaskBadge(session.project.track(row.trackId)?.item($0)) }.map { ", \($0.text)" } ?? "")\(b.itemId.map { isMissing(row.trackId, $0) } == true ? ", file missing" : "")")
         .accessibilityValue("\(EditSuite.clockTenths(b.startSec)) to \(EditSuite.clockTenths(b.endSec))")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// The item's file isn't on this Mac and couldn't be fetched (continue a draft).
+    private func isMissing(_ trackId: String, _ itemId: String) -> Bool {
+        guard !session.missing.isEmpty, let it = session.project.track(trackId)?.item(itemId),
+              let asset = it.videoClip?.asset ?? it.imageItem?.asset ?? it.audioClip?.asset else { return false }
+        return session.missing.contains(asset)
     }
 
     /// A clip's mask, Invert, green-screen key or cut-out, which can hide most of the picture without showing on the

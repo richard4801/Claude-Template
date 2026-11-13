@@ -278,6 +278,10 @@ public protocol MuseAPI: AnyObject, Sendable {
     func answerEditPending(sessionId: String, pendingId: String, approve: Bool) async throws -> EditPending
     /// POST …/{id}/close
     func closeEditSession(id: String) async throws
+    /// GET /v1/edit-sessions?recent=1&limit=: open sessions, the one last worked on first (continue a draft). Owner only.
+    func recentEditSessions(limit: Int) async throws -> [EditSession]
+    /// POST …/{id}/view {view}: where the editor was left (no revision, no history). Owner only.
+    func saveEditSessionView(sessionId: String, _ view: EditSessionView) async throws
     // End edit sessions (workstream 3)
 
     // AI suite (workstream 1): plans/api.md "AI suite". Implemented in Suite/SuiteHTTP.swift and Suite/FakeMuseAPI+Suite.swift.

@@ -255,6 +255,16 @@ final class SuiteState {
     /// One Claude: Claude opened an edit session (open_page edit es_…): Edit opens the editor on exactly that session.
     var editAttach: EditAttach?
     struct EditAttach: Equatable { let id = UUID(); var takeId: String; var sessionId: String }
+    /// Edit home's "New" asked for from outside the view (a check): starts a blank project.
+    var editNewRequest: UUID?
+    /// Recent edits on the Edit home (the last worked on first), loaded when it shows.
+    var recentEdits: [EditRecentItem] = []
+    /// A recent edit to open (the home's list, or a check).
+    var editResume: EditRecentItem?
+    /// Asks the open editor to close back to the Edit home (a check; the editor's own Back does the same).
+    var editHomeRequest: UUID?
+    /// The editor open now (checks read where it opened).
+    var editCurrent: EditSuiteSession?
     /// Swap with an add-on renders on the classic pipeline: the result pane follows the studio stage's job.
     var swapUsesStage = false
 
@@ -284,6 +294,8 @@ final class SuiteState {
         picker = nil
         browserOpen = false
         mode = .hub
+        recentEdits = []
+        editResume = nil
     }
 
     var camera: CameraCatalog { catalog?.camera ?? CameraCatalog() }

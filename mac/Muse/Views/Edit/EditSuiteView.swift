@@ -10,6 +10,8 @@ struct EditSuiteView: View {
     private let takeId: String?
     @State private var openId: String?
     @State private var session: EditSuiteSession?
+    /// Continue a draft: the recent edit `openId` names ("local:…" or a session id), opened as it was left.
+    @State private var resuming: EditRecentItem?
 
     init(takeId: String? = nil) {
         self.takeId = takeId
@@ -23,7 +25,7 @@ struct EditSuiteView: View {
             } else if openId != nil {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text(openId == EditV2.blankSourceId ? "Starting a blank project…" : "Opening the video…").font(t.body(13)).foregroundStyle(t.muted)
+                    Text(openingText).font(t.body(13)).foregroundStyle(t.muted)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.recreate.open {
@@ -35,17 +37,44 @@ struct EditSuiteView: View {
                 case .recipes: LearnRecipesView()
                 }
             } else {
-                EditSuiteHome { openId = $0 }
+                EditSuiteHome(open: openTake, resume: resume)
             }
         }
         .task(id: openId) { await open(openId) }
+        // A recent edit picked elsewhere (a check, One Claude): opened as it was left.
+        .onChange(of: store.suite.editNewRequest) { _, r in if r != nil { store.suite.editNewRequest = nil; openTake(EditV2.blankSourceId) } }
+        .task(id: store.suite.editResume?.id) {
+            guard let r = store.suite.editResume else { return }
+            store.suite.editResume = nil
+            resume(r)
+        }
+        .onChange(of: store.suite.editHomeRequest) { _, _ in if session != nil || openId != nil { close() } }
         // One Claude: Claude opened an edit session: the editor opens on it (even when its take is already open).
         .task(id: store.suite.editAttach?.id) {
             guard let a = store.suite.editAttach else { return }
             if openId == a.takeId { await open(a.takeId) } else { openId = a.takeId }
         }
-        .onChange(of: takeId) { _, new in openId = new }
-        .onDisappear { session?.close(); store.linkImport.deliverToEdit = nil }
+        .onChange(of: takeId) { _, new in resuming = nil; openId = new }
+        .onDisappear {
+            session?.close()
+            store.linkImport.deliverToEdit = nil
+            if store.suite.editCurrent === session { store.suite.editCurrent = nil }
+        }
+    }
+
+    private var openingText: String {
+        if resuming != nil { return "Opening your draft…" }
+        return openId == EditV2.blankSourceId ? "Starting a blank project…" : "Opening the video…"
+    }
+
+    private func resume(_ item: EditRecentItem) {
+        resuming = item
+        if openId == item.id { Task { await open(item.id) } } else { openId = item.id }
+    }
+
+    /// A take from the home: it continues its recent edit when it has one (where that edit was left).
+    private func openTake(_ id: String) {
+        if let r = store.recentEdit(forTake: id) { resume(r) } else { resuming = nil; openId = id }
     }
 
     private func open(_ id: String?) async {
@@ -60,15 +89,24 @@ struct EditSuiteView: View {
         }
         session?.close()
         session = nil
+        store.suite.editCurrent = nil
         store.linkImport.deliverToEdit = nil
         guard let id else { return }
-        if attach != nil { store.suite.editAttach = nil }
-        guard let s = store.makeEditSuiteSession(takeId: id, attachSessionId: attach) else {
-            store.showToast("Only video takes can be edited")
-            openId = nil
+        let made: EditSuiteSession?
+        if let r = resuming, r.id == id {
+            made = await store.makeEditSuiteSession(resuming: r)
+        } else {
+            if attach != nil { store.suite.editAttach = nil }
+            made = store.makeEditSuiteSession(takeId: id, attachSessionId: attach)
+            if made == nil { store.showToast("Only video takes can be edited") }
+        }
+        guard let s = made, openId == id else {
+            if openId == id { openId = nil }
+            resuming = nil
             return
         }
         session = s
+        store.suite.editCurrent = s
         store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
         await s.load()
         // The viewer's Split: the playhead where the take was when Split was pressed.
@@ -81,18 +119,23 @@ struct EditSuiteView: View {
     private func close() {
         session?.close()
         session = nil
+        store.suite.editCurrent = nil
         store.linkImport.deliverToEdit = nil
+        resuming = nil
         openId = nil
+        // Back on the home: its Recent edits show where this edit now stands.
+        Task { await store.loadRecentEdits() }
         // Opened with Edit on a take (Result, Gallery): back there.
         if takeId != nil, store.editor != nil { store.closeEditor() }
     }
 }
 
-/// The Edit home: video takes and edited versions, newest first.
+/// The Edit home: recent edits (continue where one was left), then video takes and edited versions, newest first.
 struct EditSuiteHome: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var open: (String) -> Void
+    var resume: (EditRecentItem) -> Void = { _ in }
 
     var body: some View {
         let takes = store.editSuiteTakes
@@ -107,12 +150,18 @@ struct EditSuiteHome: View {
                     SuiteToolButton(title: "Recipes", icon: "stack", plain: true) { store.openLearn(.recipes) }
                 }
                 SuiteToolButton(title: "Recreate an edit", icon: "arrows-clockwise") { store.openRecreate() }
-                // A fresh project with no source video (owner request 2026-11-11); saved to the Library as a new video.
-                SuiteToolButton(title: "New blank project", icon: "plus") { open(EditV2.blankSourceId) }
             }
-            if takes.isEmpty {
-                Note("Start a blank project, or make a video in the Video suite; its takes show up here to edit.")
+            // Owner decision 2026-11-12: Edit opens on a choice, New or Continue draft (only New when there is no draft).
+            let recent = store.suite.recentEdits
+            startChoice(last: recent.first)
+            if takes.isEmpty && recent.isEmpty {
+                Note("Make a video in the Video suite and its takes show up here to edit.")
                     .padding(.top, 12)
+            }
+            let older = Array(recent.dropFirst().prefix(EditRecent.shown))
+            if !older.isEmpty {
+                SectionHeader("Recent edits")
+                recentRow(older)
             }
             if !edits.isEmpty {
                 SectionHeader("Edited versions")
@@ -123,6 +172,55 @@ struct EditSuiteHome: View {
                 grid(renders)
             }
         }
+        .task { await store.loadRecentEdits() }
+    }
+
+    /// The two ways in: New (a blank project, saved to the Library as a new video) and Continue draft (the last edit, where
+    /// it was left: its picture, name and when). Continue draft is the primary when there is one.
+    private func startChoice(last: EditRecentItem?) -> some View {
+        HStack(alignment: .top, spacing: Space.s3) {
+            EditStartTile(title: "New", detail: "Blank project", accent: last == nil) {
+                Ph("plus", 20).foregroundStyle(t.roles.ink)
+                    .frame(width: 54, height: 96)
+                    .background(RoundedRectangle(cornerRadius: t.imageRadius, style: .continuous).fill(t.roles.raised))
+            } action: { open(EditV2.blankSourceId) }
+            .accessibilityLabel("New edit")
+            if let last {
+                let thumb = last.thumbTakeId.flatMap { id in store.takes.first { $0.id == id } }
+                let when = EditRecent.lastEditedText(last.lastEditedAt)
+                EditStartTile(title: "Continue draft", detail: last.title, meta: when, accent: true) {
+                    MuseImage(ref: thumb?.thumb, symbol: "film")
+                        .frame(width: 54, height: 96)
+                        .clipShape(RoundedRectangle(cornerRadius: t.imageRadius, style: .continuous))
+                } action: { resume(last) }
+                .accessibilityLabel("Continue draft: \(last.title), edited \(when)")
+            }
+        }
+        .frame(maxWidth: 720, alignment: .leading)
+        .padding(.top, Space.s2)
+    }
+
+    /// Recent edits: picture, name, when it was last worked on. Opens where it was left.
+    private func recentRow(_ list: [EditRecentItem]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 14)], alignment: .leading, spacing: 16) {
+            ForEach(list) { it in
+                let thumb = it.thumbTakeId.flatMap { id in store.takes.first { $0.id == id } }
+                let when = EditRecent.lastEditedText(it.lastEditedAt)
+                Button { resume(it) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        MuseImage(ref: thumb?.thumb, symbol: "film")
+                            .aspectRatio(9 / 16, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
+                        Text(it.title).font(t.body(12.5, .medium)).foregroundStyle(t.ink).lineLimit(1)
+                        Text(when).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Continue where you left off")
+                .accessibilityLabel("Continue \(it.title), edited \(when)")
+            }
+        }
+        .padding(.top, 6)
     }
 
     private func grid(_ list: [Take]) -> some View {
@@ -441,5 +539,41 @@ struct EditSuiteEditor: View {
             try? await Task.sleep(nanoseconds: file == nil ? 5_000_000_000 : 15_000_000_000)
             if !warn { dismiss() }
         }
+    }
+}
+
+/// One of the Edit home's two ways in: a picture, a title over its detail (and when), the whole tile a button. Tone, not
+/// shadow, lifts it; the primary one carries the accent edge.
+struct EditStartTile<Picture: View>: View {
+    @Environment(\.theme) private var t
+    var title: String
+    var detail: String
+    var meta: String? = nil
+    var accent = false
+    @ViewBuilder var picture: () -> Picture
+    var action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Space.s3) {
+                picture()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                    Text(detail).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+                    if let meta { Text(meta).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1) }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(Space.s3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(hover ? t.roles.raised : t.roles.field))
+            .overlay(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
+                .strokeBorder(accent ? t.roles.accent : t.roles.hairline, lineWidth: accent ? 1.5 : 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .frame(minWidth: 220, maxWidth: 340)
     }
 }

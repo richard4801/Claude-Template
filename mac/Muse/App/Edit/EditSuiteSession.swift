@@ -35,17 +35,28 @@ final class EditSuiteSession {
     private(set) var phase: Phase = .loading("Opening the video…")
     /// The editor state. Change it through `edit` so the preview follows.
     private(set) var state: EditSuiteState
-    var mode: Mode = .timeline
+    var mode: Mode = .timeline { didSet { viewChanged() } }
     /// A panel the inspector scrolls to once (the timeline's mask badge asks for "Mask & green screen").
     var reveal: String?
-    var binTab: EditSuite.BinTab = .takes
+    var binTab: EditSuite.BinTab = .takes { didSet { viewChanged() } }
     /// The playhead while playing (timeline seconds); `state.playhead` follows it when playback stops or an edit needs it.
     private(set) var playhead: Double = 0
     private(set) var playing = false
     /// J / K / L shuttle rate (0 = stopped).
     private(set) var shuttle: Double = 0
 
-    private(set) var files: [String: URL] = [:]
+    private(set) var files: [String: URL] = [:] { didSet { if !missing.isEmpty { missing.subtract(files.keys) } } }
+    /// Continue a draft: clips whose file isn't on this Mac and couldn't be fetched (a deleted take, a lost upload). The edit
+    /// opens anyway; the timeline marks them "Missing".
+    private(set) var missing: Set<String> = []
+    /// Continue a draft: the saved edit this editor reopens (EditSuiteResume.swift), nil when opened from a take.
+    var resume: EditResume?
+    @ObservationIgnored var viewTracking = false
+    @ObservationIgnored var viewTask: Task<Void, Never>?
+    @ObservationIgnored var lastSentView: EditSessionView?
+    @ObservationIgnored let recentStore = EditRecentStore.standard
+    /// A member's blank project kept on this Mac (one id per blank, so two blanks don't overwrite each other).
+    @ObservationIgnored var localBlankId = UUID().uuidString
     /// Frame strips per video asset (evenly over the whole file) and waveforms per sounding asset (0…1 peaks over the file).
     private(set) var strips: [String: [CGImage]] = [:]
     private(set) var waves: [String: [Float]] = [:]
@@ -181,7 +192,10 @@ final class EditSuiteSession {
         do {
             var project: E.Project
             var local: URL?
-            if isBlankStart {
+            if let p = resume?.project {
+                // Continue a draft: the edit as it was left, even when its source video is gone (missing clips are marked).
+                project = p
+            } else if isBlankStart {
                 // "New blank project": nothing on the timeline yet, the default shape (the shape picker changes it).
                 project = E.Project.blank()
             } else if let p2 = take.editsV2, p2.isBlank, take.parentTakeId == nil {
@@ -224,6 +238,7 @@ final class EditSuiteSession {
             refreshLookThumbs()
             if !isBlankStart, let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
             if isOwner { await startLive() }
+            restoreView()
         } catch {
             phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
         }
@@ -250,6 +265,7 @@ final class EditSuiteSession {
             guard let link, let url = URL(string: link) else { continue }
             if let local = try? await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id) { files[a.id] = local }
         }
+        missing = EditSuite.missingAssets(project, have: Set(files.keys))
         await ensureContentFonts()
     }
 
@@ -266,6 +282,9 @@ final class EditSuiteSession {
     }
 
     func close() {
+        saveViewNow()
+        viewTracking = false
+        viewTask?.cancel()
         stopLive()
         player.pause()
         player.replaceCurrentItem(with: nil)
@@ -293,7 +312,7 @@ final class EditSuiteSession {
         playhead = state.playhead
         // Mac Edit audit: a change the server would refuse is not made; say why instead of silently doing nothing.
         if !ok, let r = state.lastRefusal { lastError = Self.refusalText(r) }
-        if state.project != before { projectChanged() }
+        if state.project != before { projectChanged() } else { viewChanged() }
         return ok
     }
 
@@ -326,12 +345,13 @@ final class EditSuiteSession {
     }
 
     /// View-only changes (selection, zoom, tabs, snapping…).
-    func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next }   // a copy, as in edit (exclusivity)
+    func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next; viewChanged() }   // a copy, as in edit (exclusivity)
 
     func undo() { nextChangeLabel = "Undo"; edit { $0.undo() }; nextChangeLabel = nil }
     func redo() { nextChangeLabel = "Redo"; edit { $0.redo() }; nextChangeLabel = nil }
 
     private func projectChanged() {
+        viewChanged()
         Task { await ensureFiles(); rebuild(); refreshMedia() }
         if !applyingRemote { liveLocalChange() }
     }
@@ -427,6 +447,7 @@ final class EditSuiteSession {
         shuttle = 0
         playing = false
         state.playhead = playhead
+        viewChanged()
     }
 
     /// J / K / L: back faster, stop, forward faster (1×, 2×, 4×).
@@ -452,12 +473,14 @@ final class EditSuiteSession {
         playhead = v
         state.playhead = v
         player.seek(to: CMTime(seconds: v, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        viewChanged()
     }
 
     /// Seeks and selects what's there (a click on a row, or the main clip).
     func scrub(to t: Double, trackId: String? = nil) {
         seek(t)
         state.select(at: t, trackId: trackId)
+        viewChanged()
     }
 
     func step(_ dir: Int) {
