@@ -61,6 +61,10 @@ final class EditSuiteSession {
     @ObservationIgnored var viewTask: Task<Void, Never>?
     @ObservationIgnored var lastSentView: EditSessionView?
     @ObservationIgnored var lastSentProject: E.Project?
+    /// When the editor became ready on this edit, whether the person changed anything since, and the "stayed a moment" save.
+    @ObservationIgnored var openedAt: Date?
+    @ObservationIgnored var personChanged = false
+    @ObservationIgnored var stayTask: Task<Void, Never>?
     @ObservationIgnored let recentStore = EditRecentStore.standard
     /// A member's blank project kept on this Mac (one id per blank, so two blanks don't overwrite each other).
     @ObservationIgnored var localBlankId = UUID().uuidString
@@ -298,6 +302,7 @@ final class EditSuiteSession {
         saveViewNow()
         viewTracking = false
         viewTask?.cancel()
+        stayTask?.cancel()
         stopLive()
         player.pause()
         player.replaceCurrentItem(with: nil)

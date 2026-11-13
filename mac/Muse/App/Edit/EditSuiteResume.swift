@@ -30,6 +30,9 @@ enum EditResume {
 // continues at the same place. A member's edit itself is kept on this Mac too (their editor has no server copy).
 extension EditSuiteSession {
     static let viewSaveAfter: UInt64 = 800_000_000
+    /// An editor open this long counts as worked on even without a change (runs 604/607: one opened and left at once, by a
+    /// walk or by code, must not become "the last draft you were editing").
+    static let countsAfter: TimeInterval = 2
 
     /// The edit's name in Recent edits.
     var draftTitle: String {
@@ -55,13 +58,24 @@ extension EditSuiteSession {
         lastSentView = nil
         lastSentProject = nil
         viewTracking = true
-        // The edit is the last one worked on from now (even if nothing changes).
-        saveViewNow()
+        // Not saved on opening: it counts once the person changes something, or after it has been open a moment.
+        openedAt = Date()
+        stayTask?.cancel()
+        stayTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.countsAfter * 1_000_000_000) + 100_000_000)
+            guard let self, !Task.isCancelled, !self.closed else { return }
+            self.saveViewNow()
+        }
     }
+
+    /// The person was really here: they changed something, or the editor has been open a moment.
+    var workedOn: Bool { personChanged || (openedAt.map { Date().timeIntervalSince($0) >= Self.countsAfter } ?? false) }
 
     /// Something the view or the edit shows changed: saved after a short pause.
     func viewChanged() {
         guard viewTracking else { return }
+        // A change from the live session (Claude's, another device's) isn't this person working here.
+        if !applyingRemote { personChanged = true }
         viewTask?.cancel()
         viewTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.viewSaveAfter)
@@ -72,7 +86,7 @@ extension EditSuiteSession {
 
     /// Saves where the editor is now (this Mac at once; the session when it changed).
     func saveViewNow() {
-        guard viewTracking, isReady else { return }
+        guard viewTracking, isReady, workedOn else { return }
         var v = state.viewSnapshot(binTab: binTab, mode: mode.rawValue, title: draftTitle)
         if playing { v.playhead = (playhead * 1000).rounded() / 1000 }
         let sid = isOwner ? draftSessionId : nil

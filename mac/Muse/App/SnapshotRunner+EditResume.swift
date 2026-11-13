@@ -82,6 +82,7 @@ extension SnapshotRunner {
         var ourAt: Double?
         if let sid, let s = try? await fake.editSession(id: sid) {
             ourAt = s.view?.at
+            note("NOTE left rz_resume: its view.at \(ourAt.map { String(Int64($0)) } ?? "none") at \(Int64(Date().timeIntervalSince1970 * 1000))")
             check("view_on_server", s.view?.zoom == 150 && s.view?.binTab == "uploads" && s.view?.safeArea == "off",
                   "server view \(String(describing: s.view))")
         } else { note("FAIL view_on_server: session not readable") }
