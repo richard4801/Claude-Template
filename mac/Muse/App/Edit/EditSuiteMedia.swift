@@ -161,14 +161,22 @@ enum EditSuiteMedia {
     /// Where the largest face is across a frame of the file at `t` (0 = left edge, 1 = right edge), or nil.
     static func faceCentreX(_ url: URL, at t: Double) async -> Double? {
         guard let cg = await frame(url, at: t, maxSide: 720) else { return nil }
-        return await Task.detached(priority: .userInitiated) { () -> Double? in
-            let req = VNDetectFaceRectanglesRequest()
-            let handler = VNImageRequestHandler(cgImage: cg, options: [:])
-            guard (try? handler.perform([req])) != nil, let faces = req.results, !faces.isEmpty else { return nil }
-            let big = faces.max { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height }
-            return big.map { Double($0.boundingBox.midX) }
-        }.value
+        // Run 607: three of these at once on Swift's cooperative threads deadlocked inside Vision (each blocked in
+        // VNControlledCapacityTasksQueue.dispatchGroupWait; Shape never returned). Vision now runs one request at a time on
+        // its own queue, never blocking a concurrency thread.
+        return await withCheckedContinuation { (cont: CheckedContinuation<Double?, Never>) in
+            visionQueue.async {
+                let req = VNDetectFaceRectanglesRequest()
+                let handler = VNImageRequestHandler(cgImage: cg, options: [:])
+                guard (try? handler.perform([req])) != nil, let faces = req.results, !faces.isEmpty else { cont.resume(returning: nil); return }
+                let big = faces.max { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height }
+                cont.resume(returning: big.map { Double($0.boundingBox.midX) })
+            }
+        }
     }
+
+    /// Face detection's own serial queue (see faceCentreX).
+    static let visionQueue = DispatchQueue(label: "muse.edit.vision", qos: .userInitiated)
 
     /// Auto reframe (XL): the face to follow in a clip, five times a second (at most 300 frames, decoded at 480 px), as
     /// Android's Reframe.kt: the largest face first, then the one nearest the last (|Δx| + 0.5 · (1 − width)); a frame

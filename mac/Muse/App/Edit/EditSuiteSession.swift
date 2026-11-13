@@ -33,19 +33,41 @@ final class EditSuiteSession {
     /// One Claude: the edit session to join (Claude opened it) instead of opening the take's.
     var attachSessionId: String?
     private(set) var phase: Phase = .loading("Opening the video…")
+    /// The load ran on a cancelled task (it can't finish the attach to a live session then); review mode checks it.
+    private(set) var loadWasCancelled = false
+    /// close() ran: a load still running (it outlives the view) starts nothing live after it.
+    @ObservationIgnored private(set) var closed = false
+    /// Face framing found per source moment ("asset@tenths"): nil when there is no face.
+    @ObservationIgnored private var faceCache: [String: Double?] = [:]
     /// The editor state. Change it through `edit` so the preview follows.
     private(set) var state: EditSuiteState
-    var mode: Mode = .timeline
+    var mode: Mode = .timeline { didSet { viewChanged() } }
     /// A panel the inspector scrolls to once (the timeline's mask badge asks for "Mask & green screen").
     var reveal: String?
-    var binTab: EditSuite.BinTab = .takes
+    var binTab: EditSuite.BinTab = .takes { didSet { viewChanged() } }
     /// The playhead while playing (timeline seconds); `state.playhead` follows it when playback stops or an edit needs it.
     private(set) var playhead: Double = 0
     private(set) var playing = false
     /// J / K / L shuttle rate (0 = stopped).
     private(set) var shuttle: Double = 0
 
-    private(set) var files: [String: URL] = [:]
+    private(set) var files: [String: URL] = [:] { didSet { if !missing.isEmpty { missing.subtract(files.keys) } } }
+    /// Continue a draft: clips whose file isn't on this Mac and couldn't be fetched (a deleted take, a lost upload). The edit
+    /// opens anyway; the timeline marks them "Missing".
+    private(set) var missing: Set<String> = []
+    /// Continue a draft: the saved edit this editor reopens (EditSuiteResume.swift), nil when opened from a take.
+    var resume: EditResume?
+    @ObservationIgnored var viewTracking = false
+    @ObservationIgnored var viewTask: Task<Void, Never>?
+    @ObservationIgnored var lastSentView: EditSessionView?
+    @ObservationIgnored var lastSentProject: E.Project?
+    /// When the editor became ready on this edit, whether the person changed anything since, and the "stayed a moment" save.
+    @ObservationIgnored var openedAt: Date?
+    @ObservationIgnored var personChanged = false
+    @ObservationIgnored var stayTask: Task<Void, Never>?
+    @ObservationIgnored let recentStore = EditRecentStore.standard
+    /// A member's blank project kept on this Mac (one id per blank, so two blanks don't overwrite each other).
+    @ObservationIgnored var localBlankId = UUID().uuidString
     /// Frame strips per video asset (evenly over the whole file) and waveforms per sounding asset (0…1 peaks over the file).
     private(set) var strips: [String: [CGImage]] = [:]
     private(set) var waves: [String: [Float]] = [:]
@@ -177,11 +199,16 @@ final class EditSuiteSession {
     /// Opens the take: a v2 version re-opens its project on its source, a v1 version its edit list (fromV1), anything else
     /// starts fresh on the take's own video.
     func load() async {
+        // Review mode (Claude chat check): a load whose task was cancelled half-way is the build-597 open_page bug.
+        defer { if Task.isCancelled { loadWasCancelled = true } }
         phase = .loading(isBlankStart ? "Starting a blank project…" : "Opening the video…")
         do {
             var project: E.Project
             var local: URL?
-            if isBlankStart {
+            if let p = resume?.project {
+                // Continue a draft: the edit as it was left, even when its source video is gone (missing clips are marked).
+                project = p
+            } else if isBlankStart {
                 // "New blank project": nothing on the timeline yet, the default shape (the shape picker changes it).
                 project = E.Project.blank()
             } else if let p2 = take.editsV2, p2.isBlank, take.parentTakeId == nil {
@@ -223,7 +250,11 @@ final class EditSuiteSession {
             refreshMedia()
             refreshLookThumbs()
             if !isBlankStart, let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
+            // Edit closed while this loaded: nothing live starts (and a close during startLive's await stops it).
+            guard !closed else { return }
             if isOwner { await startLive() }
+            guard !closed else { stopLive(); return }
+            restoreView()
         } catch {
             phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
         }
@@ -250,6 +281,7 @@ final class EditSuiteSession {
             guard let link, let url = URL(string: link) else { continue }
             if let local = try? await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id) { files[a.id] = local }
         }
+        missing = EditSuite.missingAssets(project, have: Set(files.keys))
         await ensureContentFonts()
     }
 
@@ -266,6 +298,11 @@ final class EditSuiteSession {
     }
 
     func close() {
+        closed = true
+        saveViewNow()
+        viewTracking = false
+        viewTask?.cancel()
+        stayTask?.cancel()
         stopLive()
         player.pause()
         player.replaceCurrentItem(with: nil)
@@ -293,7 +330,7 @@ final class EditSuiteSession {
         playhead = state.playhead
         // Mac Edit audit: a change the server would refuse is not made; say why instead of silently doing nothing.
         if !ok, let r = state.lastRefusal { lastError = Self.refusalText(r) }
-        if state.project != before { projectChanged() }
+        if state.project != before { projectChanged() } else { viewChanged() }
         return ok
     }
 
@@ -326,12 +363,13 @@ final class EditSuiteSession {
     }
 
     /// View-only changes (selection, zoom, tabs, snapping…).
-    func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next }   // a copy, as in edit (exclusivity)
+    func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next; viewChanged() }   // a copy, as in edit (exclusivity)
 
     func undo() { nextChangeLabel = "Undo"; edit { $0.undo() }; nextChangeLabel = nil }
     func redo() { nextChangeLabel = "Redo"; edit { $0.redo() }; nextChangeLabel = nil }
 
     private func projectChanged() {
+        viewChanged()
         Task { await ensureFiles(); rebuild(); refreshMedia() }
         if !applyingRemote { liveLocalChange() }
     }
@@ -404,7 +442,9 @@ final class EditSuiteSession {
                     self.shuttle = 0
                     self.refreshLookThumbs()
                 }
-                self.playing = now
+                // Only on a change: @Observable notifies on every set, even of the same value, and every view reading
+                // `playing` re-renders (owner's 66-clip edit: the whole timeline 30 times a second).
+                if self.playing != now { self.playing = now }
             }
         }
     }
@@ -427,6 +467,7 @@ final class EditSuiteSession {
         shuttle = 0
         playing = false
         state.playhead = playhead
+        viewChanged()
     }
 
     /// J / K / L: back faster, stop, forward faster (1×, 2×, 4×).
@@ -452,12 +493,14 @@ final class EditSuiteSession {
         playhead = v
         state.playhead = v
         player.seek(to: CMTime(seconds: v, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        viewChanged()
     }
 
     /// Seeks and selects what's there (a click on a row, or the main clip).
     func scrub(to t: Double, trackId: String? = nil) {
         seek(t)
         state.select(at: t, trackId: trackId)
+        viewChanged()
     }
 
     func step(_ dir: Int) {
@@ -540,6 +583,14 @@ final class EditSuiteSession {
         edit { $0.addVideo(a, overlay: overlay) }
     }
 
+    /// A take from the bin's "+" or dragged onto the timeline: placed like an upload (into the sequence at the playhead,
+    /// or where it was dropped).
+    func placeTake(_ t: Take, at: Double? = nil, lane: E.TrackKind? = nil) {
+        guard let a = takeAsset(t) else { return }
+        if let at { seek(at) }
+        edit { $0.place(a, at: at, lane: lane) }
+    }
+
     /// A take as an asset of this edit (named after it).
     private func takeAsset(_ t: Take) -> E.Asset? {
         guard let d = t.durationSec, d > 0 else { lastError = "That take has no video yet"; return nil }
@@ -560,20 +611,12 @@ final class EditSuiteSession {
         if edit({ $0.replaceClip(with: a) }) { notice = "Clip replaced · its edits stay" }
     }
 
-    /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row.
+    /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row (Record
+    /// voice-over and Music → Add).
     func importAudio(_ url: URL, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) async {
         guard isReady else { return }
         do {
-            let asset = AVURLAsset(url: url)
-            let d = try await asset.load(.duration).seconds
-            guard d.isFinite, d >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no sound to use") }
-            notice = "Uploading \(url.lastPathComponent)…"
-            let up = try await api.uploadEditorFile(url, contentType: Self.contentType(url), purpose: nil, progress: nil)
-            let id = project.newId("a")
-            let a = E.Asset(id: id, kind: .audio, upload: up, durationSec: (d * 1000).rounded() / 1000, hasAudio: true)
-            files[id] = url
-            state.assetNames[id] = url.deletingPathExtension().lastPathComponent
-            notice = nil
+            let a = try await uploadAudio(url)
             edit { $0.addAudio(a, kind: kind, at: at, trimStart: trimStart) }
         } catch {
             notice = nil
@@ -581,45 +624,91 @@ final class EditSuiteSession {
         }
     }
 
-    /// A video or picture from this Mac (Uploads / Stickers): uploaded as an editor upload, then added like a take (a video at
-    /// the end of the main track, or as an overlay at the playhead) or as a picture at the playhead (Mac Edit audit: the
-    /// Uploads tab could only take sounds, and pictures had no way in).
-    func importMedia(_ url: URL, overlay: Bool = false) async {
+    /// Files from this Mac (Uploads → Add → From this Mac, or dropped on the media panel): each goes into Uploads as what
+    /// its file is (video, picture or sound); nothing is placed until "+" or a drag onto the timeline.
+    func addFiles(_ urls: [URL]) async {
         guard isReady else { return }
-        let ext = url.pathExtension.lowercased()
-        do {
-            if Self.pictureTypes[ext] != nil {
-                guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
-                // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
-                let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: ext)
-                notice = "Uploading \(url.lastPathComponent)…"
-                let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
-                let id = project.newId("p")
-                let a = E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
-                files[id] = file
-                state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        var added = 0
+        for url in urls {
+            let ext = url.pathExtension.lowercased()
+            do {
+                let a: E.Asset
+                switch EditSuite.UploadBin.kind(ofExtension: ext) {
+                case .video: a = try await uploadVideo(url)
+                case .picture: a = try await uploadPicture(url)
+                case .audio: a = try await uploadAudio(url)
+                case nil: throw ApiError("bad_media", ext.isEmpty ? "MUSE can't use that file. Add a video, picture or sound." : "MUSE can't use .\(ext) files. Add a video, picture or sound.")
+                }
+                if edit({ $0.addToBin(a) }) { added += 1 }
+            } catch {
                 notice = nil
-                // Selected, with the Video tab (Transform, blend, keyframes) open so it can be placed straight away.
-                if edit({ $0.addImage(a) }) { view { $0.tab = .video } }
-                return
+                lastError = (error as? ApiError)?.message ?? "Couldn't add \(url.lastPathComponent)"
             }
-            let info = try await VideoEditEngine.info(AVURLAsset(url: url))
-            guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
-            notice = "Uploading \(url.lastPathComponent)…"
-            let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
-            let id = project.newId("v")
-            let audioTracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)
-            let sound = !audioTracks.isEmpty
-            let a = E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
-                            hasAudio: sound)
-            files[id] = url
-            state.assetNames[id] = url.deletingPathExtension().lastPathComponent
-            notice = nil
-            edit { $0.addVideo(a, overlay: overlay) }
-        } catch {
-            notice = nil
-            lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
         }
+        if added > 0 { binTab = .uploads }
+    }
+
+    /// A video imported from a link while this edit is open (Uploads → Add → From a link): into Uploads like a file from
+    /// this Mac. The import's upload (`uploadId`, a video) is used as the asset's upload; the server's editor takes any
+    /// video upload of the studio. A link imported again shows the same upload, not a second tile.
+    func addLinkImport(_ r: LinkImportResult) -> Bool {
+        guard isReady, let up = r.uploadId, let c = r.clip, c.durationSec >= E.minClipSourceSec else { return false }
+        if project.assets.contains(where: { $0.upload == up }) { binTab = .uploads; return true }
+        let id = project.newId("v")
+        state.assetNames[id] = c.name
+        let a = E.Asset(id: id, kind: .video, upload: up, durationSec: (c.durationSec * 1000).rounded(.down) / 1000,
+                        width: c.width > 0 ? c.width : nil, height: c.height > 0 ? c.height : nil, url: r.videoUrl)
+        guard edit({ $0.addToBin(a) }) else { return false }
+        binTab = .uploads
+        return true
+    }
+
+    /// An upload from the bin onto the timeline: at the playhead ("+"), or where it was dropped (`at`, on row `lane`).
+    func placeUpload(_ id: String, at: Double? = nil, lane: E.TrackKind? = nil, audioKind: E.TrackKind? = nil) {
+        if let at { seek(at) }
+        let picture = project.asset(id)?.kind == .image
+        // A picture is selected with the Video tab (Transform, blend, keyframes) open, so it can be placed straight away.
+        if edit({ $0.placeUpload(id, at: at, lane: lane, audioKind: audioKind) }), picture { view { $0.tab = .video } }
+    }
+
+    private func uploadAudio(_ url: URL) async throws -> E.Asset {
+        let d = try await AVURLAsset(url: url).load(.duration).seconds
+        guard d.isFinite, d >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no sound to use") }
+        notice = "Uploading \(url.lastPathComponent)…"
+        let up = try await api.uploadEditorFile(url, contentType: Self.contentType(url), purpose: nil, progress: nil)
+        let id = project.newId("a")
+        files[id] = url
+        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        notice = nil
+        return E.Asset(id: id, kind: .audio, upload: up, durationSec: (d * 1000).rounded() / 1000, hasAudio: true)
+    }
+
+    private func uploadPicture(_ url: URL) async throws -> E.Asset {
+        guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
+        // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
+        let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: url.pathExtension.lowercased())
+        notice = "Uploading \(url.lastPathComponent)…"
+        let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
+        let id = project.newId("p")
+        files[id] = file
+        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        notice = nil
+        return E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
+    }
+
+    private func uploadVideo(_ url: URL) async throws -> E.Asset {
+        let info = try await VideoEditEngine.info(AVURLAsset(url: url))
+        guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
+        notice = "Uploading \(url.lastPathComponent)…"
+        let ext = url.pathExtension.lowercased()
+        let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
+        let id = project.newId("v")
+        let sound = !(try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)).isEmpty
+        files[id] = url
+        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        notice = nil
+        return E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
+                       hasAudio: sound)
     }
 
     /// Picture types an editor upload takes (server `/v1/editor/uploads/presign`).
@@ -648,7 +737,10 @@ final class EditSuiteSession {
     static let pictureTypes: [String: String] = ["png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "heic": "image/heic", "webp": "image/webp"]
 
     /// Pictures in this edit (the Stickers tab lists them to add again).
-    var pictureAssets: [E.Asset] { project.assets.filter { $0.kind == .image } }
+    var pictureAssets: [E.Asset] { project.assets.filter { $0.kind == .image && $0.library == nil } }
+
+    /// Uploads → the bin's tiles, newest first.
+    var uploads: [EditSuite.Upload] { EditSuite.UploadBin.items(project, names: state.assetNames) }
 
     // MARK: Record VO (Edit suite, workstream 3)
 
@@ -774,8 +866,34 @@ final class EditSuiteSession {
     // MARK: Shape
 
     /// Changes the canvas shape; each clip is re-framed to keep the faces Vision finds in view.
+    /// Owner bug (build 597): face framing ran on all 66 clips one after another on every click (about 10 s each), so
+    /// Shape clicks queued up and landed minutes late. Switching straight back needs none (the transforms come back as
+    /// they were); otherwise each clip's face is found once per source moment and kept, four clips at a time.
     func setRatio(_ r: EditSuite.Ratio) async {
-        let framing = await EditSuiteMedia.framing(project, files: files)
+        if state.restoresShape(r) { edit { $0.setRatio(r) }; return }
+        var framing: [String: Double] = [:]
+        var todo: [(id: String, key: String, url: URL, t: Double)] = []
+        for c in project.mainClips {
+            guard let url = files[c.asset] else { continue }
+            let t = (c.inSec + c.outSec) / 2
+            let key = "\(c.asset)@\(Int((t * 10).rounded()))"
+            if let known = faceCache[key] { if let x = known { framing[c.id] = x } } else { todo.append((c.id, key, url, t)) }
+        }
+        await withTaskGroup(of: (String, String, Double?).self) { g in
+            var next = 0
+            while next < min(4, todo.count) {
+                let j = todo[next]; next += 1
+                g.addTask { (j.id, j.key, await EditSuiteMedia.faceCentreX(j.url, at: j.t)) }
+            }
+            while let (id, key, x) = await g.next() {
+                faceCache[key] = .some(x)
+                if let x { framing[id] = x }
+                if next < todo.count {
+                    let j = todo[next]; next += 1
+                    g.addTask { (j.id, j.key, await EditSuiteMedia.faceCentreX(j.url, at: j.t)) }
+                }
+            }
+        }
         edit { $0.setRatio(r, framing: framing) }
     }
 
@@ -1819,7 +1937,7 @@ final class EditSuiteSession {
                 } else {
                     // A chosen bitrate (parity), or HDR (HEVC Main 10, HLG): reader → writer at the size estimate's rate.
                     try await EditV2Engine.write(built, to: file, hevc: settings.effectiveCodec == .hevc, bitrate: settings.videoBitrate,
-                                                 hdr: settings.hdr, aiLabel: settings.labelAI, progress: onProgress)
+                                                 hdr: settings.hdr, dolbyVision: settings.writesDolbyVision, aiLabel: settings.labelAI, progress: onProgress)
                 }
                 try Task.checkCancellation()
                 let video = try await VideoEditEngine.describe(file)

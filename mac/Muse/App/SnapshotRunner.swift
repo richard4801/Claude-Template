@@ -97,6 +97,7 @@ enum SnapshotRunner {
             // The composer screens need the suite's catalog (the demo draft picks its camera, light and look from it).
             await store.loadSuite()
             await store.loadEngines()   // the owner's models per purpose (WS6)
+            await hdrColourCheck(store, dir: dir)   // owner bug 2026-11-12: HDR export colour on every frame, first and on its own
             await streamCloseCheck(store, dir: dir)   // closing a chat mid-reply with a screen change must not freeze (SnapshotRunner+StreamClose.swift)
             let shots: [(String, @MainActor () -> Void)] = [
                 ("home", { store.go(.home) }),
@@ -181,6 +182,8 @@ enum SnapshotRunner {
             await fitCheck(store, dir: dir)
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
+            await editResumeCheck(store, dir: dir)   // Continue a draft (owner 2026-11-12): Edit reopens the last edit where it was left
+            await editBigCheck(store, dir: dir)   // Owner bugs, build 597: a 66-shot 16:9 edit opened by Claude, idle CPU, playback, Shape round trip
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab

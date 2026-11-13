@@ -121,6 +121,11 @@ struct EditSuiteExportSheet: View {
                     // XL (owner-approved, Mac first): HDR video. HEVC only; most social apps show it as SDR.
                     SuiteToggleRow(title: "HDR (HLG)", hint: "10-bit HEVC that keeps the bright highlights of HDR footage. Many apps show it as standard video.",
                                    isOn: settings.hdr) { settings.hdr = $0 }
+                    if settings.hdr {
+                        // Owner 2026-11-12: Dolby Vision on top of HLG, on by default; off writes plain HLG.
+                        SuiteToggleRow(title: "Dolby Vision", hint: "Adds Dolby Vision metadata on top of HLG for iPhone and apps that support it. Off: plain HLG.",
+                                       isOn: settings.dolbyVision) { settings.dolbyVision = $0 }
+                    }
                     VStack(alignment: .leading, spacing: 8) {
                         SuiteLabel("Bitrate")
                         EditSeg(options: EditSuite.Bitrate.allCases.map { ($0, $0.label) }, selection: settings.bitrate, height: 32) { settings.bitrate = $0 }

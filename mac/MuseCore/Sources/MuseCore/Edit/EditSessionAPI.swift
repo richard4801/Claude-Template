@@ -146,16 +146,20 @@ public struct EditSession: Codable, Hashable, Sendable, Identifiable {
     public var online: [EditPresence]
     public var requests: [EditAppRequest]
     public var history: [EditHistoryEntry]?
+    /// Where an editor was last left on this session (continue a draft; EditRecent.swift).
+    public var view: EditSessionView?
+    /// The later of the last change and `view.at` (ms), from GET /v1/edit-sessions?recent=1.
+    public var lastTouchedAt: Double?
 
     public init(id: String, takeId: String, baseVersionId: String? = nil, revision: Int, project: JSONValue, durationSec: Double? = nil, status: String = "open",
                 updatedBy: String? = nil, updatedAt: Double? = nil, pending: [EditPending] = [], online: [EditPresence] = [], requests: [EditAppRequest] = [],
-                history: [EditHistoryEntry]? = nil) {
+                history: [EditHistoryEntry]? = nil, view: EditSessionView? = nil, lastTouchedAt: Double? = nil) {
         self.id = id; self.takeId = takeId; self.baseVersionId = baseVersionId; self.revision = revision; self.project = project
         self.durationSec = durationSec; self.status = status; self.updatedBy = updatedBy; self.updatedAt = updatedAt; self.pending = pending
-        self.online = online; self.requests = requests; self.history = history
+        self.online = online; self.requests = requests; self.history = history; self.view = view; self.lastTouchedAt = lastTouchedAt
     }
 
-    enum CodingKeys: String, CodingKey { case id, takeId, baseVersionId, revision, project, durationSec, status, updatedBy, updatedAt, pending, online, requests, history }
+    enum CodingKeys: String, CodingKey { case id, takeId, baseVersionId, revision, project, durationSec, status, updatedBy, updatedAt, pending, online, requests, history, view, lastTouchedAt }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -171,6 +175,8 @@ public struct EditSession: Codable, Hashable, Sendable, Identifiable {
         online = (try? c.decode([EditPresence].self, forKey: .online)) ?? []
         requests = (try? c.decode([EditAppRequest].self, forKey: .requests)) ?? []
         history = try? c.decodeIfPresent([EditHistoryEntry].self, forKey: .history)
+        view = try? c.decodeIfPresent(EditSessionView.self, forKey: .view)
+        lastTouchedAt = try? c.decodeIfPresent(Double.self, forKey: .lastTouchedAt)
     }
 }
 

@@ -208,9 +208,12 @@ struct OneClaudePanel: View {
         if let opened = o.opened, let back = o.back {
             HStack(spacing: Space.s1) {
                 Ph("arrow-square-out", 13)
+                // One event, two parts (coordinator, run 591): a " · " and Back in the link colour, so they never read as one
+                // sentence. Lower-risk variant (run 595): the same layout as before plus one Text; no fixedSize/layoutPriority.
                 Text("Opened \(opened.line) for you").lineLimit(1)
+                Text("·").accessibilityHidden(true)
                 Button("Back to \(back.label ?? back.line)") { store.oneClaudeBack() }
-                    .buttonStyle(.link).lineLimit(1)
+                    .buttonStyle(.link).foregroundStyle(r.link).lineLimit(1)
                 Spacer(minLength: 0)
             }
             .font(t.scale.caption.font).foregroundStyle(r.ink2)

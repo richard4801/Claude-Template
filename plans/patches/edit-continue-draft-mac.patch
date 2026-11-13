@@ -1,0 +1,1374 @@
+diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
+index 1a50d7e6..20e91e05 100644
+--- a/.github/workflows/mac.yml
++++ b/.github/workflows/mac.yml
+@@ -150,6 +150,19 @@ jobs:
+           if grep -q '^FAIL' "$f"; then exit 1; fi
+           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+ 
++      # Continue a draft (owner 2026-11-12): Edit opens on a choice, New or Continue draft (nothing opens by itself); Continue
++      # draft reopens the last edit exactly where it was left (playhead, zoom, tab, Uploads bin, platform view); an edit whose
++      # take was deleted opens with its clips marked missing; New starts a blank project (SnapshotRunner+EditResume.swift).
++      # Fails on any FAIL line or a missing ALL DONE.
++      - name: Edit continue-a-draft check
++        working-directory: mac
++        run: |
++          f=snapshots/edit-resume-check.txt
++          if [ ! -f "$f" ]; then echo "no edit-resume-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
++          cat "$f"
++          if grep -q '^FAIL' "$f"; then exit 1; fi
++          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
++
+       # Every Edit operation must WORK, not just not crash (Mac Edit audit 2026-11-08, plans/mac-edit-audit.md): each runs
+       # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
+       # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
+diff --git a/mac/Muse/App/AppStore+Suite.swift b/mac/Muse/App/AppStore+Suite.swift
+index 78ea15e6..cbaa43ad 100644
+--- a/mac/Muse/App/AppStore+Suite.swift
++++ b/mac/Muse/App/AppStore+Suite.swift
+@@ -255,6 +255,16 @@ final class SuiteState {
+     /// One Claude: Claude opened an edit session (open_page edit es_…): Edit opens the editor on exactly that session.
+     var editAttach: EditAttach?
+     struct EditAttach: Equatable { let id = UUID(); var takeId: String; var sessionId: String }
++    /// Edit home's "New" asked for from outside the view (a check): starts a blank project.
++    var editNewRequest: UUID?
++    /// Recent edits on the Edit home (the last worked on first), loaded when it shows.
++    var recentEdits: [EditRecentItem] = []
++    /// A recent edit to open (the home's list, or a check).
++    var editResume: EditRecentItem?
++    /// Asks the open editor to close back to the Edit home (a check; the editor's own Back does the same).
++    var editHomeRequest: UUID?
++    /// The editor open now (checks read where it opened).
++    var editCurrent: EditSuiteSession?
+     /// Swap with an add-on renders on the classic pipeline: the result pane follows the studio stage's job.
+     var swapUsesStage = false
+ 
+@@ -284,6 +294,8 @@ final class SuiteState {
+         picker = nil
+         browserOpen = false
+         mode = .hub
++        recentEdits = []
++        editResume = nil
+     }
+ 
+     var camera: CameraCatalog { catalog?.camera ?? CameraCatalog() }
+diff --git a/mac/Muse/App/Edit/AppStore+EditRecent.swift b/mac/Muse/App/Edit/AppStore+EditRecent.swift
+new file mode 100644
+index 00000000..384379cc
+--- /dev/null
++++ b/mac/Muse/App/Edit/AppStore+EditRecent.swift
+@@ -0,0 +1,57 @@
++import Foundation
++import MuseCore
++
++// Continue a draft (owner, 2026-11-12): "When you click on Edit, you should see the last draft you were editing." The owner's
++// recent edits come from the server (so they match across devices), a member's from this Mac (their editor is local).
++extension AppStore {
++    /// Recent edits, the last worked on first; also kept in `suite.recentEdits` for the Edit home.
++    @discardableResult
++    func loadRecentEdits() async -> [EditRecentItem] {
++        var sessions: [EditSession] = []
++        if isOwner { sessions = (try? await api.recentEditSessions(limit: 20)) ?? [] }
++        let items = EditRecent.items(sessions: sessions, local: EditRecentStore.standard.load()) { [weak self] id in
++            guard let t = self?.takes.first(where: { $0.id == id }) else { return nil }
++            return t.title.isEmpty ? nil : t.displayTitle
++        }
++        suite.recentEdits = items
++        return items
++    }
++
++    /// An editor on a recent edit, as it was left. Its take may be gone: the edit opens on a stand-in and its missing clips
++    /// are marked. Nil (with a toast) when the server's session can't be read.
++    func makeEditSuiteSession(resuming item: EditRecentItem) async -> EditSuiteSession? {
++        let resume: EditResume
++        if let sid = item.sessionId {
++            do {
++                var s = try await api.editSession(id: sid)
++                // This Mac's own newer record of where it was left wins over the server's (it may not have arrived yet).
++                if let v = item.view, (v.at ?? 0) >= (s.view?.at ?? 0) || s.view == nil { s.view = v }
++                resume = .session(s)
++            } catch {
++                showToast("Couldn't open that edit. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
++                return nil
++            }
++        } else {
++            let key = item.id.hasPrefix("local:") ? String(item.id.dropFirst(6)) : item.id
++            guard let d = EditRecentStore.standard.load().first(where: { $0.key == key }), d.project != nil else {
++                showToast("That edit isn't on this Mac any more")
++                return nil
++            }
++            resume = .local(d)
++        }
++        let take = takes.first { $0.id == item.takeId }
++            ?? Take(id: item.takeId, kind: "edit", title: item.isBlank ? (item.title == EditRecent.untitled ? "New project" : item.title) : item.title,
++                    label: item.isBlank ? "Blank" : "Missing", thumb: ImageRef())
++        let s = EditSuiteSession(take: take, api: api, isOwner: isOwner) { [weak self] id in self?.takes.first { $0.id == id } }
++        s.onVersionSaved = { [weak self] t in self?.editSuiteSaved(t) }
++        s.attachSessionId = item.sessionId
++        s.resume = resume
++        return s
++    }
++
++    /// The recent edit for a take opened from the Edit home (it continues where that edit was left), if there is one.
++    func recentEdit(forTake takeId: String) -> EditRecentItem? {
++        guard takeId != EditV2.blankSourceId else { return nil }
++        return suite.recentEdits.first { $0.takeId == takeId }
++    }
++}
+diff --git a/mac/Muse/App/Edit/EditSuiteResume.swift b/mac/Muse/App/Edit/EditSuiteResume.swift
+new file mode 100644
+index 00000000..e3fb6feb
+--- /dev/null
++++ b/mac/Muse/App/Edit/EditSuiteResume.swift
+@@ -0,0 +1,90 @@
++import Foundation
++import MuseCore
++
++/// Continue a draft (owner, 2026-11-12): what an editor reopens. The owner's edit is a server session (joined by its id, so a
++/// blank project or an edit whose take was deleted opens too); a member's is the copy this Mac kept.
++enum EditResume {
++    case session(EditSession)
++    case local(EditLocalDraft)
++
++    /// The edit as it was left (nil: build it from the take as usual).
++    var project: EditV2.Project? {
++        switch self {
++        case .session(let s): return try? JSONPatch.decode(EditV2.Project.self, s.project)
++        case .local(let d): return d.project
++        }
++    }
++
++    var view: EditSessionView? {
++        switch self {
++        case .session(let s): return s.view
++        case .local(let d): return d.view
++        }
++    }
++
++    var localDraft: EditLocalDraft? { if case .local(let d) = self { return d }; return nil }
++}
++
++// Where the editor was left is saved shortly after it changes (playhead when stopped, zoom, tabs, platform view, selection),
++// and at once when the editor closes: on this Mac (EditRecentStore) and, for the owner, on the session so another device
++// continues at the same place. A member's edit itself is kept on this Mac too (their editor has no server copy).
++extension EditSuiteSession {
++    static let viewSaveAfter: UInt64 = 800_000_000
++
++    /// The edit's name in Recent edits.
++    var draftTitle: String {
++        if let t = resume?.view?.title, !t.isEmpty, take.title.isEmpty || isBlankStart { return t }
++        return isBlankStart ? EditRecent.untitled : title
++    }
++
++    /// The take this edit is kept under ("blank" for a blank project).
++    var draftTakeId: String { isBlankStart ? E.blankSourceId : sourceTakeId }
++
++    /// The server session this editor is on (owner), if any.
++    var draftSessionId: String? { live?.sessionId ?? attachSessionId }
++
++    /// After load: back where it was left, then changes are tracked.
++    func restoreView() {
++        if case .local(let d)? = resume, d.takeId == E.blankSourceId, let id = d.localId { localBlankId = id }
++        if let v = resume?.view {
++            view { $0.restore(v) }
++            if let b = EditSuite.binTab(v) { binTab = b }
++            if let m = v.mode.flatMap(Mode.init(rawValue:)) { mode = m }
++            seek(state.playhead)
++        }
++        lastSentView = nil
++        viewTracking = true
++        // The edit is the last one worked on from now (even if nothing changes).
++        saveViewNow()
++    }
++
++    /// Something the view or the edit shows changed: saved after a short pause.
++    func viewChanged() {
++        guard viewTracking else { return }
++        viewTask?.cancel()
++        viewTask = Task { @MainActor [weak self] in
++            try? await Task.sleep(nanoseconds: Self.viewSaveAfter)
++            guard let self, !Task.isCancelled else { return }
++            self.saveViewNow()
++        }
++    }
++
++    /// Saves where the editor is now (this Mac at once; the session when it changed).
++    func saveViewNow() {
++        guard viewTracking, isReady else { return }
++        var v = state.viewSnapshot(binTab: binTab, mode: mode.rawValue, title: draftTitle)
++        if playing { v.playhead = (playhead * 1000).rounded() / 1000 }
++        let sid = isOwner ? draftSessionId : nil
++        let now = Double(Date().timeIntervalSince1970 * 1000)
++        // The owner's project is on the server; a member's (or the owner's when the edit couldn't be shared) is kept here.
++        let keepProject = sid == nil && !(project.isBlank && project.mainClips.isEmpty && project.assets.isEmpty)
++        if sid != nil || keepProject {
++            recentStore.save(EditLocalDraft(takeId: draftTakeId, sessionId: sid, localId: isBlankStart && sid == nil ? localBlankId : nil,
++                                            project: keepProject ? project : nil, view: v, title: draftTitle, savedAt: now))
++        }
++        guard let sid, lastSentView.map({ !$0.samePlace(v) }) ?? true else { return }
++        lastSentView = v
++        let api = self.api
++        Task { try? await api.saveEditSessionView(sessionId: sid, v) }
++    }
++}
+diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
+index 563ee523..88b71228 100644
+--- a/mac/Muse/App/Edit/EditSuiteSession.swift
++++ b/mac/Muse/App/Edit/EditSuiteSession.swift
+@@ -35,17 +35,28 @@ final class EditSuiteSession {
+     private(set) var phase: Phase = .loading("Opening the video…")
+     /// The editor state. Change it through `edit` so the preview follows.
+     private(set) var state: EditSuiteState
+-    var mode: Mode = .timeline
++    var mode: Mode = .timeline { didSet { viewChanged() } }
+     /// A panel the inspector scrolls to once (the timeline's mask badge asks for "Mask & green screen").
+     var reveal: String?
+-    var binTab: EditSuite.BinTab = .takes
++    var binTab: EditSuite.BinTab = .takes { didSet { viewChanged() } }
+     /// The playhead while playing (timeline seconds); `state.playhead` follows it when playback stops or an edit needs it.
+     private(set) var playhead: Double = 0
+     private(set) var playing = false
+     /// J / K / L shuttle rate (0 = stopped).
+     private(set) var shuttle: Double = 0
+ 
+-    private(set) var files: [String: URL] = [:]
++    private(set) var files: [String: URL] = [:] { didSet { if !missing.isEmpty { missing.subtract(files.keys) } } }
++    /// Continue a draft: clips whose file isn't on this Mac and couldn't be fetched (a deleted take, a lost upload). The edit
++    /// opens anyway; the timeline marks them "Missing".
++    private(set) var missing: Set<String> = []
++    /// Continue a draft: the saved edit this editor reopens (EditSuiteResume.swift), nil when opened from a take.
++    var resume: EditResume?
++    @ObservationIgnored var viewTracking = false
++    @ObservationIgnored var viewTask: Task<Void, Never>?
++    @ObservationIgnored var lastSentView: EditSessionView?
++    @ObservationIgnored let recentStore = EditRecentStore.standard
++    /// A member's blank project kept on this Mac (one id per blank, so two blanks don't overwrite each other).
++    @ObservationIgnored var localBlankId = UUID().uuidString
+     /// Frame strips per video asset (evenly over the whole file) and waveforms per sounding asset (0…1 peaks over the file).
+     private(set) var strips: [String: [CGImage]] = [:]
+     private(set) var waves: [String: [Float]] = [:]
+@@ -179,7 +190,10 @@ final class EditSuiteSession {
+         do {
+             var project: E.Project
+             var local: URL?
+-            if isBlankStart {
++            if let p = resume?.project {
++                // Continue a draft: the edit as it was left, even when its source video is gone (missing clips are marked).
++                project = p
++            } else if isBlankStart {
+                 // "New blank project": nothing on the timeline yet, the default shape (the shape picker changes it).
+                 project = E.Project.blank()
+             } else if let p2 = take.editsV2, p2.isBlank, take.parentTakeId == nil {
+@@ -220,6 +234,7 @@ final class EditSuiteSession {
+             refreshLookThumbs()
+             if !isBlankStart, let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
+             if isOwner { await startLive() }
++            restoreView()
+         } catch {
+             phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
+         }
+@@ -246,6 +261,7 @@ final class EditSuiteSession {
+             guard let link, let url = URL(string: link) else { continue }
+             if let local = try? await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id) { files[a.id] = local }
+         }
++        missing = EditSuite.missingAssets(project, have: Set(files.keys))
+         await ensureContentFonts()
+     }
+ 
+@@ -262,6 +278,9 @@ final class EditSuiteSession {
+     }
+ 
+     func close() {
++        saveViewNow()
++        viewTracking = false
++        viewTask?.cancel()
+         stopLive()
+         player.pause()
+         player.replaceCurrentItem(with: nil)
+@@ -289,7 +308,7 @@ final class EditSuiteSession {
+         playhead = state.playhead
+         // Mac Edit audit: a change the server would refuse is not made; say why instead of silently doing nothing.
+         if !ok, let r = state.lastRefusal { lastError = Self.refusalText(r) }
+-        if state.project != before { projectChanged() }
++        if state.project != before { projectChanged() } else { viewChanged() }
+         return ok
+     }
+ 
+@@ -322,12 +341,13 @@ final class EditSuiteSession {
+     }
+ 
+     /// View-only changes (selection, zoom, tabs, snapping…).
+-    func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next }   // a copy, as in edit (exclusivity)
++    func view(_ f: (inout EditSuiteState) -> Void) { var next = state; f(&next); state = next; viewChanged() }   // a copy, as in edit (exclusivity)
+ 
+     func undo() { nextChangeLabel = "Undo"; edit { $0.undo() }; nextChangeLabel = nil }
+     func redo() { nextChangeLabel = "Redo"; edit { $0.redo() }; nextChangeLabel = nil }
+ 
+     private func projectChanged() {
++        viewChanged()
+         Task { await ensureFiles(); rebuild(); refreshMedia() }
+         if !applyingRemote { liveLocalChange() }
+     }
+@@ -423,6 +443,7 @@ final class EditSuiteSession {
+         shuttle = 0
+         playing = false
+         state.playhead = playhead
++        viewChanged()
+     }
+ 
+     /// J / K / L: back faster, stop, forward faster (1×, 2×, 4×).
+@@ -448,12 +469,14 @@ final class EditSuiteSession {
+         playhead = v
+         state.playhead = v
+         player.seek(to: CMTime(seconds: v, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
++        viewChanged()
+     }
+ 
+     /// Seeks and selects what's there (a click on a row, or the main clip).
+     func scrub(to t: Double, trackId: String? = nil) {
+         seek(t)
+         state.select(at: t, trackId: trackId)
++        viewChanged()
+     }
+ 
+     func step(_ dir: Int) {
+diff --git a/mac/Muse/App/SnapshotRunner+EditResume.swift b/mac/Muse/App/SnapshotRunner+EditResume.swift
+new file mode 100644
+index 00000000..3c7c779f
+--- /dev/null
++++ b/mac/Muse/App/SnapshotRunner+EditResume.swift
+@@ -0,0 +1,151 @@
++import AppKit
++import MuseCore
++
++/// Continue a draft check (Mac CI, owner 2026-11-12: "When you click on Edit, you should see the last draft you were
++/// editing"; owner decision the same day: Edit opens on a choice, "New" or "Continue draft"). In review mode only, through
++/// the real Edit page: a take is opened, the editor is moved (playhead, zoom, inspector tab, Uploads bin, platform view off)
++/// and left; clicking Edit again must show the choice (no editor opens by itself) with that edit as the draft, and Continue
++/// draft must reopen it exactly there. Then an edit whose take was deleted must open anyway with its clips marked missing,
++/// and New must start a blank project. Writes `edit-resume-check.txt`; CI fails on any FAIL line or a missing ALL DONE.
++extension SnapshotRunner {
++    static func editResumeCheck(_ store: AppStore, dir: URL) async {
++        let log = dir.appendingPathComponent("edit-resume-check.txt")
++        try? Data().write(to: log)
++        func note(_ s: String) {
++            guard let h = try? FileHandle(forWritingTo: log) else { return }
++            h.seekToEndOfFile()
++            h.write(Data((s + "\n").utf8))
++            try? h.synchronize()
++            try? h.close()
++            print("edit-resume-check: \(s)")
++        }
++        func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
++            note(ok ? "DONE \(name)" : "FAIL \(name)\(detail().isEmpty ? "" : ": \(detail())")")
++        }
++        /// Waits for the Edit page's editor to be ready on `takeId` (nil: any).
++        func editorReady(_ takeId: String?, seconds: Double = 25) async -> EditSuiteSession? {
++            let end = Date().addingTimeInterval(seconds)
++            while Date() < end {
++                // Ready and put back where it was left (restoreView ran).
++                if let s = store.suite.editCurrent, s.isReady, s.viewTracking, takeId == nil || s.take.id == takeId { return s }
++                if let s = store.suite.editCurrent, case .failed = s.phase { return s }
++                try? await Task.sleep(for: .milliseconds(200))
++            }
++            return nil
++        }
++        guard let fake = store.api as? FakeMuseAPI else { note("FAIL not in demo mode"); note("ALL DONE"); return }
++        store.themeID = .a
++        let media = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-resume", isDirectory: true)
++        try? FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
++        let clip = media.appendingPathComponent("resume.mp4")
++        do { try await makeVideo(clip, seconds: 6, fps: 30, width: 360, height: 640, audio: (48_000, 2)) } catch {
++            note("FAIL making the test video: \(error.localizedDescription)"); note("ALL DONE"); return
++        }
++        let now = Int64(Date().timeIntervalSince1970 * 1000)
++        let raw: [[String: Any]] = [
++            ["id": "rz_resume", "kind": "take", "title": "Beach walk", "videoUrl": clip.absoluteString, "durationSec": 6, "width": 360, "height": 640, "fps": 30, "createdAt": now],
++            ["id": "rz_gone", "kind": "take", "title": "Deleted later", "videoUrl": clip.absoluteString, "durationSec": 6, "width": 360, "height": 640, "fps": 30, "createdAt": now - 1],
++        ]
++        let made = raw.compactMap { r -> Take? in
++            guard let data = try? JSONSerialization.data(withJSONObject: r) else { return nil }
++            return try? JSONDecoder().decode(Take.self, from: data)
++        }
++        guard made.count == 2 else { note("FAIL decoding the test takes"); note("ALL DONE"); return }
++        store.takes.removeAll { $0.id.hasPrefix("rz_") }
++        store.takes.insert(contentsOf: made, at: 0)
++        await fake.adoptTakes(made)
++
++        // 1. Open a take, move the editor, leave Edit.
++        note("START open_and_move")
++        store.openEdit(takeId: "rz_resume")
++        guard let first = await editorReady("rz_resume"), first.isReady else {
++            note("FAIL open_and_move: the editor didn't open (\(String(describing: store.suite.editCurrent?.phase)))"); note("ALL DONE"); return
++        }
++        first.view { $0.zoom = 150; $0.tab = .audio; $0.safeArea = nil }
++        first.binTab = .uploads
++        first.seek(2.5)
++        try? await Task.sleep(for: .seconds(2))   // the view is saved after a short pause
++        let sid = first.draftSessionId
++        check("session_shared", sid != nil, "no edit session")
++        store.go(.home)
++        try? await Task.sleep(for: .seconds(1.5))
++        if let sid, let s = try? await fake.editSession(id: sid) {
++            check("view_on_server", s.view?.zoom == 150 && s.view?.binTab == "uploads" && s.view?.safeArea == "off",
++                  "server view \(String(describing: s.view))")
++        } else { note("FAIL view_on_server: session not readable") }
++
++        // 2. Click Edit: the choice shows (nothing opens by itself), Continue draft names that edit, and reopens it there.
++        note("START choice")
++        store.openEdit(takeId: nil)
++        try? await Task.sleep(for: .seconds(3))
++        check("no_auto_open", store.suite.editCurrent == nil, "an editor opened by itself on \(store.suite.editCurrent?.take.id ?? "?")")
++        let draft = store.suite.recentEdits.first
++        check("choice_continue_draft", draft?.takeId == "rz_resume" && draft?.title == "Beach walk",
++              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing")")
++        capture(dir.appendingPathComponent("mac_a_edit_choice.png"))
++        note("START reopen_last")
++        if let draft { store.suite.editResume = draft }
++        if let s = await editorReady("rz_resume"), s.isReady {
++            check("reopen_last", true)
++            check("reopen_playhead", abs(s.state.playhead - 2.5) < 0.05, "playhead \(s.state.playhead)")
++            check("reopen_zoom", abs(s.state.zoom - 150) < 0.01, "zoom \(s.state.zoom)")
++            check("reopen_tab", s.state.tab == .audio, "tab \(s.state.tab)")
++            check("reopen_bin_uploads", s.binTab == .uploads, "bin \(s.binTab)")
++            check("reopen_platform_view_off", s.state.safeArea == nil, "safe area \(String(describing: s.state.safeArea))")
++            capture(dir.appendingPathComponent("mac_a_edit_resumed.png"))
++        } else {
++            note("FAIL reopen_last: Continue draft opened \(store.suite.editCurrent?.take.id ?? "nothing"), not the last edit")
++        }
++
++        // 3. The Edit home lists Recent edits (the editor's Back).
++        note("START recent_list")
++        store.suite.editHomeRequest = UUID()
++        try? await Task.sleep(for: .seconds(2))
++        check("back_to_home", store.suite.editCurrent == nil, "the editor is still open")
++        let recent = await store.loadRecentEdits()
++        check("draft_still_first", recent.first?.takeId == "rz_resume", "first is \(recent.first.map { "\($0.title) (\($0.takeId))" } ?? "none")")
++        try? await Task.sleep(for: .seconds(1))
++        capture(dir.appendingPathComponent("mac_a_edit_recent.png"))
++
++        // 4. An edit whose take was deleted opens anyway; its clips are marked missing.
++        note("START missing_media")
++        do {
++            let p = EditV2.fromV1(EditList(sourceTakeId: "rz_gone", sourceDurationSec: 6), EditV2.SourceFacts(width: 360, height: 640, fps: 30, hasAudio: true))
++            let s = try await fake.openEditSession(EditSessionOpenRequest(takeId: "rz_gone", project: p, device: "phone"))
++            try await fake.saveEditSessionView(sessionId: s.id, EditSessionView(playhead: 1, title: "Deleted later"))
++            store.takes.removeAll { $0.id == "rz_gone" }
++            let items = await store.loadRecentEdits()
++            guard let gone = items.first(where: { $0.sessionId == s.id }) else {
++                note("FAIL missing_media: the edit isn't in Recent edits"); throw CancellationError()
++            }
++            store.suite.editResume = gone
++            if let ed = await editorReady("rz_gone") {
++                check("missing_media_opens", ed.isReady, "phase \(ed.phase)")
++                try? await Task.sleep(for: .seconds(2))
++                check("missing_media_marked", !ed.missing.isEmpty, "no clip marked missing")
++                capture(dir.appendingPathComponent("mac_a_edit_missing.png"))
++            } else {
++                note("FAIL missing_media_opens: the editor didn't open")
++            }
++        } catch is CancellationError {
++        } catch {
++            note("FAIL missing_media: \(error.localizedDescription)")
++        }
++
++        // 5. New starts a blank project (the choice's other way in).
++        note("START new_edit")
++        store.suite.editHomeRequest = UUID()
++        try? await Task.sleep(for: .seconds(1))
++        store.suite.editNewRequest = UUID()
++        if let b = await editorReady(EditV2.blankSourceId) {
++            check("new_edit_blank", b.isReady && b.project.mainClips.isEmpty, "phase \(b.phase)")
++        } else { note("FAIL new_edit_blank: no blank project") }
++        store.suite.editHomeRequest = UUID()
++        try? await Task.sleep(for: .seconds(1))
++        store.suite.editTakeId = nil
++        store.go(.home)
++        try? await Task.sleep(for: .seconds(1))
++        store.takes.removeAll { $0.id.hasPrefix("rz_") }
++        note("ALL DONE")
++    }
++}
+diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
+index f02e37a6..c89ac232 100644
+--- a/mac/Muse/App/SnapshotRunner.swift
++++ b/mac/Muse/App/SnapshotRunner.swift
+@@ -179,6 +179,7 @@ enum SnapshotRunner {
+             await fitCheck(store, dir: dir)
+             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
+             await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
++            await editResumeCheck(store, dir: dir)   // Continue a draft (owner 2026-11-12): Edit reopens the last edit where it was left
+             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
+             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
+             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
+diff --git a/mac/Muse/Views/Edit/EditSuiteTimeline.swift b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
+index ae68d0a6..249a36c7 100644
+--- a/mac/Muse/Views/Edit/EditSuiteTimeline.swift
++++ b/mac/Muse/Views/Edit/EditSuiteTimeline.swift
+@@ -477,6 +477,22 @@ struct TimelineCanvas: View {
+             if !locked { session.view { $0.selection = id } }
+         }
+         .gesture(moveGesture(b, row: row, locked: locked))
++        .overlay(alignment: .bottomLeading) {
++            // Continue a draft: the clip's file is gone (a deleted take, a lost upload). The edit still opens; this says why
++            // the clip shows nothing.
++            if let id = b.itemId, isMissing(row.trackId, id) {
++                HStack(spacing: Space.s1) {
++                    Ph("warning", 12)
++                    if w >= 64 { Text("Missing").font(t.scale.micro.font).lineLimit(1) }
++                }
++                .foregroundStyle(.white)
++                .padding(.horizontal, Space.s1 + 2).padding(.vertical, 2)
++                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
++                .offset(x: x + 4, y: 2)
++                .help("This clip's file is missing")
++                .accessibilityHidden(true)
++            }
++        }
+         .overlay(alignment: .topTrailing) {
+             if let id = b.itemId, let badge = MaskBadge(session.project.track(row.trackId)?.item(id)), w >= 36 {
+                 maskBadge(badge, itemId: id, locked: locked).offset(x: x, y: 6)
+@@ -496,11 +512,18 @@ struct TimelineCanvas: View {
+             }
+         }
+         .accessibilityElement(children: .ignore)
+-        .accessibilityLabel("\(row.label): \(b.label)\(b.itemId.flatMap { MaskBadge(session.project.track(row.trackId)?.item($0)) }.map { ", \($0.text)" } ?? "")")
++        .accessibilityLabel("\(row.label): \(b.label)\(b.itemId.flatMap { MaskBadge(session.project.track(row.trackId)?.item($0)) }.map { ", \($0.text)" } ?? "")\(b.itemId.map { isMissing(row.trackId, $0) } == true ? ", file missing" : "")")
+         .accessibilityValue("\(EditSuite.clockTenths(b.startSec)) to \(EditSuite.clockTenths(b.endSec))")
+         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+     }
+ 
++    /// The item's file isn't on this Mac and couldn't be fetched (continue a draft).
++    private func isMissing(_ trackId: String, _ itemId: String) -> Bool {
++        guard !session.missing.isEmpty, let it = session.project.track(trackId)?.item(itemId),
++              let asset = it.videoClip?.asset ?? it.imageItem?.asset ?? it.audioClip?.asset else { return false }
++        return session.missing.contains(asset)
++    }
++
+     /// A clip's mask, Invert, green-screen key or cut-out, which can hide most of the picture without showing on the
+     /// timeline (the owner's "oval", 2026-11-11). Click: select the clip and open "Mask & green screen".
+     private func maskBadge(_ badge: MaskBadge, itemId: String, locked: Bool) -> some View {
+diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
+index cd05450a..b461df85 100644
+--- a/mac/Muse/Views/Edit/EditSuiteView.swift
++++ b/mac/Muse/Views/Edit/EditSuiteView.swift
+@@ -10,6 +10,8 @@ struct EditSuiteView: View {
+     private let takeId: String?
+     @State private var openId: String?
+     @State private var session: EditSuiteSession?
++    /// Continue a draft: the recent edit `openId` names ("local:…" or a session id), opened as it was left.
++    @State private var resuming: EditRecentItem?
+ 
+     init(takeId: String? = nil) {
+         self.takeId = takeId
+@@ -23,7 +25,7 @@ struct EditSuiteView: View {
+             } else if openId != nil {
+                 VStack(spacing: 12) {
+                     ProgressView()
+-                    Text(openId == EditV2.blankSourceId ? "Starting a blank project…" : "Opening the video…").font(t.body(13)).foregroundStyle(t.muted)
++                    Text(openingText).font(t.body(13)).foregroundStyle(t.muted)
+                 }
+                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+             } else if store.recreate.open {
+@@ -35,32 +37,68 @@ struct EditSuiteView: View {
+                 case .recipes: LearnRecipesView()
+                 }
+             } else {
+-                EditSuiteHome { openId = $0 }
++                EditSuiteHome(open: openTake, resume: resume)
+             }
+         }
+         .task(id: openId) { await open(openId) }
++        // A recent edit picked elsewhere (a check, One Claude): opened as it was left.
++        .onChange(of: store.suite.editNewRequest) { _, r in if r != nil { store.suite.editNewRequest = nil; openTake(EditV2.blankSourceId) } }
++        .task(id: store.suite.editResume?.id) {
++            guard let r = store.suite.editResume else { return }
++            store.suite.editResume = nil
++            resume(r)
++        }
++        .onChange(of: store.suite.editHomeRequest) { _, _ in if session != nil || openId != nil { close() } }
+         // One Claude: Claude opened an edit session: the editor opens on it (even when its take is already open).
+         .task(id: store.suite.editAttach?.id) {
+             guard let a = store.suite.editAttach else { return }
+             if openId == a.takeId { await open(a.takeId) } else { openId = a.takeId }
+         }
+-        .onChange(of: takeId) { _, new in openId = new }
+-        .onDisappear { session?.close(); store.linkImport.deliverToEdit = nil }
++        .onChange(of: takeId) { _, new in resuming = nil; openId = new }
++        .onDisappear {
++            session?.close()
++            store.linkImport.deliverToEdit = nil
++            if store.suite.editCurrent === session { store.suite.editCurrent = nil }
++        }
++    }
++
++    private var openingText: String {
++        if resuming != nil { return "Opening your draft…" }
++        return openId == EditV2.blankSourceId ? "Starting a blank project…" : "Opening the video…"
++    }
++
++    private func resume(_ item: EditRecentItem) {
++        resuming = item
++        if openId == item.id { Task { await open(item.id) } } else { openId = item.id }
++    }
++
++    /// A take from the home: it continues its recent edit when it has one (where that edit was left).
++    private func openTake(_ id: String) {
++        if let r = store.recentEdit(forTake: id) { resume(r) } else { resuming = nil; openId = id }
+     }
+ 
+     private func open(_ id: String?) async {
+         session?.close()
+         session = nil
++        store.suite.editCurrent = nil
+         store.linkImport.deliverToEdit = nil
+         guard let id else { return }
+-        let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
+-        if attach != nil { store.suite.editAttach = nil }
+-        guard let s = store.makeEditSuiteSession(takeId: id, attachSessionId: attach) else {
+-            store.showToast("Only video takes can be edited")
+-            openId = nil
++        let made: EditSuiteSession?
++        if let r = resuming, r.id == id {
++            made = await store.makeEditSuiteSession(resuming: r)
++        } else {
++            let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
++            if attach != nil { store.suite.editAttach = nil }
++            made = store.makeEditSuiteSession(takeId: id, attachSessionId: attach)
++            if made == nil { store.showToast("Only video takes can be edited") }
++        }
++        guard let s = made, openId == id else {
++            if openId == id { openId = nil }
++            resuming = nil
+             return
+         }
+         session = s
++        store.suite.editCurrent = s
+         store.linkImport.deliverToEdit = { [weak s] r in s?.addLinkImport(r) ?? false }
+         await s.load()
+         // The viewer's Split: the playhead where the take was when Split was pressed.
+@@ -73,18 +111,23 @@ struct EditSuiteView: View {
+     private func close() {
+         session?.close()
+         session = nil
++        store.suite.editCurrent = nil
+         store.linkImport.deliverToEdit = nil
++        resuming = nil
+         openId = nil
++        // Back on the home: its Recent edits show where this edit now stands.
++        Task { await store.loadRecentEdits() }
+         // Opened with Edit on a take (Result, Gallery): back there.
+         if takeId != nil, store.editor != nil { store.closeEditor() }
+     }
+ }
+ 
+-/// The Edit home: video takes and edited versions, newest first.
++/// The Edit home: recent edits (continue where one was left), then video takes and edited versions, newest first.
+ struct EditSuiteHome: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+     var open: (String) -> Void
++    var resume: (EditRecentItem) -> Void = { _ in }
+ 
+     var body: some View {
+         let takes = store.editSuiteTakes
+@@ -99,13 +142,19 @@ struct EditSuiteHome: View {
+                     SuiteToolButton(title: "Recipes", icon: "stack", plain: true) { store.openLearn(.recipes) }
+                 }
+                 SuiteToolButton(title: "Recreate an edit", icon: "arrows-clockwise") { store.openRecreate() }
+-                // A fresh project with no source video (owner request 2026-11-11); saved to the Library as a new video.
+-                SuiteToolButton(title: "New blank project", icon: "plus") { open(EditV2.blankSourceId) }
+             }
+-            if takes.isEmpty {
+-                Note("Start a blank project, or make a video in the Video suite; its takes show up here to edit.")
++            // Owner decision 2026-11-12: Edit opens on a choice, New or Continue draft (only New when there is no draft).
++            let recent = store.suite.recentEdits
++            startChoice(last: recent.first)
++            if takes.isEmpty && recent.isEmpty {
++                Note("Make a video in the Video suite and its takes show up here to edit.")
+                     .padding(.top, 12)
+             }
++            let older = Array(recent.dropFirst().prefix(EditRecent.shown))
++            if !older.isEmpty {
++                SectionHeader("Recent edits")
++                recentRow(older)
++            }
+             if !edits.isEmpty {
+                 SectionHeader("Edited versions")
+                 grid(edits)
+@@ -115,6 +164,55 @@ struct EditSuiteHome: View {
+                 grid(renders)
+             }
+         }
++        .task { await store.loadRecentEdits() }
++    }
++
++    /// The two ways in: New (a blank project, saved to the Library as a new video) and Continue draft (the last edit, where
++    /// it was left: its picture, name and when). Continue draft is the primary when there is one.
++    private func startChoice(last: EditRecentItem?) -> some View {
++        HStack(alignment: .top, spacing: Space.s3) {
++            EditStartTile(title: "New", detail: "Blank project", accent: last == nil) {
++                Ph("plus", 20).foregroundStyle(t.roles.ink)
++                    .frame(width: 54, height: 96)
++                    .background(RoundedRectangle(cornerRadius: t.imageRadius, style: .continuous).fill(t.roles.raised))
++            } action: { open(EditV2.blankSourceId) }
++            .accessibilityLabel("New edit")
++            if let last {
++                let thumb = last.thumbTakeId.flatMap { id in store.takes.first { $0.id == id } }
++                let when = EditRecent.lastEditedText(last.lastEditedAt)
++                EditStartTile(title: "Continue draft", detail: last.title, meta: when, accent: true) {
++                    MuseImage(ref: thumb?.thumb, symbol: "film")
++                        .frame(width: 54, height: 96)
++                        .clipShape(RoundedRectangle(cornerRadius: t.imageRadius, style: .continuous))
++                } action: { resume(last) }
++                .accessibilityLabel("Continue draft: \(last.title), edited \(when)")
++            }
++        }
++        .frame(maxWidth: 720, alignment: .leading)
++        .padding(.top, Space.s2)
++    }
++
++    /// Recent edits: picture, name, when it was last worked on. Opens where it was left.
++    private func recentRow(_ list: [EditRecentItem]) -> some View {
++        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 14)], alignment: .leading, spacing: 16) {
++            ForEach(list) { it in
++                let thumb = it.thumbTakeId.flatMap { id in store.takes.first { $0.id == id } }
++                let when = EditRecent.lastEditedText(it.lastEditedAt)
++                Button { resume(it) } label: {
++                    VStack(alignment: .leading, spacing: 4) {
++                        MuseImage(ref: thumb?.thumb, symbol: "film")
++                            .aspectRatio(9 / 16, contentMode: .fit)
++                            .clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
++                        Text(it.title).font(t.body(12.5, .medium)).foregroundStyle(t.ink).lineLimit(1)
++                        Text(when).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
++                    }
++                }
++                .buttonStyle(.plain)
++                .help("Continue where you left off")
++                .accessibilityLabel("Continue \(it.title), edited \(when)")
++            }
++        }
++        .padding(.top, 6)
+     }
+ 
+     private func grid(_ list: [Take]) -> some View {
+@@ -428,3 +526,39 @@ struct EditSuiteEditor: View {
+         }
+     }
+ }
++
++/// One of the Edit home's two ways in: a picture, a title over its detail (and when), the whole tile a button. Tone, not
++/// shadow, lifts it; the primary one carries the accent edge.
++struct EditStartTile<Picture: View>: View {
++    @Environment(\.theme) private var t
++    var title: String
++    var detail: String
++    var meta: String? = nil
++    var accent = false
++    @ViewBuilder var picture: () -> Picture
++    var action: () -> Void
++    @State private var hover = false
++
++    var body: some View {
++        Button(action: action) {
++            HStack(spacing: Space.s3) {
++                picture()
++                VStack(alignment: .leading, spacing: 2) {
++                    Text(title).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(1)
++                    Text(detail).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
++                    if let meta { Text(meta).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1) }
++                }
++                Spacer(minLength: 0)
++            }
++            .padding(Space.s3)
++            .frame(maxWidth: .infinity, alignment: .leading)
++            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(hover ? t.roles.raised : t.roles.field))
++            .overlay(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
++                .strokeBorder(accent ? t.roles.accent : t.roles.hairline, lineWidth: accent ? 1.5 : 1))
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .onHover { hover = $0 }
++        .frame(minWidth: 220, maxWidth: 340)
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
+new file mode 100644
+index 00000000..65540531
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
+@@ -0,0 +1,255 @@
++import Foundation
++
++// Continue a draft (owner, 2026-11-12): clicking Edit reopens the last edit exactly where it was left. The owner's edits live
++// on the server (edit sessions; the project is pushed on every change) and each session also keeps where the editor was left
++// (`EditSessionView`, POST …/{id}/view), so another device continues at the same place. Members' editors are local: this Mac
++// keeps their last edits (project and view) in `EditRecentStore`. Pure, so the rules are tested on Linux.
++
++/// Where the editor was left: playhead, zoom, tabs, platform view, the edit's name. `at` (ms) is set by the server or the store.
++public struct EditSessionView: Codable, Hashable, Sendable {
++    public var playhead: Double?
++    public var zoom: Double?
++    /// Inspector tab (`EditSuite.InspectorTab` raw value).
++    public var tab: String?
++    /// Media bin tab (`EditSuite.BinTab` raw value).
++    public var binTab: String?
++    /// timeline | captions
++    public var mode: String?
++    public var selection: String?
++    /// Platform view (`EditSuite.SafeArea` raw value); "off" (or the server's null) = none.
++    public var safeArea: String?
++    public var title: String?
++    public var at: Double?
++
++    public init(playhead: Double? = nil, zoom: Double? = nil, tab: String? = nil, binTab: String? = nil, mode: String? = nil,
++                selection: String? = nil, safeArea: String? = nil, title: String? = nil, at: Double? = nil) {
++        self.playhead = playhead; self.zoom = zoom; self.tab = tab; self.binTab = binTab; self.mode = mode; self.selection = selection
++        self.safeArea = safeArea; self.title = title; self.at = at
++    }
++
++    enum CodingKeys: String, CodingKey { case playhead, zoom, tab, binTab, mode, selection, safeArea, title, at }
++    public init(from d: Decoder) throws {
++        let c = try d.container(keyedBy: CodingKeys.self)
++        playhead = try? c.decodeIfPresent(Double.self, forKey: .playhead)
++        zoom = try? c.decodeIfPresent(Double.self, forKey: .zoom)
++        tab = try? c.decodeIfPresent(String.self, forKey: .tab)
++        binTab = try? c.decodeIfPresent(String.self, forKey: .binTab)
++        mode = try? c.decodeIfPresent(String.self, forKey: .mode)
++        selection = try? c.decodeIfPresent(String.self, forKey: .selection)
++        // The server keeps "off" as null: a present null means off, a missing key means "not saved".
++        if c.contains(.safeArea), (try? c.decodeNil(forKey: .safeArea)) == true { safeArea = "off" }
++        else { safeArea = try? c.decodeIfPresent(String.self, forKey: .safeArea) }
++        title = try? c.decodeIfPresent(String.self, forKey: .title)
++        at = try? c.decodeIfPresent(Double.self, forKey: .at)
++    }
++
++    /// The same place (the time it was saved aside).
++    public func samePlace(_ o: EditSessionView) -> Bool {
++        var a = self, b = o
++        a.at = nil; b.at = nil
++        return a == b
++    }
++}
++
++/// POST /v1/edit-sessions/{id}/view
++public struct EditSessionViewRequest: Codable, Hashable, Sendable {
++    public var view: EditSessionView
++    public init(view: EditSessionView) { self.view = view }
++}
++
++/// → `{ok, view}`
++public struct EditSessionViewReply: Codable, Hashable, Sendable {
++    public var view: EditSessionView?
++}
++
++extension EditSuiteState {
++    /// Where the editor is now (the app adds the bin tab, the mode and the title it keeps itself).
++    public func viewSnapshot(binTab: EditSuite.BinTab? = nil, mode: String? = nil, title: String? = nil) -> EditSessionView {
++        EditSessionView(playhead: EditV2.r3(max(0, playhead.isFinite ? playhead : 0)), zoom: EditV2.r3(zoom), tab: tab.rawValue,
++                        binTab: binTab?.rawValue, mode: mode, selection: selection, safeArea: safeArea?.rawValue ?? "off", title: title)
++    }
++
++    /// Puts the editor back where it was left. Anything the edit no longer has (a deleted clip, a playhead past the end, an
++    /// unknown tab from a newer app) is ignored, so a saved view never breaks opening.
++    public mutating func restore(_ v: EditSessionView) {
++        if let p = v.playhead, p.isFinite { playhead = min(max(0, p), max(0, duration)) }
++        if let z = v.zoom, z.isFinite { zoom = min(Self.zoomRange.upperBound, max(Self.zoomRange.lowerBound, z)) }
++        if let s = v.tab, let tb = EditSuite.InspectorTab(rawValue: s) { tab = tb }
++        if let s = v.safeArea { safeArea = s == "off" ? nil : (EditSuite.SafeArea(rawValue: s) ?? safeArea) }
++        if let sel = v.selection, project.tracks.contains(where: { $0.items.contains { $0.id == sel } }) { selection = sel }
++    }
++}
++
++extension EditSuite {
++    /// The bin tab a saved view asks for (nil: unknown, keep the default).
++    public static func binTab(_ v: EditSessionView) -> BinTab? { v.binTab.flatMap(BinTab.init(rawValue:)) }
++
++    /// Assets that need a file on this Mac (video, picture, sound) but have none: the timeline marks their clips "Missing"
++    /// instead of the edit failing to open. Content-library items (stickers, sound effects) and LUTs are left out.
++    public static func missingAssets(_ p: EditV2.Project, have: Set<String>) -> Set<String> {
++        let used = Set(p.tracks.flatMap(\.items).compactMap { item -> String? in
++            if let c = item.videoClip { return c.asset }
++            if let i = item.imageItem { return i.asset }
++            if let a = item.audioClip { return a.asset }
++            return nil
++        })
++        return Set(p.assets.filter { a in
++            used.contains(a.id) && a.contentRef == nil && (a.kind == .video || a.kind == .image || a.kind == .audio) && !have.contains(a.id)
++        }.map(\.id))
++    }
++}
++
++/// One edit in "Recent edits": the owner's server session or a member's edit kept on this Mac.
++public struct EditRecentItem: Identifiable, Hashable, Sendable {
++    /// The session id, or "local:<takeId>" for an edit kept on this Mac.
++    public var id: String
++    public var takeId: String
++    /// The server session to join (owner).
++    public var sessionId: String?
++    public var title: String
++    /// The take whose picture stands for the edit (nil: none yet, e.g. an empty blank project).
++    public var thumbTakeId: String?
++    /// Last worked on, ms since 1970.
++    public var lastEditedAt: Double
++    public var view: EditSessionView?
++
++    public init(id: String, takeId: String, sessionId: String? = nil, title: String, thumbTakeId: String? = nil, lastEditedAt: Double,
++                view: EditSessionView? = nil) {
++        self.id = id; self.takeId = takeId; self.sessionId = sessionId; self.title = title; self.thumbTakeId = thumbTakeId
++        self.lastEditedAt = lastEditedAt; self.view = view
++    }
++
++    public var isBlank: Bool { takeId == EditV2.blankSourceId }
++}
++
++/// A member's edit kept on this Mac (the whole project and where it was left), or the owner's offline copy of where the
++/// editor was.
++public struct EditLocalDraft: Codable, Hashable, Sendable {
++    public var takeId: String
++    public var sessionId: String?
++    /// A blank project kept on this Mac only (no session): its own id, so two blanks are two edits.
++    public var localId: String?
++    /// Members: the edit itself (their editor is local). Nil for the owner (the server holds the project).
++    public var project: EditV2.Project?
++    public var view: EditSessionView
++    public var title: String
++    /// ms since 1970.
++    public var savedAt: Double
++
++    public init(takeId: String, sessionId: String? = nil, localId: String? = nil, project: EditV2.Project? = nil, view: EditSessionView, title: String,
++                savedAt: Double) {
++        self.takeId = takeId; self.sessionId = sessionId; self.localId = localId; self.project = project; self.view = view; self.title = title; self.savedAt = savedAt
++    }
++
++    /// One draft per take; a blank project (no take) per session, or one local blank.
++    public var key: String { takeId == EditV2.blankSourceId ? "blank-\(sessionId ?? localId ?? "local")" : takeId }
++}
++
++public enum EditRecent {
++    /// Recent edits shown on the Edit home.
++    public static let shown = 8
++    /// Edits kept on this Mac.
++    public static let kept = 12
++
++    /// "Untitled edit" when nothing better is known.
++    public static let untitled = "Untitled edit"
++
++    /// The thumbnail's take: the source take, or for a blank project the first take on its timeline.
++    public static func thumbTake(takeId: String, project: EditV2.Project?) -> String? {
++        if takeId != EditV2.blankSourceId { return takeId }
++        guard let p = project else { return nil }
++        for c in p.mainClips { if let t = p.assets.first(where: { $0.id == c.asset })?.take { return t } }
++        return p.assets.first(where: { $0.take != nil })?.take
++    }
++
++    /// The server's sessions (owner) and this Mac's drafts, the last worked on first; an empty blank project is left out. A draft of a session the server lists is
++    /// the same edit (the newer view wins). `takeTitle` names a take (nil: it's gone). Members pass no sessions.
++    public static func items(sessions: [EditSession], local: [EditLocalDraft], takeTitle: (String) -> String?) -> [EditRecentItem] {
++        var out: [String: EditRecentItem] = [:]
++        for s in sessions where s.status == "open" {
++            let p = try? JSONPatch.decode(EditV2.Project.self, s.project)
++            // A blank project nothing was added to is not an edit yet ("New edit" pressed and left).
++            if s.takeId == EditV2.blankSourceId, let p, p.assets.isEmpty { continue }
++            let at = max(s.lastTouchedAt ?? 0, s.updatedAt ?? 0, s.view?.at ?? 0)
++            out[s.id] = EditRecentItem(id: s.id, takeId: s.takeId, sessionId: s.id, title: title(view: s.view, takeId: s.takeId, takeTitle: takeTitle),
++                                       thumbTakeId: thumbTake(takeId: s.takeId, project: p), lastEditedAt: at, view: s.view)
++        }
++        for d in local {
++            if let sid = d.sessionId {
++                // The owner's own record of a session: only its newer view counts (a session the server no longer lists is closed).
++                guard var it = out[sid] else { continue }
++                if d.savedAt > it.lastEditedAt {
++                    var v = d.view
++                    v.at = d.savedAt
++                    it.view = v
++                    it.lastEditedAt = d.savedAt
++                }
++                out[sid] = it
++                continue
++            }
++            guard d.project != nil else { continue }
++            let id = "local:\(d.key)"
++            out[id] = EditRecentItem(id: id, takeId: d.takeId, title: d.title.isEmpty ? title(view: d.view, takeId: d.takeId, takeTitle: takeTitle) : d.title,
++                                     thumbTakeId: thumbTake(takeId: d.takeId, project: d.project), lastEditedAt: d.savedAt, view: withAt(d.view, d.savedAt))
++        }
++        return out.values.sorted { $0.lastEditedAt != $1.lastEditedAt ? $0.lastEditedAt > $1.lastEditedAt : $0.id < $1.id }
++    }
++
++    static func withAt(_ v: EditSessionView, _ at: Double) -> EditSessionView { var v = v; v.at = at; return v }
++
++    static func title(view: EditSessionView?, takeId: String, takeTitle: (String) -> String?) -> String {
++        if let t = view?.title?.trimmingCharacters(in: .whitespaces), !t.isEmpty { return t }
++        if takeId == EditV2.blankSourceId { return untitled }
++        return takeTitle(takeId) ?? untitled
++    }
++
++    /// "Just now", "5 min ago", "3 h ago", "Yesterday", "Tuesday", "12 Nov" (the year added when it isn't this year).
++    public static func lastEditedText(_ atMs: Double, now: Date = Date(), calendar: Calendar = .current) -> String {
++        let at = Date(timeIntervalSince1970: atMs / 1000)
++        let s = now.timeIntervalSince(at)
++        if s < 60 { return "Just now" }
++        if s < 3600 { return "\(Int(s / 60)) min ago" }
++        if calendar.isDate(at, inSameDayAs: now) { return "\(Int(s / 3600)) h ago" }
++        if let y = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(at, inSameDayAs: y) { return "Yesterday" }
++        let f = DateFormatter()
++        f.calendar = calendar
++        f.timeZone = calendar.timeZone
++        f.locale = Locale(identifier: "en_GB")
++        if s < 6 * 86_400 { f.dateFormat = "EEEE" }
++        else if calendar.component(.year, from: at) == calendar.component(.year, from: now) { f.dateFormat = "d MMM" }
++        else { f.dateFormat = "d MMM yyyy" }
++        return f.string(from: at)
++    }
++}
++
++/// This Mac's recent edits on disk (one JSON file, newest first, at most `EditRecent.kept`).
++public struct EditRecentStore: Sendable {
++    public let file: URL
++    public init(file: URL) { self.file = file }
++
++    /// ~/Library/Application Support/MUSE/EditDrafts/recent.json (next to the unsent-change drafts).
++    public static var standard: EditRecentStore {
++        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
++        return EditRecentStore(file: base.appendingPathComponent("MUSE/EditDrafts/recent.json"))
++    }
++
++    public func load() -> [EditLocalDraft] {
++        guard let data = try? Data(contentsOf: file) else { return [] }
++        return (try? JSONDecoder().decode([EditLocalDraft].self, from: data)) ?? []
++    }
++
++    /// Saves this draft as the newest (replacing the same edit's older one).
++    public func save(_ d: EditLocalDraft) {
++        var list = load().filter { $0.key != d.key }
++        list.insert(d, at: 0)
++        write(Array(list.prefix(EditRecent.kept)))
++    }
++
++    /// Forgets one edit (its key).
++    public func remove(key: String) { write(load().filter { $0.key != key }) }
++
++    private func write(_ list: [EditLocalDraft]) {
++        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
++        if let data = try? JSONEncoder().encode(list) { try? data.write(to: file, options: .atomic) }
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
+index 8ee7187b..7cb43e25 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
+@@ -144,16 +144,20 @@ public struct EditSession: Codable, Hashable, Sendable, Identifiable {
+     public var online: [EditPresence]
+     public var requests: [EditAppRequest]
+     public var history: [EditHistoryEntry]?
++    /// Where an editor was last left on this session (continue a draft; EditRecent.swift).
++    public var view: EditSessionView?
++    /// The later of the last change and `view.at` (ms), from GET /v1/edit-sessions?recent=1.
++    public var lastTouchedAt: Double?
+ 
+     public init(id: String, takeId: String, baseVersionId: String? = nil, revision: Int, project: JSONValue, durationSec: Double? = nil, status: String = "open",
+                 updatedBy: String? = nil, updatedAt: Double? = nil, pending: [EditPending] = [], online: [EditPresence] = [], requests: [EditAppRequest] = [],
+-                history: [EditHistoryEntry]? = nil) {
++                history: [EditHistoryEntry]? = nil, view: EditSessionView? = nil, lastTouchedAt: Double? = nil) {
+         self.id = id; self.takeId = takeId; self.baseVersionId = baseVersionId; self.revision = revision; self.project = project
+         self.durationSec = durationSec; self.status = status; self.updatedBy = updatedBy; self.updatedAt = updatedAt; self.pending = pending
+-        self.online = online; self.requests = requests; self.history = history
++        self.online = online; self.requests = requests; self.history = history; self.view = view; self.lastTouchedAt = lastTouchedAt
+     }
+ 
+-    enum CodingKeys: String, CodingKey { case id, takeId, baseVersionId, revision, project, durationSec, status, updatedBy, updatedAt, pending, online, requests, history }
++    enum CodingKeys: String, CodingKey { case id, takeId, baseVersionId, revision, project, durationSec, status, updatedBy, updatedAt, pending, online, requests, history, view, lastTouchedAt }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         id = try c.decode(String.self, forKey: .id)
+@@ -169,6 +173,8 @@ public struct EditSession: Codable, Hashable, Sendable, Identifiable {
+         online = (try? c.decode([EditPresence].self, forKey: .online)) ?? []
+         requests = (try? c.decode([EditAppRequest].self, forKey: .requests)) ?? []
+         history = try? c.decodeIfPresent([EditHistoryEntry].self, forKey: .history)
++        view = try? c.decodeIfPresent(EditSessionView.self, forKey: .view)
++        lastTouchedAt = try? c.decodeIfPresent(Double.self, forKey: .lastTouchedAt)
+     }
+ }
+ 
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift b/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
+index 95e1975f..0470a658 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
+@@ -216,6 +216,29 @@ extension FakeMuseAPI {
+         emitEdit(EditSessionEvent(sessionId: id, op: "closed"))
+     }
+ 
++    /// Continue a draft: open sessions, the last worked on (changed or left) first, without history.
++    public func recentEditSessions(limit: Int) throws -> [EditSession] {
++        try editOwner()
++        func touched(_ s: EditSession) -> Double { max(s.updatedAt ?? 0, s.view?.at ?? 0) }
++        return editSessions.values.map(\.session).filter { $0.status == "open" }.sorted { touched($0) > touched($1) }
++            .prefix(max(1, min(50, limit))).map { s in
++                var v = view(editSessions[s.id]!, history: false)
++                v.lastTouchedAt = touched(s)
++                return v
++            }
++    }
++
++    /// Where the editor was left (the server's clamps; `at` stamped here).
++    public func saveEditSessionView(sessionId id: String, _ v: EditSessionView) throws {
++        _ = try record(id)
++        var v = v
++        v.playhead = v.playhead.map { min(24 * 3600, max(0, $0)) }
++        v.zoom = v.zoom.map { min(2000, max(1, $0)) }
++        // Strictly later than the last change, so "left last" beats "changed last" even within one millisecond.
++        v.at = max(Double(nowMs()), (editSessions[id]?.session.updatedAt ?? 0) + 1)
++        editSessions[id]?.session.view = v
++    }
++
+     // MARK: Claude's side (tests and demos)
+ 
+     /// The stored session (revision, project, history, the app's answers).
+diff --git a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+index 81d46479..39369b63 100644
+--- a/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/HTTPMuseAPI.swift
+@@ -471,6 +471,12 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
+         try await call("POST", "\(es(sessionId))/pending/\(Self.pathKey(pendingId))", ApproveBody(approve: approve))
+     }
+     public func closeEditSession(id: String) async throws { let _: OkReply = try await call("POST", "\(es(id))/close", Empty()) }
++    public func recentEditSessions(limit: Int) async throws -> [EditSession] {
++        try await call("GET", "v1/edit-sessions?recent=1&limit=\(max(1, min(50, limit)))")
++    }
++    public func saveEditSessionView(sessionId: String, _ view: EditSessionView) async throws {
++        let _: EditSessionViewReply = try await call("POST", "\(es(sessionId))/view", EditSessionViewRequest(view: view))
++    }
+     // End edit sessions (workstream 3)
+ 
+     // MARK: Video editor (edited versions of a take)
+diff --git a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+index 327a1f46..f3f8cc19 100644
+--- a/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/MuseAPI.swift
+@@ -278,6 +278,10 @@ public protocol MuseAPI: AnyObject, Sendable {
+     func answerEditPending(sessionId: String, pendingId: String, approve: Bool) async throws -> EditPending
+     /// POST …/{id}/close
+     func closeEditSession(id: String) async throws
++    /// GET /v1/edit-sessions?recent=1&limit=: open sessions, the one last worked on first (continue a draft). Owner only.
++    func recentEditSessions(limit: Int) async throws -> [EditSession]
++    /// POST …/{id}/view {view}: where the editor was left (no revision, no history). Owner only.
++    func saveEditSessionView(sessionId: String, _ view: EditSessionView) async throws
+     // End edit sessions (workstream 3)
+ 
+     // AI suite (workstream 1): plans/api.md "AI suite". Implemented in Suite/SuiteHTTP.swift and Suite/FakeMuseAPI+Suite.swift.
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
+new file mode 100644
+index 00000000..1ff3ecda
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
+@@ -0,0 +1,210 @@
++import XCTest
++@testable import MuseCore
++
++/// Continue a draft (owner, 2026-11-12): where the editor was left comes back, Recent edits lists the last worked on first,
++/// a member's edit is kept on this Mac, and missing media is marked instead of failing.
++final class EditRecentTests: XCTestCase {
++    typealias E = EditV2
++
++    private func fixture(_ name: String = "pip text image look") throws -> E.Project {
++        let c = try XCTUnwrap(editorFixture("projects").array.first { $0["name"].string == name }, name)
++        return try c["project"].decode(E.Project.self)
++    }
++
++    // MARK: View
++
++    func testViewRoundTripsThroughTheState() throws {
++        let p = try fixture()
++        var s = EditSuiteState(p)
++        s.playhead = 2.25
++        s.zoom = 140
++        s.tab = .audio
++        s.safeArea = .reels
++        let id = try XCTUnwrap(p.tracks.flatMap(\.items).last?.id)
++        s.selection = id
++        let v = s.viewSnapshot(binTab: .uploads, mode: "timeline", title: "Café cut")
++        XCTAssertEqual(v.binTab, "uploads")
++        XCTAssertEqual(v.safeArea, "reels")
++
++        // Through JSON, as the server and the file keep it.
++        let back = try JSONDecoder().decode(EditSessionView.self, from: JSONEncoder().encode(v))
++        var fresh = EditSuiteState(p)
++        fresh.restore(back)
++        XCTAssertEqual(fresh.playhead, 2.25, accuracy: 0.001)
++        XCTAssertEqual(fresh.zoom, 140)
++        XCTAssertEqual(fresh.tab, .audio)
++        XCTAssertEqual(fresh.safeArea, .reels)
++        XCTAssertEqual(fresh.selection, id)
++        XCTAssertEqual(EditSuite.binTab(back), .uploads)
++        XCTAssertTrue(v.samePlace(back))
++    }
++
++    func testPlatformViewOffIsRemembered() throws {
++        var s = EditSuiteState(try fixture())
++        s.safeArea = nil
++        let v = s.viewSnapshot()
++        XCTAssertEqual(v.safeArea, "off")
++        var fresh = EditSuiteState(try fixture())
++        XCTAssertNotNil(fresh.safeArea)
++        fresh.restore(v)
++        XCTAssertNil(fresh.safeArea)
++        // The server keeps "off" as null.
++        let fromServer = try JSONDecoder().decode(EditSessionView.self, from: Data(#"{"safeArea":null,"zoom":80}"#.utf8))
++        XCTAssertEqual(fromServer.safeArea, "off")
++        let unsaved = try JSONDecoder().decode(EditSessionView.self, from: Data(#"{"zoom":80}"#.utf8))
++        XCTAssertNil(unsaved.safeArea)
++    }
++
++    func testAStaleOrStrangeViewNeverBreaksOpening() throws {
++        let p = try fixture()
++        var s = EditSuiteState(p)
++        let before = s
++        s.restore(EditSessionView(playhead: 99_999, zoom: 1e9, tab: "from-a-newer-app", binTab: "nope", selection: "deleted-clip", safeArea: "nope"))
++        XCTAssertEqual(s.playhead, s.duration, accuracy: 0.001)
++        XCTAssertEqual(s.zoom, EditSuiteState.zoomRange.upperBound)
++        XCTAssertEqual(s.tab, before.tab)
++        XCTAssertEqual(s.selection, before.selection)
++        XCTAssertEqual(s.safeArea, before.safeArea)
++        XCTAssertNil(EditSuite.binTab(EditSessionView(binTab: "nope")))
++        s.restore(EditSessionView(playhead: -.infinity, zoom: .nan))
++        XCTAssertEqual(s.zoom, EditSuiteState.zoomRange.upperBound)
++        // A view from an older or newer server with odd types still decodes.
++        let odd = try JSONDecoder().decode(EditSessionView.self, from: Data(#"{"playhead":"x","zoom":90,"extra":[1]}"#.utf8))
++        XCTAssertNil(odd.playhead)
++        XCTAssertEqual(odd.zoom, 90)
++    }
++
++    // MARK: Missing media
++
++    func testMissingMediaIsMarkedNotFatal() throws {
++        let p = try fixture()
++        let used = Set(p.tracks.flatMap(\.items).compactMap { $0.videoClip?.asset ?? $0.imageItem?.asset ?? $0.audioClip?.asset })
++        let media = p.assets.filter { used.contains($0.id) && $0.contentRef == nil && [.video, .image, .audio].contains($0.kind) }.map(\.id)
++        XCTAssertFalse(media.isEmpty)
++        XCTAssertEqual(EditSuite.missingAssets(p, have: Set(media)), [])
++        let gone = try XCTUnwrap(media.first)
++        XCTAssertEqual(EditSuite.missingAssets(p, have: Set(media.dropFirst())), [gone])
++        XCTAssertEqual(EditSuite.missingAssets(p, have: []), Set(media))
++        // An asset no clip uses isn't "missing" (nothing on the timeline shows it).
++        var extra = p
++        extra.assets.append(E.Asset(id: "unused", kind: .video, upload: "u9", durationSec: 3))
++        XCTAssertFalse(EditSuite.missingAssets(extra, have: Set(media)).contains("unused"))
++    }
++
++    // MARK: Recent edits
++
++    private func session(_ id: String, takeId: String, project: E.Project, updatedAt: Double, view: EditSessionView? = nil, status: String = "open") throws -> EditSession {
++        EditSession(id: id, takeId: takeId, revision: 1, project: try JSONPatch.encode(project), status: status, updatedAt: updatedAt, view: view)
++    }
++
++    func testRecentListsTheLastWorkedOnFirst() throws {
++        let p = try fixture()
++        var blankEmpty = E.Project.blank()
++        blankEmpty.sourceTakeId = E.blankSourceId
++        var blankUsed = E.Project.blank()
++        blankUsed.assets = [E.Asset(id: "a1", kind: .video, take: "take_b", durationSec: 3)]
++        let titles = ["take_a": "Café review", "take_b": "Beach"]
++        let sessions = [
++            try session("es_1", takeId: "take_a", project: p, updatedAt: 1_000),
++            // Changed earlier but left later: it leads.
++            try session("es_2", takeId: "take_gone", project: p, updatedAt: 500, view: EditSessionView(title: nil, at: 3_000)),
++            try session("es_3", takeId: E.blankSourceId, project: blankUsed, updatedAt: 2_000, view: EditSessionView(title: "Promo")),
++            try session("es_4", takeId: E.blankSourceId, project: blankEmpty, updatedAt: 9_000),
++            try session("es_5", takeId: "take_a", project: p, updatedAt: 9_500, status: "closed"),
++        ]
++        let items = EditRecent.items(sessions: sessions, local: [], takeTitle: { titles[$0] })
++        XCTAssertEqual(items.map(\.id), ["es_2", "es_3", "es_1"])
++        XCTAssertEqual(items[0].title, EditRecent.untitled)      // its take is gone: still listed, still opens
++        XCTAssertEqual(items[1].title, "Promo")
++        XCTAssertEqual(items[1].thumbTakeId, "take_b")
++        XCTAssertTrue(items[1].isBlank)
++        XCTAssertEqual(items[2].title, "Café review")
++        XCTAssertEqual(items[2].thumbTakeId, "take_a")
++        XCTAssertEqual(items[2].sessionId, "es_1")
++    }
++
++    func testThisMacsDraftsJoinTheList() throws {
++        let p = try fixture()
++        let sessions = [try session("es_1", takeId: "take_a", project: p, updatedAt: 1_000)]
++        let local = [
++            // The owner's newer view of a listed session moves it up and carries the view.
++            EditLocalDraft(takeId: "take_a", sessionId: "es_1", view: EditSessionView(playhead: 4), title: "Café review", savedAt: 5_000),
++            // A view of a session the server no longer lists (closed) is dropped.
++            EditLocalDraft(takeId: "take_x", sessionId: "es_closed", view: EditSessionView(), title: "Old", savedAt: 9_000),
++            // A member's edit: listed with its project.
++            EditLocalDraft(takeId: "take_m", project: p, view: EditSessionView(), title: "Member cut", savedAt: 4_000),
++            // Nothing to reopen (no project, no session): left out.
++            EditLocalDraft(takeId: "take_n", view: EditSessionView(), title: "", savedAt: 8_000),
++        ]
++        let items = EditRecent.items(sessions: sessions, local: local, takeTitle: { _ in nil })
++        XCTAssertEqual(items.map(\.id), ["es_1", "local:take_m"])
++        XCTAssertEqual(items[0].lastEditedAt, 5_000)
++        XCTAssertEqual(items[0].view?.playhead, 4)
++        XCTAssertEqual(items[0].view?.at, 5_000)   // so the app can tell it is newer than the server's
++        XCTAssertEqual(items[1].title, "Member cut")
++        XCTAssertNil(items[1].sessionId)
++    }
++
++    func testStoreKeepsTheNewestPerEditAcrossRestarts() throws {
++        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("recent-\(UUID().uuidString)")
++        defer { try? FileManager.default.removeItem(at: dir) }
++        let file = dir.appendingPathComponent("recent.json")
++        let p = try fixture()
++        let store = EditRecentStore(file: file)
++        XCTAssertEqual(store.load(), [])
++        store.save(EditLocalDraft(takeId: "take_a", project: p, view: EditSessionView(playhead: 1), title: "A", savedAt: 1))
++        store.save(EditLocalDraft(takeId: "take_b", project: p, view: EditSessionView(playhead: 2), title: "B", savedAt: 2))
++        store.save(EditLocalDraft(takeId: "take_a", project: p, view: EditSessionView(playhead: 3), title: "A", savedAt: 3))
++        // Two blank projects kept on this Mac are two edits.
++        store.save(EditLocalDraft(takeId: E.blankSourceId, localId: "l1", project: p, view: EditSessionView(), title: "Blank 1", savedAt: 4))
++        store.save(EditLocalDraft(takeId: E.blankSourceId, localId: "l2", project: p, view: EditSessionView(), title: "Blank 2", savedAt: 5))
++        // A new store on the same file (the app restarted) reads the same list.
++        let again = EditRecentStore(file: file).load()
++        XCTAssertEqual(again.map(\.title), ["Blank 2", "Blank 1", "A", "B"])
++        XCTAssertEqual(again[2].view.playhead, 3)
++        XCTAssertEqual(again[2].project, p)
++        for i in 0..<20 { store.save(EditLocalDraft(takeId: "t\(i)", project: p, view: EditSessionView(), title: "\(i)", savedAt: Double(10 + i))) }
++        XCTAssertEqual(store.load().count, EditRecent.kept)
++        store.remove(key: "t19")
++        XCTAssertEqual(store.load().first?.title, "18")
++        // A damaged file reads as empty instead of failing.
++        try Data("not json".utf8).write(to: file)
++        XCTAssertEqual(store.load(), [])
++    }
++
++    func testLastEditedText() {
++        var cal = Calendar(identifier: .gregorian)
++        cal.timeZone = TimeZone(identifier: "UTC")!
++        let now = Date(timeIntervalSince1970: 1_794_500_000) // Thu 12 Nov 2026, 16:13 UTC
++        func at(_ secondsAgo: Double) -> Double { (now.timeIntervalSince1970 - secondsAgo) * 1000 }
++        XCTAssertEqual(EditRecent.lastEditedText(at(20), now: now, calendar: cal), "Just now")
++        XCTAssertEqual(EditRecent.lastEditedText(at(5 * 60), now: now, calendar: cal), "5 min ago")
++        XCTAssertEqual(EditRecent.lastEditedText(at(3 * 3600), now: now, calendar: cal), "3 h ago")
++        XCTAssertEqual(EditRecent.lastEditedText(at(20 * 3600), now: now, calendar: cal), "Yesterday")
++        XCTAssertEqual(EditRecent.lastEditedText(at(3 * 86_400), now: now, calendar: cal), "Monday")
++        XCTAssertEqual(EditRecent.lastEditedText(at(30 * 86_400), now: now, calendar: cal), "13 Oct")
++        XCTAssertEqual(EditRecent.lastEditedText(at(400 * 86_400), now: now, calendar: cal), "8 Oct 2025")
++    }
++
++    // MARK: The fake server (the app's demo mode and walks)
++
++    func testFakeServerKeepsTheViewAndListsRecent() async throws {
++        let api = FakeMuseAPI(speed: 0)
++        let p = try fixture()
++        let a = try await api.openEditSession(EditSessionOpenRequest(takeId: p.sourceTakeId, project: p, device: "mac"))
++        let b = try await api.openEditSession(EditSessionOpenRequest(takeId: E.blankSourceId, device: "mac"))
++        var recent = try await api.recentEditSessions(limit: 10)
++        XCTAssertEqual(Set(recent.map(\.id)), [a.id, b.id])
++        try await api.saveEditSessionView(sessionId: a.id, EditSessionView(playhead: -3, zoom: 90, binTab: "uploads"))
++        recent = try await api.recentEditSessions(limit: 10)
++        XCTAssertEqual(recent.first?.id, a.id)
++        XCTAssertEqual(recent.first?.view?.playhead, 0)
++        XCTAssertEqual(recent.first?.view?.binTab, "uploads")
++        XCTAssertNil(recent.first?.history)
++        let one = try await api.editSession(id: a.id)
++        XCTAssertEqual(one.view?.zoom, 90)
++        try await api.closeEditSession(id: a.id)
++        recent = try await api.recentEditSessions(limit: 10)
++        XCTAssertEqual(recent.map(\.id), [b.id])
++    }
++}

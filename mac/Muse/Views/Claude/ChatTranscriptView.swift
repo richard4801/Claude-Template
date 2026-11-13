@@ -96,6 +96,8 @@ struct ChatTranscriptView: View {
     @State private var pinned = true
     @State private var showJump = false
     @State private var lastFrame: CGRect = .zero
+    @State private var followPending = false
+    @State private var scrollAgain = false
     private static let endId = "chat_end"
 
     var body: some View {
@@ -123,6 +125,8 @@ struct ChatTranscriptView: View {
                 .onPreferenceChange(ChatContentFrameKey.self) { f in follow(f, viewport: outer.size.height, proxy: proxy) }
                 .onAppear { proxy.scrollTo(Self.endId, anchor: .bottom) }
                 .onChange(of: rows.count) { _, _ in if pinned { scrollToEnd(proxy, animated: false) } }
+                // Run 612: the window shrank or the composer grew; a chat at its end stays there.
+                .onChange(of: outer.size) { _, _ in if pinned { scrollToEnd(proxy, animated: false) } }
                 .onChange(of: state.busy) { _, busy in if busy { pinned = true; scrollToEnd(proxy, animated: true) } }
                 .overlay(alignment: .bottom) {
                     if showJump {
@@ -160,25 +164,46 @@ struct ChatTranscriptView: View {
     private func follow(_ f: CGRect, viewport: CGFloat, proxy: ScrollViewProxy) {
         let distance = f.maxY - viewport
         let moved = abs(f.minY - lastFrame.minY) > 0.5
-        let grew = abs(f.height - lastFrame.height) > 0.5
+        // Real growth (new text), or a new width (the rows re-wrapped: a resize): the lazy stack re-estimating rows makes the
+        // height wobble both ways at one width, which alone must not scroll (runs 595/604).
+        let grew = f.height > lastFrame.height + 0.5 || abs(f.width - lastFrame.width) > 0.5
         lastFrame = f
         if moved {
             let p = distance < 48
             if p != pinned { pinned = p }
+        } else if grew, pinned, distance > 1, followPending {
+            scrollAgain = true
         } else if grew, pinned, distance > 1 {
-            // Only when the new text pushed the end out of view, so a scroll can't feed itself.
-            DispatchQueue.main.async { proxy.scrollTo(Self.endId, anchor: .bottom) }
+            // Only when the new text pushed the end out of view, and one scroll at a time (runs 595 and 604: a streaming
+            // reply scrolled, re-measured and scrolled again on every frame; the main thread never rested).
+            followPending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                proxy.scrollTo(Self.endId, anchor: .bottom)
+                followPending = false
+                if scrollAgain { scrollAgain = false; scrollToEnd(proxy, animated: false) }
+            }
         }
         let j = !pinned && distance > 120
         if j != showJump { showJump = j }
     }
 
+    /// Coalesced (run 607: a third of the main thread while a reply streamed was these scrolls, one per new row): at most
+    /// one scroll pending, a tenth of a second after the first ask.
+    /// Run 610: a request dropped while one was pending left long chats short of the end (the rows were still being
+    /// laid out), so a request during a pending scroll asks for one more after it; still at most ten a second.
     private func scrollToEnd(_ proxy: ScrollViewProxy, animated: Bool) {
-        DispatchQueue.main.async {
+        guard !followPending else { scrollAgain = true; return }
+        followPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if animated {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.endId, anchor: .bottom) }
             } else {
                 proxy.scrollTo(Self.endId, anchor: .bottom)
+            }
+            followPending = false
+            if scrollAgain {
+                scrollAgain = false
+                scrollToEnd(proxy, animated: false)
             }
         }
     }

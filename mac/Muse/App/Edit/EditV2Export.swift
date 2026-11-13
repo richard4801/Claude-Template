@@ -14,8 +14,11 @@ extension EditV2Engine {
         let output: AVAssetReaderOutput
         let input: AVAssetWriterInput
         let queue: DispatchQueue
-        init(_ output: AVAssetReaderOutput, _ input: AVAssetWriterInput, _ label: String) {
-            self.output = output; self.input = input; queue = DispatchQueue(label: label)
+        /// HDR: every frame is tagged BT.2020 / HLG right before the encoder (what the compositor drew), whatever AVFoundation
+        /// put on it on the way, so VideoToolbox never converts it again.
+        let hdr: Bool
+        init(_ output: AVAssetReaderOutput, _ input: AVAssetWriterInput, _ label: String, hdr: Bool = false) {
+            self.output = output; self.input = input; queue = DispatchQueue(label: label); self.hdr = hdr
         }
         func run(onSample: @escaping @Sendable (CMTime) -> Void) async {
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -24,6 +27,11 @@ extension EditV2Engine {
                     while input.isReadyForMoreMediaData && !done {
                         if let sb = output.copyNextSampleBuffer() {
                             onSample(CMSampleBufferGetPresentationTimeStamp(sb))
+                            if hdr, let pb = CMSampleBufferGetImageBuffer(sb) {
+                                EditV2HDRTrace.writer(pb, own: EditV2Scene.tags(of: pb), at: CMSampleBufferGetPresentationTimeStamp(sb).seconds)
+                                CVBufferRemoveAttachment(pb, kCVImageBufferCGColorSpaceKey)
+                                EditV2Scene.stamp(pb, EditV2.HDRColor.output)
+                            }
                             if !input.append(sb) { done = true; input.markAsFinished(); cont.resume(); return }
                         } else {
                             done = true
@@ -53,7 +61,7 @@ extension EditV2Engine {
     }
 
     static func write(_ built: Built, to url: URL, audioOnly: Bool = false, hevc: Bool = false, bitrate: Double = 16e6, hdr: Bool = false,
-                      aiLabel: Bool = false, progress: @escaping @MainActor (Double) -> Void) async throws {
+                      dolbyVision: Bool = true, aiLabel: Bool = false, progress: @escaping @MainActor (Double) -> Void) async throws {
         try? FileManager.default.removeItem(at: url)
         let asset = built.composition
         let total = max(0.1, built.plan.durationSec)
@@ -76,6 +84,11 @@ extension EditV2Engine {
                                         AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height)]
             if hdr {
                 compression[AVVideoProfileLevelKey] = kVTProfileLevel_HEVC_Main10_AutoLevel as String
+                // Dolby Vision (owner 2026-11-12: kept, on by default): VideoToolbox adds the 8.4 RPU to HLG by itself;
+                // the export option's Off writes plain HLG.
+                if !dolbyVision {
+                    compression[kVTCompressionPropertyKey_HDRMetadataInsertionMode as String] = kVTHDRMetadataInsertionMode_None as String
+                }
                 video[AVVideoColorPropertiesKey] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
                                                     AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_2100_HLG,
                                                     AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020]
@@ -85,7 +98,7 @@ extension EditV2Engine {
             vIn.expectsMediaDataInRealTime = false
             guard writer.canAdd(vIn) else { throw ApiError("edit_export_failed", "This Mac can't encode this video") }
             writer.add(vIn)
-            pumps.append(Pump(vOut, vIn, "studio.muse.edit.export.video"))
+            pumps.append(Pump(vOut, vIn, "studio.muse.edit.export.video", hdr: hdr))
         }
 
         let aTracks = try await asset.loadTracks(withMediaType: .audio)

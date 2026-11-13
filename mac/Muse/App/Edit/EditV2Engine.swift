@@ -282,14 +282,24 @@ enum EditV2Engine {
             mix = m
         }
 
+        // HDR round 5: SDR-only edits compose in BT.709, so AVFoundation hands the compositor the decoder's frames untouched
+        // and the compositor alone places them in HLG; with an HDR source, BT.2020 / HLG (EditV2.HDRColor.compositionSpace).
+        let composition = EditV2.HDRColor.compositionSpace(sources.media.values.filter { $0.videoTrack != nil }.map(\.colorTags))
         let scene = EditV2Scene(project: project, plan: plan, laneTracks: trackIds, matteTracks: matteIds, matted: matted, sources: sources,
-                                burnCaptions: burnCaptions, hdr: hdr, layerTracks: layerIds)
+                                burnCaptions: burnCaptions, hdr: hdr, layerTracks: layerIds, composition: composition)
         let vc = AVMutableVideoComposition()
         vc.customVideoCompositorClass = hdr ? EditV2HDRCompositor.self : EditV2Compositor.self
         if hdr {
-            vc.colorPrimaries = AVVideoColorPrimaries_ITU_R_2020
-            vc.colorTransferFunction = AVVideoTransferFunction_ITU_R_2100_HLG
-            vc.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_2020
+            if composition == EditV2.HDRColor.output {
+                vc.colorPrimaries = AVVideoColorPrimaries_ITU_R_2020
+                vc.colorTransferFunction = AVVideoTransferFunction_ITU_R_2100_HLG
+                vc.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_2020
+            } else {
+                vc.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+                vc.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+                vc.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+            }
+            EditV2HDRTrace.note("composition \(composition.primaries ?? "-")/\(composition.transfer ?? "-")/\(composition.matrix ?? "-")")
         }
         // A zero or odd render size makes AVFoundation refuse (or raise on) the video composition.
         vc.renderSize = CGSize(width: max(2, plan.width / 2 * 2), height: max(2, plan.height / 2 * 2))

@@ -50,6 +50,8 @@ export const editSessions = pgTable('edit_sessions', {
   status: text('status').notNull().$type<'open' | 'closed'>().default('open'),
   /** Paid AI helpers Claude asked for, waiting for the owner in the app. */
   pending: jsonb('pending').$type<Record<string, unknown>[]>().notNull().default([]),
+  /** Where the editor was left (migration 0035): playhead, zoom, tabs, platform view, title, `at` (ms). Not history. */
+  view: jsonb('view').$type<Record<string, unknown>>(),
   updatedBy: text('updated_by').notNull(),
   createdAt: ms('created_at').notNull(),
   updatedAt: ms('updated_at').notNull(),

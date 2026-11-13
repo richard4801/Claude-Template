@@ -176,6 +176,7 @@ struct EditSuiteTimeline: View {
 /// The time-scaled part of the timeline (inside the horizontal scroll view).
 struct TimelineCanvas: View {
     @Environment(\.theme) private var t
+    @Environment(AppStore.self) private var store
     @Bindable var session: EditSuiteSession
     var lanes: [Lane]
     @State private var drag: DragState?
@@ -284,6 +285,37 @@ struct TimelineCanvas: View {
         }
         .frame(width: width, alignment: .leading)
         .overlay(alignment: .topLeading) { playhead }
+        // A tile from Takes or Uploads dropped here (owner, 2026-11-12): placed at that time, on that row.
+        .dropDestination(for: String.self) { items, loc in
+            guard let raw = items.first, let d = BinDrag.parse(raw) else { return false }
+            let at = Double(max(0, loc.x) / max(z, 0.0001))
+            let lane = Self.laneKind(atY: loc.y, lanes: lanes)
+            if d.take {
+                guard let tk = store.takes.first(where: { $0.id == d.id }) else { return false }
+                session.placeTake(tk, at: at, lane: lane)
+            } else {
+                session.placeUpload(d.id, at: at, lane: lane)
+            }
+            return true
+        }
+    }
+
+    /// The row under `y` (canvas coordinates): its track kind; the ruler, the Captions lane and below the rows give nil,
+    /// and the main video's Sound lane counts as the main row.
+    static func laneKind(atY y: CGFloat, lanes: [Lane]) -> EditV2.TrackKind? {
+        var top = rulerHeight + 1
+        for l in lanes {
+            let h = laneHeight(l)
+            if y >= top, y < top + h {
+                switch l {
+                case .track(let r): return r.kind
+                case .sound: return .main
+                case .noCaptions: return nil
+                }
+            }
+            top += h + 1
+        }
+        return nil
     }
 
     // MARK: Ruler and playhead
@@ -448,6 +480,22 @@ struct TimelineCanvas: View {
             if !locked { session.view { $0.selection = id } }
         }
         .gesture(moveGesture(b, row: row, locked: locked))
+        .overlay(alignment: .bottomLeading) {
+            // Continue a draft: the clip's file is gone (a deleted take, a lost upload). The edit still opens; this says why
+            // the clip shows nothing.
+            if let id = b.itemId, isMissing(row.trackId, id) {
+                HStack(spacing: Space.s1) {
+                    Ph("warning", 12)
+                    if w >= 64 { Text("Missing").font(t.scale.micro.font).lineLimit(1) }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, Space.s1 + 2).padding(.vertical, 2)
+                .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .offset(x: x + 4, y: 2)
+                .help("This clip's file is missing")
+                .accessibilityHidden(true)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if let id = b.itemId, let badge = MaskBadge(session.project.track(row.trackId)?.item(id)), w >= 36 {
                 maskBadge(badge, itemId: id, locked: locked).offset(x: x, y: 6)
@@ -467,9 +515,16 @@ struct TimelineCanvas: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.label): \(b.label)\(b.itemId.flatMap { MaskBadge(session.project.track(row.trackId)?.item($0)) }.map { ", \($0.text)" } ?? "")")
+        .accessibilityLabel("\(row.label): \(b.label)\(b.itemId.flatMap { MaskBadge(session.project.track(row.trackId)?.item($0)) }.map { ", \($0.text)" } ?? "")\(b.itemId.map { isMissing(row.trackId, $0) } == true ? ", file missing" : "")")
         .accessibilityValue("\(EditSuite.clockTenths(b.startSec)) to \(EditSuite.clockTenths(b.endSec))")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// The item's file isn't on this Mac and couldn't be fetched (continue a draft).
+    private func isMissing(_ trackId: String, _ itemId: String) -> Bool {
+        guard !session.missing.isEmpty, let it = session.project.track(trackId)?.item(itemId),
+              let asset = it.videoClip?.asset ?? it.imageItem?.asset ?? it.audioClip?.asset else { return false }
+        return session.missing.contains(asset)
     }
 
     /// A clip's mask, Invert, green-screen key or cut-out, which can hide most of the picture without showing on the

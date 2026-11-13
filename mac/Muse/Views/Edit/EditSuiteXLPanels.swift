@@ -123,20 +123,3 @@ struct CutoutRow: View {
         }
     }
 }
-
-/// Stickers → "Cut out a picture…": a photo from this Mac, cut out and added at the playhead.
-struct CutoutPictureButton: View {
-    @Bindable var session: EditSuiteSession
-
-    var body: some View {
-        SuiteToolButton(title: session.isRunning(.cutout) ? "Cutting out…" : "Cut out a picture…", icon: "scissors", disabled: session.isRunning(.cutout)) {
-            let panel = NSOpenPanel()
-            panel.allowedContentTypes = [.png, .jpeg, .heic, .webP]
-            panel.allowsMultipleSelection = false
-            panel.message = "Choose a photo to cut out"
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            Task { await session.cutoutPicture(url) }
-        }
-        .help("The person in the photo, on a clear background, at the playhead")
-    }
-}

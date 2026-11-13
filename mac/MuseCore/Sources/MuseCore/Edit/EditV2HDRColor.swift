@@ -35,6 +35,19 @@ public extension EditV2 {
         public static let sdrDefault = Tags(primaries: bt709, transfer: bt709, matrix: bt709)
         /// What every HDR output frame is, and what the file says it is.
         public static let output = Tags(primaries: bt2020, transfer: hlg, matrix: bt2020)
+        public static let pq = "SMPTE_ST_2084_PQ"
+
+        /// Whether a source track is HDR (HLG or PQ).
+        public static func isHDR(_ t: Tags?) -> Bool { t?.transfer == hlg || t?.transfer == pq }
+
+        /// Round 5 (Mac run 587): the colour space the HDR export's video composition works in. With it set to BT.2020 / HLG,
+        /// AVFoundation itself converted every SDR source frame to HLG before the compositor saw it, and converted the first
+        /// one differently (3 hot frames at 60 fps). So: every source SDR → BT.709, AVFoundation converts nothing and the
+        /// compositor places SDR in HLG itself, the same way on every frame. Any HDR source → BT.2020 / HLG as before (its
+        /// highlights must not be tone-mapped to SDR first).
+        public static func compositionSpace(_ sources: [Tags]) -> Tags {
+            sources.contains(where: isHDR) ? output : sdrDefault
+        }
 
         /// The colour a source frame is read with. A frame with complete tags keeps them (they describe its pixels);
         /// otherwise the source track's complete tags; otherwise BT.709 SDR. Never a mix of a frame's partial tags and
@@ -45,6 +58,24 @@ public extension EditV2 {
             if frame.isComplete { base = frame } else if let track, track.isComplete { base = track } else { base = sdrDefault }
             let matrix = base.matrix ?? frame.matrix ?? track?.matrix ?? sdrDefault.matrix
             return Tags(primaries: base.primaries, transfer: base.transfer, matrix: matrix)
+        }
+
+        /// The colour space a source track's frames are in: its own complete tags, else BT.709 SDR (matrix filled in).
+        public static func trackSpace(_ track: Tags?) -> Tags {
+            resolve(frame: Tags(), track: track)
+        }
+
+        /// Round 2 (owner 2026-11-12, build 582: still orange at the START). A frame's own tags are trusted only when they
+        /// describe one of the two spaces the frame can really be in: its track's (decoded as is) or the composition's
+        /// (converted by AVFoundation). Anything else (missing, partial, or a mix such as BT.2020 primaries with an SDR
+        /// curve, which reads BT.709 colour as BT.2020: orange skin) is read as the track's space.
+        public static func resolve(frame: Tags, track: Tags?, composition: Tags) -> Tags {
+            let space = trackSpace(track)
+            func same(_ a: Tags, _ b: Tags) -> Bool { a.primaries == b.primaries && a.transfer == b.transfer }
+            guard frame.isComplete else { return space }
+            if same(frame, space) { return Tags(primaries: space.primaries, transfer: space.transfer, matrix: frame.matrix ?? space.matrix) }
+            if same(frame, composition) { return Tags(primaries: frame.primaries, transfer: frame.transfer, matrix: frame.matrix ?? composition.matrix) }
+            return space
         }
 
         // MARK: Maths (BT.709, BT.2020, BT.2100 HLG, BT.2408 SDR placement)
