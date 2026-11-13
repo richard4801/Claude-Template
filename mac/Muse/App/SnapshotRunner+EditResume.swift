@@ -54,6 +54,16 @@ extension SnapshotRunner {
         store.takes.removeAll { $0.id.hasPrefix("rz_") }
         store.takes.insert(contentsOf: made, at: 0)
         await fake.adoptTakes(made)
+        // Sessions earlier checks left open (the rx_* takes, ops_red…) would compete for "last worked on" (runs 604/607: their
+        // views carried later times than this check's). They're closed here so the check is about its own edit; whether any of
+        // them is still stamped while this check runs (a background save after its editor closed) is reported at the end.
+        let started = Date().timeIntervalSince1970 * 1000
+        let leftovers = (try? await fake.recentEditSessions(limit: 50)) ?? []
+        for s in leftovers { try? await fake.closeEditSession(id: s.id) }
+        try? FileManager.default.removeItem(at: EditRecentStore.standard.file)
+        note("NOTE closed \(leftovers.count) edit sessions left open by earlier checks: " +
+             leftovers.prefix(8).map { "\($0.takeId) view \($0.view?.at.map { String(Int64($0)) } ?? "-") updated \(Int64($0.updatedAt ?? 0))" }.joined(separator: ", ") +
+             " (this check started \(Int64(started)))")
 
         // 1. Open a take, move the editor, leave Edit.
         note("START open_and_move")
@@ -69,7 +79,9 @@ extension SnapshotRunner {
         check("session_shared", sid != nil, "no edit session")
         store.go(.home)
         try? await Task.sleep(for: .seconds(1.5))
+        var ourAt: Double?
         if let sid, let s = try? await fake.editSession(id: sid) {
+            ourAt = s.view?.at
             check("view_on_server", s.view?.zoom == 150 && s.view?.binTab == "uploads" && s.view?.safeArea == "off",
                   "server view \(String(describing: s.view))")
         } else { note("FAIL view_on_server: session not readable") }
@@ -81,8 +93,8 @@ extension SnapshotRunner {
         check("no_auto_open", store.suite.editCurrent == nil, "an editor opened by itself on \(store.suite.editCurrent?.take.id ?? "?")")
         let draft = store.suite.recentEdits.first
         check("choice_continue_draft", draft?.takeId == "rz_resume" && draft?.title == "Beach walk",
-              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing"); order: " +
-              store.suite.recentEdits.prefix(4).map { "\($0.takeId) at \(Int64($0.lastEditedAt)) view \($0.view?.at.map { String(Int64($0)) } ?? "-")" }.joined(separator: ", "))
+              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing"); " +
+              "ours (rz_resume) view \(ourAt.map { String(Int64($0)) } ?? "-"); order: " + store.suite.recentEdits.prefix(4).map { "\($0.takeId) at \(Int64($0.lastEditedAt)) view \($0.view?.at.map { String(Int64($0)) } ?? "-")" }.joined(separator: ", "))
         capture(dir.appendingPathComponent("mac_a_edit_choice.png"))
         note("START reopen_last")
         if let draft { store.suite.editResume = draft }
@@ -147,6 +159,12 @@ extension SnapshotRunner {
         store.go(.home)
         try? await Task.sleep(for: .seconds(1))
         store.takes.removeAll { $0.id.hasPrefix("rz_") }
+        // A closed editor must not keep saving its view: an earlier check's session stamped after this check started is one.
+        var late: [String] = []
+        for old in leftovers {
+            if let v = (try? await fake.editSession(id: old.id))?.view?.at, v > started, v != old.view?.at { late.append("\(old.takeId) at \(Int64(v))") }
+        }
+        check("no_late_views", late.isEmpty, "views saved after their editor closed: \(late.joined(separator: ", ")) (check started \(Int64(started)))")
         note("ALL DONE")
     }
 }
