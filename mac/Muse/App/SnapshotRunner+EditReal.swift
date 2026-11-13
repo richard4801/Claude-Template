@@ -114,12 +114,14 @@ extension SnapshotRunner {
 
         // 4. Idle after a 15 s settle. The owner's build sat at ~80 % here.
         try? await Task.sleep(for: .seconds(15))
+        let rebuilds0 = s.rebuildCount
         let idleSample = dir.appendingPathComponent("edit-real-idle-sample.txt")
         async let sampledIdle: Void = sampleApp(to: idleSample, seconds: 5)
         let idle = await cpuPercent(over: 20)
         _ = await sampledIdle
         line(idle <= 25, "idle CPU with the real edit open", String(format: "%.0f %% of one core over 20 s after a 15 s settle (fails above 25 %%); ", idle)
              + systemLoad())
+        line(s.rebuildCount == rebuilds0, "no player rebuilds while idle", "\(s.rebuildCount - rebuilds0) rebuilds in 20 s idle (\(rebuilds0) since open)")
         frames("idle", idleSample)
 
         // 5. Playback: the playhead keeps time, and what it costs.

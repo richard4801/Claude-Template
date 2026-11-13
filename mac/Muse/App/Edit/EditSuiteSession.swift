@@ -37,6 +37,8 @@ final class EditSuiteSession {
     private(set) var loadWasCancelled = false
     /// close() ran: a load still running (it outlives the view) starts nothing live after it.
     @ObservationIgnored private(set) var closed = false
+    /// How many times the player item was asked to rebuild (the real-media review check: none while idle).
+    @ObservationIgnored private(set) var rebuildCount = 0
     /// Face framing found per source moment ("asset@tenths"): nil when there is no face.
     @ObservationIgnored private var faceCache: [String: Double?] = [:]
     /// The editor state. Change it through `edit` so the preview follows.
@@ -391,6 +393,7 @@ final class EditSuiteSession {
 
     /// Rebuilds the player item after a change (debounced), keeping the playhead.
     func rebuild(immediately: Bool = false) {
+        rebuildCount += 1
         buildTask?.cancel()
         let p = project
         let wanted = files
