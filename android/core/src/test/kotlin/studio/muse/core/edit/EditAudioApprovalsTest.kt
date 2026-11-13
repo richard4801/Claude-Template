@@ -45,6 +45,10 @@ class EditAudioApprovalsTest {
     @Test fun anUnreadableFileSaysWhyInOnePlainLine() {
         assertNull(MediaSniff.verdict(MediaSniff.Format.Unknown, "pdf"))
         assertNull("an .mp3 with no MPEG audio inside", MediaSniff.verdict(MediaSniff.Format.Unknown, "mp3"))
+        assertNull("a name alone never makes a file usable (Mac run 617)", MediaSniff.verdict(MediaSniff.format("not a video".toByteArray()), "mp4"))
+        assertNull(MediaSniff.verdict(MediaSniff.Format.Unknown, "mov", hasVideo = false, hasAudio = false))
+        assertEquals("video/quicktime", MediaSniff.verdict(MediaSniff.Format.Unknown, "mov", hasVideo = true)?.contentType)
+        assertEquals(MediaSniff.Format.IsoMedia("qt  "), MediaSniff.format(bytes(0, 0, 0, 8, *ascii("wide"))))
         assertEquals("This file has no video or sound MUSE can read.", MediaSniff.UNREADABLE)
         assertFalse(MediaSniff.UNREADABLE.contains("·"))
     }

@@ -841,7 +841,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         val fmt = MediaSniff.format(head)
         var hasVideo: Boolean? = null
         var hasAudio: Boolean? = null
-        if (fmt is MediaSniff.Format.IsoMedia) runCatching {
+        // A container, or bytes that say nothing (then only real tracks make it usable, never the name).
+        if (fmt is MediaSniff.Format.IsoMedia || fmt == MediaSniff.Format.Unknown) runCatching {
             val x = android.media.MediaExtractor()
             try {
                 x.setDataSource(f.absolutePath)

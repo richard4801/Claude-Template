@@ -82,6 +82,23 @@ class FakeClaudeApi(
 
     override suspend fun newThread(contextKind: String, contextId: String): ClaudeThread = thread(contextKind, contextId, new = true)
 
+    // Model and effort (demo): the server's list in short; a chat's picks are kept on the thread.
+    @Volatile private var lastEffort: String? = null
+    override suspend fun claudeModels() = ClaudeModelList(listOf(
+        ClaudeModelInfo("claude-opus-5-5", "Claude Opus 5.5", "Steady", "Standard cost", "Most work", ClaudeEffort.ALL, "medium"),
+        ClaudeModelInfo("claude-sonnet-5-5", "Claude Sonnet 5.5", "Fast", "About half of Opus", "Everyday questions", ClaudeEffort.ALL, "high"),
+        ClaudeModelInfo("claude-haiku-5-5", "Claude Haiku 5.5", "Fastest", "Lowest cost", "Short answers", ClaudeEffort.ALL, "medium"),
+    ), default = null, studioDefault = "claude-opus-5-5", defaultEffort = lastEffort)
+    override suspend fun setChatModel(id: String, model: String?) = setOnThread(id) { it.copy(model = model) }
+    override suspend fun setChatEffort(id: String, effort: String?) { if (effort != null) lastEffort = effort; setOnThread(id) { it.copy(effort = effort) } }
+    private suspend fun setOnThread(id: String, f: (ClaudeThread) -> ClaudeThread) {
+        val t = lock.withLock {
+            val i = threads.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "No such thread")
+            f(threads[i]).also { threads[i] = it }
+        }
+        live(ClaudeLive("thread", thread = t))
+    }
+
     override suspend fun renameThread(id: String, title: String): ClaudeThread {
         val t = lock.withLock {
             val i = threads.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "No such thread")

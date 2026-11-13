@@ -716,7 +716,8 @@ fun MuseMenu(expanded: Boolean, onDismiss: () -> Unit, items: List<MenuItem>) {
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     val c = if (it.danger) Color(0xFFC2362B) else m.t.ink
-                    Ic(it.icon, 18.dp, c)
+                    // "" = no icon (a picker list: only the chosen row has its check); the labels still line up.
+                    if (it.icon.isNotEmpty()) Ic(it.icon, 18.dp, c) else Spacer(Modifier.width(18.dp))
                     T(it.label, m.type.menu, c, upper = m.isA)
                 }
             }

@@ -69,7 +69,19 @@ data class ClaudeThread(
     val createdAt: Long = 0, val updatedAt: Long = 0, val messages: List<ClaudeMessage>? = null, val activeTurn: ClaudeTurn? = null,
     /** WS18: the list of chats it belongs to (`suite:photo`, `recreate:rx_1`…), its name (the owner's or its first words) and, in a list, its message count. */
     val contextKey: String? = null, val title: String? = null, val messageCount: Int? = null,
+    /** The chat's own Claude model and effort level (null: the person's default model; their last effort, else the model's). */
+    val model: String? = null, val effort: String? = null,
 )
+
+/** GET /v1/claude/models: a Claude model anyone can pick, with the effort levels it takes (empty: none) and its own default. */
+@Serializable
+data class ClaudeModelInfo(val id: String, val name: String = "", val speed: String = "", val cost: String = "", val good: String = "",
+    val efforts: List<String> = emptyList(), val defaultEffort: String? = null)
+
+/** The models, this person's default model (null: the studio's) and their last effort choice. */
+@Serializable
+data class ClaudeModelList(val models: List<ClaudeModelInfo> = emptyList(), val default: String? = null, val studioDefault: String? = null,
+    val defaultEffort: String? = null)
 
 /** GET /v1/claude/threads?key= (WS18): one place's chats, newest first. */
 @Serializable
@@ -168,6 +180,12 @@ interface ClaudeApi {
     /** Cards: Approve / Decline on a gated action's card; Undo on one row of "What I changed". */
     suspend fun answerAction(id: String, approve: Boolean): String = throw ApiException("not_found", "This server can't answer Claude's actions yet")
     suspend fun undoCardRow(messageId: String, row: Int): Unit = throw ApiException("not_found", "This server can't undo from the chat yet")
+    /** The Claude models to pick from (an older server has none: the picker hides). */
+    suspend fun claudeModels(): ClaudeModelList = throw ApiException("not_found", "This server has no model choice yet")
+    /** PATCH /v1/claude/chats/{id}: the chat's model (null: the person's default). */
+    suspend fun setChatModel(id: String, model: String?): Unit = throw ApiException("not_found", "This server has no model choice yet")
+    /** The chat's effort level (null: the last choice, else the model's default). A pick is also the person's last choice. */
+    suspend fun setChatEffort(id: String, effort: String?): Unit = throw ApiException("not_found", "This server has no effort choice yet")
 
     object Unsupported : ClaudeApi {
         private fun no(): Nothing = throw ApiException("unsupported", "Claude chat needs the studio server")
@@ -265,6 +283,15 @@ class HttpClaudeApi(baseUrl: String, private val client: OkHttpClient, private v
         call("PATCH", "v1/claude/threads/${enc(id)}", json.encodeToString(TitleBody.serializer(), TitleBody(title)), ClaudeThread.serializer())
     override suspend fun deleteThread(id: String) {
         val a = raw("DELETE", "v1/claude/threads/${enc(id)}", null)
+        if (a.code !in 200..299) throw errorOf(a.code, a.text)
+    }
+    override suspend fun claudeModels() = call("GET", "v1/claude/models", null, ClaudeModelList.serializer())
+    override suspend fun setChatModel(id: String, model: String?) = patchChat(id, "model", model)
+    override suspend fun setChatEffort(id: String, effort: String?) = patchChat(id, "effort", effort)
+    /** `null` is sent as JSON null (it clears the chat's own choice). */
+    private suspend fun patchChat(id: String, key: String, value: String?) {
+        val body = JsonObject(mapOf(key to (value?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull))).toString()
+        val a = raw("PATCH", "v1/claude/chats/${enc(id)}", body)
         if (a.code !in 200..299) throw errorOf(a.code, a.text)
     }
 

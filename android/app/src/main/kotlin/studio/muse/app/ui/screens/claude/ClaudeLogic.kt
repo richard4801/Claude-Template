@@ -127,7 +127,11 @@ data class ClaudeChatUi(
     /** WS18: this place's chats, newest first; [sessions] once the server answered with a list. */
     val threads: List<ClaudeThread> = emptyList(),
     val sessions: Boolean = false,
+    /** The Claude models to pick from (null: not loaded, or an older server: the model and effort chips hide). */
+    val models: studio.muse.app.data.ClaudeModelList? = null,
 ) {
+    /** The open chat's model and effort (effort only with the levels its model takes). */
+    val choice get() = studio.muse.app.data.ClaudeModelChoice.of(models, thread)
     val busy get() = turn?.active == true
     /** Attaching images: not in Camera stage yet (the server refuses them there). */
     val canAttach get() = contextKind != "camera"
