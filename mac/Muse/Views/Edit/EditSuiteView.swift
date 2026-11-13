@@ -393,6 +393,8 @@ struct EditSuiteEditor: View {
             if SnapshotRunner.state.claudeTab != nil { showClaude = true }
             reportClaudePage()
         }
+        // Review mode (big edit check): the panel opened on an editor that is already up.
+        .onChange(of: SnapshotRunner.state.claudeTab) { _, tab in if tab != nil { showClaude = true } }
         // One Claude: Claude sees this edit (its take and live session).
         .onChange(of: session.liveConnected) { _, _ in reportClaudePage() }
         .onDisappear { store.oneClaude.viewPage = nil }

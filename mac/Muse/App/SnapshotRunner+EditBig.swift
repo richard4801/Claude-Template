@@ -82,6 +82,48 @@ extension SnapshotRunner {
         for f in mainThreadTop(sampleFile, count: 25) { lines.append("INFO   main: " + f) }
         write()
 
+        // 4b. Coordinator, run 604: the owner's 99.7 % came with Claude working, its reply streaming in Edit's Claude panel
+        // (runs 595 and 604 hung on a streaming chat: the transcript's follow-scroll fed itself). Claude's panel streams a
+        // reply over the big edit for about 10 s while it plays: FAIL above 60 % of one core or if the playhead lags.
+        let service = ClaudeCodeService.shared
+        if service.configured, service.isDemo {
+            state.claudeTab = 0
+            defer { state.claudeTab = nil }
+            try? await Task.sleep(for: .seconds(2))
+            let delay = ClaudeCodeService.demoLineDelay
+            ClaudeCodeService.demoLineDelay = 0.6
+            defer { ClaudeCodeService.demoLineDelay = delay }
+            if let d = try? await service.openThread(contextKind: "edit", contextId: es.id) {
+                service.send(threadId: d.thread.id, text: "Tighten the cuts so every shot lands on the beat")
+                var running = false
+                for _ in 0..<40 where !running {
+                    try? await Task.sleep(for: .seconds(0.1))
+                    running = service.isRunning(threadId: d.thread.id)
+                }
+                let streamSample = dir.appendingPathComponent("edit-big-stream-sample.txt")
+                let p0 = s.playhead, t0 = Date()
+                s.play(rate: 1)
+                async let sampledStream: Void = sampleApp(to: streamSample, seconds: 4)
+                let cpu = await cpuPercent(over: 10)
+                _ = await sampledStream
+                let advanced = s.playhead - p0, wall = Date().timeIntervalSince(t0)
+                let still = service.isRunning(threadId: d.thread.id)
+                s.pause()
+                capture(dir.appendingPathComponent("mac_edit_big_streaming.png"))
+                line(running && cpu <= 60 && advanced >= wall * 0.8 - 1, "CPU while Claude's reply streams in Edit",
+                     String(format: "%.0f %% of one core over 10 s (fails above 60 %%), playhead +%.1f s in %.1f s, ", cpu, advanced, wall)
+                     + "reply streaming at start \(running), still at the end \(still)")
+                for f in mainThreadTop(streamSample, count: 25) { lines.append("INFO   main (streaming): " + f) }
+                write()
+                for _ in 0..<100 where service.isRunning(threadId: d.thread.id) { try? await Task.sleep(for: .seconds(0.1)) }
+            } else {
+                line(false, "CPU while Claude's reply streams in Edit", "the edit's Claude thread didn't open")
+            }
+            s.seek(0)
+        } else {
+            line(false, "CPU while Claude's reply streams in Edit", "demo Claude not configured (configured \(service.configured), demo \(service.isDemo))")
+        }
+
         // 5. Playback advances, and what it costs.
         let from = s.playhead
         s.play(rate: 1)
