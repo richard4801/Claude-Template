@@ -84,6 +84,22 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     /// The Suite's list key for a draft (set by tests and demo mode as the server reads it from the shared draft).
     public var suiteToolOf: @Sendable (String) async -> String = { _ in "shot" }
 
+    // One Claude's chats, as the server keeps them (bundle-10 run 621: the fake had none, so in demo mode the One Claude
+    // panel never opened a chat and the allow-always walk couldn't start). A chat's thread is contextKind "chat" on its id.
+    private var chatList: [ClaudeChatSummary] = []
+
+    public func chats(query: String?) async throws -> [ClaudeChatSummary] {
+        locked { chatList.sorted { $0.updatedAt > $1.updatedAt } }
+    }
+
+    public func newChat(page: ClaudePage?) async throws -> ClaudeChatSummary {
+        locked {
+            let c = ClaudeChatSummary(id: nextId("cc"), page: page, updatedAt: now())
+            chatList.append(c)
+            return c
+        }
+    }
+
     private func thread(contextKind: String, contextId: String, new: Bool) async throws -> ClaudeThread {
         // "chat": One Claude's own chats, as the server has them (bundle-10 run 620: the allow-always walk couldn't open one).
         guard ["camera", "edit", "recreate", "suite", "chat"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
