@@ -179,6 +179,19 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during the big edit check"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # Owner report ci_83f9d0dcd92f (2026-11-13): a 64 s edit of 20 real 1080p H.264/HEVC files, 67 main clips and 16
+      # overlays. Idle CPU after a 15 s settle (fails above 25 %), playback, idle again; main-thread MUSE frames logged
+      # (SnapshotRunner+EditReal.swift). Fails on any FAIL line or a missing ALL DONE.
+      - name: Real media edit check
+        if: ${{ !cancelled() }}
+        working-directory: mac
+        run: |
+          f=snapshots/edit-real-check.txt
+          if [ ! -f "$f" ]; then echo "no edit-real-check.txt (review mode didn't reach the real media check)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during the real media check"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # Continue a draft (owner 2026-11-12): Edit opens on a choice, New or Continue draft (nothing opens by itself); Continue
       # draft reopens the last edit exactly where it was left (playhead, zoom, tab, Uploads bin, platform view); an edit whose
       # take was deleted opens with its clips marked missing; New starts a blank project (SnapshotRunner+EditResume.swift).

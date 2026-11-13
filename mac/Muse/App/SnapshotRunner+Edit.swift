@@ -105,13 +105,13 @@ extension SnapshotRunner {
     /// A short H.264 MP4: grey frames that change brightness (so strips differ). `rotated` stores it landscape with a 90°
     /// preferredTransform, as some phone files are. `audio` (sample rate, channels) adds an AAC track of a rising tone.
     static func makeVideo(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool = false,
-                          audio: (rate: Double, channels: Int)? = nil) async throws {
+                          audio: (rate: Double, channels: Int)? = nil, codec: AVVideoCodecType = .h264, seed: Int? = nil) async throws {
         try? FileManager.default.removeItem(at: url)
-        guard let audio else { return try await writeFrames(url, seconds: seconds, fps: fps, width: w, height: h, rotated: rotated) }
+        guard let audio else { return try await writeFrames(url, seconds: seconds, fps: fps, width: w, height: h, rotated: rotated, codec: codec, seed: seed) }
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-edit-check", isDirectory: true)
         let silent = tmp.appendingPathComponent("v-\(UUID().uuidString).mp4"), sound = tmp.appendingPathComponent("a-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: silent); try? FileManager.default.removeItem(at: sound) }
-        try await writeFrames(silent, seconds: seconds, fps: fps, width: w, height: h, rotated: rotated)
+        try await writeFrames(silent, seconds: seconds, fps: fps, width: w, height: h, rotated: rotated, codec: codec, seed: seed)
         try writeTone(sound, seconds: seconds, rate: audio.rate, channels: audio.channels)
         // Video and sound into one MP4, as the providers deliver them (no re-encode).
         let comp = AVMutableComposition()
@@ -148,10 +148,11 @@ extension SnapshotRunner {
         try file.write(from: buf)
     }
 
-    static func writeFrames(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool, split: Bool = false) async throws {
+    static func writeFrames(_ url: URL, seconds: Double, fps: Int32, width w: Int, height h: Int, rotated: Bool, split: Bool = false,
+                            codec: AVVideoCodecType = .h264, seed: Int? = nil) async throws {
         try? FileManager.default.removeItem(at: url)
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h])
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: codec, AVVideoWidthKey: w, AVVideoHeightKey: h])
         input.expectsMediaDataInRealTime = false
         if rotated { input.transform = CGAffineTransform(rotationAngle: .pi / 2) }
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
@@ -172,6 +173,10 @@ extension SnapshotRunner {
                 if split {
                     // A matte: the left half white (keep), the right half black.
                     for y in 0..<h { memset(base + y * row, 255, w / 2 * 4); memset(base + y * row + w / 2 * 4, 0, row - w / 2 * 4) }
+                } else if let seed {
+                    // Real-looking footage (the big real-media check): bands that move every frame, different per clip, so
+                    // every frame decodes as real motion, not a near-empty P-frame.
+                    for y in 0..<h { memset(base + y * row, Int32(30 + (y / (6 + seed % 9) * 23 + i * (3 + seed % 5) + seed * 37) % 200), row) }
                 } else {
                     memset(base, Int32(40 + (i * 7) % 180), row * h)
                 }
