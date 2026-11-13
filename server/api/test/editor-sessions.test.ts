@@ -14,6 +14,7 @@ import { EDIT_TOOLS } from '../src/editor/mcpTools.js';
 import * as M from '../src/editor/model.js';
 import { applyOps, OP_NAMES, type EditOp } from '../src/editor/ops.js';
 import { editSessionsOf } from '../src/editor/sessions.js';
+import { editSessions as editSessionsTable } from '../src/editor/schema.js';
 import { repairSourceMatteVersions, stripSourceMattes } from '../src/editor/repair.js';
 import { makeApp, people, until, type Client } from './helpers.js';
 
@@ -139,6 +140,15 @@ describe('edit sessions API and Claude tools', () => {
     expect(recent[0].history).toBeUndefined();
     // Reopening the take's session brings its view back (another device continues where this one left off).
     expect((await owner.req('GET', `/v1/edit-sessions/${s.id}`)).body.view.zoom).toBe(120);
+    // A change that lands later without anyone in the editor (a helper's result, Claude's note) doesn't make an edit the
+    // last one worked on: the blank stays behind the take the person just left (run 604).
+    await new Promise(r => setTimeout(r, 5));
+    const svc = editSessionsOf(a.ctx), row = await svc.row(ownerUser, blank.id);
+    await svc.saveView(ownerUser, blank.id, { view: { playhead: 0 } });
+    await svc.saveView(ownerUser, s.id, { view: { playhead: 2.5, zoom: 120, binTab: 'uploads', safeArea: null } });
+    await svc.log(row, 'Claude looked at the edit');
+    await a.ctx.db.update(editSessionsTable).set({ updatedAt: Date.now() + 60_000 }).where(eq(editSessionsTable.id, blank.id)); // a later change from no one in the editor
+    expect((await owner.req('GET', '/v1/edit-sessions?recent=1')).body[0].id).toBe(s.id);
     // Out-of-range values are clamped; a non-object is refused; members never see sessions.
     expect((await owner.req('POST', `/v1/edit-sessions/${s.id}/view`, { view: { playhead: -4, zoom: 1e9 } })).body.view).toMatchObject({ playhead: 0, zoom: 2000 });
     expect((await owner.req('POST', `/v1/edit-sessions/${s.id}/view`, { view: [1] })).status).toBe(400);

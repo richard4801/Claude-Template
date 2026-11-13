@@ -132,10 +132,10 @@ index e9acc864..c8eb5a43 100644
              if let id = attachSessionId {
 diff --git a/mac/Muse/App/Edit/EditSuiteResume.swift b/mac/Muse/App/Edit/EditSuiteResume.swift
 new file mode 100644
-index 00000000..e3fb6feb
+index 00000000..7bf2e5b0
 --- /dev/null
 +++ b/mac/Muse/App/Edit/EditSuiteResume.swift
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,94 @@
 +import Foundation
 +import MuseCore
 +
@@ -191,6 +191,7 @@ index 00000000..e3fb6feb
 +            seek(state.playhead)
 +        }
 +        lastSentView = nil
++        lastSentProject = nil
 +        viewTracking = true
 +        // The edit is the last one worked on from now (even if nothing changes).
 +        saveViewNow()
@@ -220,17 +221,20 @@ index 00000000..e3fb6feb
 +            recentStore.save(EditLocalDraft(takeId: draftTakeId, sessionId: sid, localId: isBlankStart && sid == nil ? localBlankId : nil,
 +                                            project: keepProject ? project : nil, view: v, title: draftTitle, savedAt: now))
 +        }
-+        guard let sid, lastSentView.map({ !$0.samePlace(v) }) ?? true else { return }
++        // The session's view is also "when the person last worked on it" (Recent edits' order): sent when the place moved or
++        // the edit itself changed, so editing without moving the playhead still counts.
++        guard let sid, lastSentView.map({ !$0.samePlace(v) }) ?? true || lastSentProject != project else { return }
 +        lastSentView = v
++        lastSentProject = project
 +        let api = self.api
 +        Task { try? await api.saveEditSessionView(sessionId: sid, v) }
 +    }
 +}
 diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
-index 318b12aa..76f1357a 100644
+index 318b12aa..dce267d6 100644
 --- a/mac/Muse/App/Edit/EditSuiteSession.swift
 +++ b/mac/Muse/App/Edit/EditSuiteSession.swift
-@@ -33,19 +33,34 @@ final class EditSuiteSession {
+@@ -33,19 +33,35 @@ final class EditSuiteSession {
      /// One Claude: the edit session to join (Claude opened it) instead of opening the take's.
      var attachSessionId: String?
      private(set) var phase: Phase = .loading("Opening the video…")
@@ -262,13 +266,14 @@ index 318b12aa..76f1357a 100644
 +    @ObservationIgnored var viewTracking = false
 +    @ObservationIgnored var viewTask: Task<Void, Never>?
 +    @ObservationIgnored var lastSentView: EditSessionView?
++    @ObservationIgnored var lastSentProject: E.Project?
 +    @ObservationIgnored let recentStore = EditRecentStore.standard
 +    /// A member's blank project kept on this Mac (one id per blank, so two blanks don't overwrite each other).
 +    @ObservationIgnored var localBlankId = UUID().uuidString
      /// Frame strips per video asset (evenly over the whole file) and waveforms per sounding asset (0…1 peaks over the file).
      private(set) var strips: [String: [CGImage]] = [:]
      private(set) var waves: [String: [Float]] = [:]
-@@ -177,11 +192,16 @@ final class EditSuiteSession {
+@@ -177,11 +193,16 @@ final class EditSuiteSession {
      /// Opens the take: a v2 version re-opens its project on its source, a v1 version its edit list (fromV1), anything else
      /// starts fresh on the take's own video.
      func load() async {
@@ -286,7 +291,7 @@ index 318b12aa..76f1357a 100644
                  // "New blank project": nothing on the timeline yet, the default shape (the shape picker changes it).
                  project = E.Project.blank()
              } else if let p2 = take.editsV2, p2.isBlank, take.parentTakeId == nil {
-@@ -223,7 +243,11 @@ final class EditSuiteSession {
+@@ -223,7 +244,11 @@ final class EditSuiteSession {
              refreshMedia()
              refreshLookThumbs()
              if !isBlankStart, let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
@@ -298,7 +303,7 @@ index 318b12aa..76f1357a 100644
          } catch {
              phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
          }
-@@ -250,6 +274,7 @@ final class EditSuiteSession {
+@@ -250,6 +275,7 @@ final class EditSuiteSession {
              guard let link, let url = URL(string: link) else { continue }
              if let local = try? await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id) { files[a.id] = local }
          }
@@ -306,7 +311,7 @@ index 318b12aa..76f1357a 100644
          await ensureContentFonts()
      }
  
-@@ -266,6 +291,10 @@ final class EditSuiteSession {
+@@ -266,6 +292,10 @@ final class EditSuiteSession {
      }
  
      func close() {
@@ -317,7 +322,7 @@ index 318b12aa..76f1357a 100644
          stopLive()
          player.pause()
          player.replaceCurrentItem(with: nil)
-@@ -293,7 +322,7 @@ final class EditSuiteSession {
+@@ -293,7 +323,7 @@ final class EditSuiteSession {
          playhead = state.playhead
          // Mac Edit audit: a change the server would refuse is not made; say why instead of silently doing nothing.
          if !ok, let r = state.lastRefusal { lastError = Self.refusalText(r) }
@@ -326,7 +331,7 @@ index 318b12aa..76f1357a 100644
          return ok
      }
  
-@@ -326,12 +355,13 @@ final class EditSuiteSession {
+@@ -326,12 +356,13 @@ final class EditSuiteSession {
      }
  
      /// View-only changes (selection, zoom, tabs, snapping…).
@@ -341,7 +346,7 @@ index 318b12aa..76f1357a 100644
          Task { await ensureFiles(); rebuild(); refreshMedia() }
          if !applyingRemote { liveLocalChange() }
      }
-@@ -427,6 +457,7 @@ final class EditSuiteSession {
+@@ -427,6 +458,7 @@ final class EditSuiteSession {
          shuttle = 0
          playing = false
          state.playhead = playhead
@@ -349,7 +354,7 @@ index 318b12aa..76f1357a 100644
      }
  
      /// J / K / L: back faster, stop, forward faster (1×, 2×, 4×).
-@@ -452,12 +483,14 @@ final class EditSuiteSession {
+@@ -452,12 +484,14 @@ final class EditSuiteSession {
          playhead = v
          state.playhead = v
          player.seek(to: CMTime(seconds: v, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -366,10 +371,10 @@ index 318b12aa..76f1357a 100644
      func step(_ dir: Int) {
 diff --git a/mac/Muse/App/SnapshotRunner+EditResume.swift b/mac/Muse/App/SnapshotRunner+EditResume.swift
 new file mode 100644
-index 00000000..ba935908
+index 00000000..b15960c3
 --- /dev/null
 +++ b/mac/Muse/App/SnapshotRunner+EditResume.swift
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,152 @@
 +import AppKit
 +import MuseCore
 +
@@ -453,7 +458,8 @@ index 00000000..ba935908
 +        check("no_auto_open", store.suite.editCurrent == nil, "an editor opened by itself on \(store.suite.editCurrent?.take.id ?? "?")")
 +        let draft = store.suite.recentEdits.first
 +        check("choice_continue_draft", draft?.takeId == "rz_resume" && draft?.title == "Beach walk",
-+              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing")")
++              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing"); order: " +
++              store.suite.recentEdits.prefix(4).map { "\($0.takeId) at \(Int64($0.lastEditedAt)) view \($0.view?.at.map { String(Int64($0)) } ?? "-")" }.joined(separator: ", "))
 +        capture(dir.appendingPathComponent("mac_a_edit_choice.png"))
 +        note("START reopen_last")
 +        if let draft { store.suite.editResume = draft }
@@ -834,10 +840,10 @@ index 7d320904..e6ef8fc3 100644
 +}
 diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
 new file mode 100644
-index 00000000..2f143e4d
+index 00000000..16a3961a
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,261 @@
 +import Foundation
 +
 +// Continue a draft (owner, 2026-11-12): clicking Edit reopens the last edit exactly where it was left. The owner's edits live
@@ -1014,7 +1020,9 @@ index 00000000..2f143e4d
 +            let p = try? JSONPatch.decode(EditV2.Project.self, s.project)
 +            // A blank project nothing was added to is not an edit yet ("New edit" pressed and left).
 +            if s.takeId == EditV2.blankSourceId, let p, p.assets.isEmpty { continue }
-+            let at = max(s.lastTouchedAt ?? 0, s.updatedAt ?? 0, s.view?.at ?? 0)
++            // When the person last worked on it: the last saved view; an edit no app has opened (Claude's) by its last change.
++            // A change landing later with no one there (a helper's result, Claude's note) doesn't move it up (run 604).
++            let at = s.view?.at.flatMap { $0 > 0 ? $0 : nil } ?? max(s.lastTouchedAt ?? 0, s.updatedAt ?? 0)
 +            out[s.id] = EditRecentItem(id: s.id, takeId: s.takeId, sessionId: s.id, title: title(view: s.view, takeId: s.takeId, takeTitle: takeTitle),
 +                                       thumbTakeId: thumbTake(takeId: s.takeId, project: p), lastEditedAt: at, view: s.view)
 +        }
@@ -1135,17 +1143,18 @@ index 8c1415cc..8b8c3f2d 100644
  }
  
 diff --git a/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift b/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
-index 95e1975f..0470a658 100644
+index 95e1975f..ac1e93e2 100644
 --- a/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
 +++ b/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
-@@ -216,6 +216,29 @@ extension FakeMuseAPI {
+@@ -216,6 +216,30 @@ extension FakeMuseAPI {
          emitEdit(EditSessionEvent(sessionId: id, op: "closed"))
      }
  
 +    /// Continue a draft: open sessions, the last worked on (changed or left) first, without history.
 +    public func recentEditSessions(limit: Int) throws -> [EditSession] {
 +        try editOwner()
-+        func touched(_ s: EditSession) -> Double { max(s.updatedAt ?? 0, s.view?.at ?? 0) }
++        // Like the server: when the person last worked on it (the view), else its last change.
++        func touched(_ s: EditSession) -> Double { s.view?.at.flatMap { $0 > 0 ? $0 : nil } ?? (s.updatedAt ?? 0) }
 +        return editSessions.values.map(\.session).filter { $0.status == "open" }.sorted { touched($0) > touched($1) }
 +            .prefix(max(1, min(50, limit))).map { s in
 +                var v = view(editSessions[s.id]!, history: false)
@@ -1202,10 +1211,10 @@ index 327a1f46..f3f8cc19 100644
      // AI suite (workstream 1): plans/api.md "AI suite". Implemented in Suite/SuiteHTTP.swift and Suite/FakeMuseAPI+Suite.swift.
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
 new file mode 100644
-index 00000000..9cccf666
+index 00000000..f2fe4f99
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
-@@ -0,0 +1,210 @@
+@@ -0,0 +1,212 @@
 +import XCTest
 +@testable import MuseCore
 +
@@ -1319,16 +1328,18 @@ index 00000000..9cccf666
 +            try session("es_3", takeId: E.blankSourceId, project: blankUsed, updatedAt: 2_000, view: EditSessionView(title: "Promo")),
 +            try session("es_4", takeId: E.blankSourceId, project: blankEmpty, updatedAt: 9_000),
 +            try session("es_5", takeId: "take_a", project: p, updatedAt: 9_500, status: "closed"),
++            // Left at 1 500, then a helper's result landed at 9 000 with no one there: still ranked by when it was left.
++            try session("es_6", takeId: "take_b", project: p, updatedAt: 9_000, view: EditSessionView(at: 1_500)),
 +        ]
 +        let items = EditRecent.items(sessions: sessions, local: [], takeTitle: { titles[$0] })
-+        XCTAssertEqual(items.map(\.id), ["es_2", "es_3", "es_1"])
++        XCTAssertEqual(items.map(\.id), ["es_2", "es_3", "es_6", "es_1"])
 +        XCTAssertEqual(items[0].title, EditRecent.untitled)      // its take is gone: still listed, still opens
 +        XCTAssertEqual(items[1].title, "Promo")
 +        XCTAssertEqual(items[1].thumbTakeId, "take_b")
 +        XCTAssertTrue(items[1].isBlank)
-+        XCTAssertEqual(items[2].title, "Café review")
-+        XCTAssertEqual(items[2].thumbTakeId, "take_a")
-+        XCTAssertEqual(items[2].sessionId, "es_1")
++        XCTAssertEqual(items[3].title, "Café review")
++        XCTAssertEqual(items[3].thumbTakeId, "take_a")
++        XCTAssertEqual(items[3].sessionId, "es_1")
 +    }
 +
 +    func testThisMacsDraftsJoinTheList() throws {

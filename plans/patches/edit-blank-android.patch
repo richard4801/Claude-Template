@@ -1,5 +1,5 @@
 diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
-index 6ca3060a..943f0c61 100644
+index 251e7182..1710c96e 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
 +++ b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
 @@ -42,6 +42,8 @@ import studio.muse.core.edit.Asset as EdAsset // Edit sessions (workstream 3)
@@ -32,7 +32,7 @@ index 6ca3060a..943f0c61 100644
              videoUrl = "file://" + video.file.absolutePath, durationSec = video.durationSec, width = video.width, height = video.height, fps = video.fps,
              name = versionName(name), // Edit sessions (workstream 3)
          )
-@@ -941,7 +950,7 @@ class FakeMuseApi(
+@@ -942,7 +951,7 @@ class FakeMuseApi(
  
      private fun editCheck(p: kotlinx.serialization.json.JsonElement, takeId: String): kotlinx.serialization.json.JsonObject {
          val project = try { EdEditJson.parse(p) } catch (e: Exception) { throw ApiException("bad_request", "project: ${e.message}") }
@@ -41,7 +41,7 @@ index 6ca3060a..943f0c61 100644
          if (project.sourceTakeId != takeId) throw ApiException("bad_request", "project.sourceTakeId: must be the session's take")
          return p as kotlinx.serialization.json.JsonObject
      }
-@@ -963,6 +972,13 @@ class FakeMuseApi(
+@@ -964,6 +973,13 @@ class FakeMuseApi(
      private fun editStale(s: FakeEditSession, base: Int) = ApiException("stale_revision", "The edit moved on (revision ${s.revision}, you sent $base) · get it again and re-apply")
  
      override suspend fun openEditSession(req: OpenEditSessionRequest): EditSessionDto = lock.withLock {
@@ -152,7 +152,7 @@ index 8691f403..b516d1e3 100644
              if (dragBase == null) { dragBase = base; h.apply(next) } else h.amend(next)
          } else if (dragBase != null) { h.amend(next); dragBase = null } else h.apply(next)
 diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
-index 65392675..14749076 100644
+index 4dadfbaf..3d10cb04 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
 +++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
 @@ -129,6 +129,8 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
@@ -238,7 +238,7 @@ index 65392675..14749076 100644
      val ui by vm.controller.ui.collectAsState()
      val soundPlaying by vm.soundPlaying.collectAsState()
      val frames by vm.frames.collectAsState()
-@@ -531,7 +529,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -532,7 +530,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                  if (p == null) return@collect
                  // A take added while editing (an overlay, or a clip at the end): its file first, so the preview and the
                  // export include it (before, only takes in the project when it opened were fetched).
@@ -247,7 +247,7 @@ index 65392675..14749076 100644
                  if (p.assets.any { it.kind == AssetKind.FONT && it.upload?.let(OwnFonts::has) == false }) fetchFonts(p)
                  if (contentMissing(p).isNotEmpty()) ensureContent(p)
                  rebuildPreview(p)
-@@ -573,6 +571,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -574,6 +572,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          work = viewModelScope.launch {
              controller.setPhase(SuitePhase.Loading())
              val takes = c.repo.state.value.takes
@@ -256,7 +256,7 @@ index 65392675..14749076 100644
              val take = takes.firstOrNull { it.id == takeId } ?: run {
                  // Continue a draft: an edit whose take was deleted still opens (its clips read "Missing").
                  if (resume != null && loadWithoutTake(resume)) return@launch
-@@ -593,7 +593,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -594,7 +594,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                      val f = engine.fetchSource(url) { p -> controller.setPhase(SuitePhase.Loading(p)) }
                      sourceFile = f; sourceInfo = engine.probe(f)
                  }
@@ -265,7 +265,7 @@ index 65392675..14749076 100644
                  for (a in project.assets) if (a.take == source.id && a.kind == AssetKind.VIDEO) sourceFile?.let { files[a.id] = it }
                  controller.load(project, source.title, source.id, source.thumb, reopened = take.kind == "edit")
                  // Edit's preview: this project's remembered view (else this device's last), and the server's safe zones.
-@@ -614,6 +614,48 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -615,6 +615,48 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          }
      }
  
@@ -314,7 +314,7 @@ index 65392675..14749076 100644
      /** The project to start from: a saved v2 project, a v1 edit list, or the whole source as one clip. */
      private fun projectFor(source: Take, initial: studio.muse.app.data.EditListDto?): EditProject {
          val info = sourceInfo
-@@ -720,7 +762,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -723,7 +765,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
      private fun playable(p: EditProject): EditProject = playableProject(p, files.keys)
  
      private fun rebuildPreview(p: EditProject) {
@@ -324,7 +324,7 @@ index 65392675..14749076 100644
          val pos = _player.value?.currentPosition ?: (controller.ui.value.playheadSec * 1000).toLong()
          runCatching {
              val plan = composer.plan(playable(p), files)
-@@ -1020,7 +1063,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1023,7 +1066,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
      /** The frame under the playhead, rendered like the export (looks, text, captions), into Pictures/MUSE. */
      fun saveFrame() {
          val p = controller.project ?: return
@@ -333,7 +333,7 @@ index 65392675..14749076 100644
          val t = controller.ui.value.playheadSec
          viewModelScope.launch {
              val png = runCatching {
-@@ -1122,7 +1165,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1125,7 +1168,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
      /** Effect tiles: each effect (at 80 %) on a small frame under the playhead, on the CPU reference (once per editor). */
      fun renderEffectThumbs() {
          if (_fxThumbs.value.isNotEmpty()) return
@@ -342,7 +342,7 @@ index 65392675..14749076 100644
          viewModelScope.launch {
              val frame = runCatching { engine.frames(f, listOf(controller.ui.value.playheadSec.coerceAtLeast(0.1)), 120).firstOrNull() }.getOrNull() ?: return@launch
              val map = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-@@ -1135,7 +1178,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1138,7 +1181,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
      /** Filter thumbnails: every look on the frame under the playhead. */
      fun renderLookThumbs() {
          if (_thumbs.value.isNotEmpty()) return
@@ -351,7 +351,7 @@ index 65392675..14749076 100644
          viewModelScope.launch {
              val frame = runCatching { engine.frames(f, listOf(controller.ui.value.playheadSec.coerceAtLeast(0.1)), 240).firstOrNull() }.getOrNull() ?: return@launch
              val map = runCatching { LookThumbnails.renderPack(frame, looks) }.getOrNull() ?: return@launch
-@@ -1145,7 +1188,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1148,7 +1191,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
  
      // ------------------------------------------------------------ Edit sessions (workstream 3): owner only
      /** The owner's editor joins the take's edit session (Claude edits it too); members and offline stay local. */
@@ -360,7 +360,7 @@ index 65392675..14749076 100644
          if (!(c.repo.demo || c.prefs.value.owner)) return
          controller.update { it.copy(claudeOwner = true) } // the Claude button shows, dimmed until the session is there
          val s = EditSessionSync(viewModelScope, { c.repo.api }, c.repo.live, controller, sessionHost, deviceId(), Build.MODEL ?: "Android phone", looks.paletteIds,
-@@ -1153,7 +1196,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1156,7 +1199,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          sync = s
          // The app's own project goes up only when it was built from a saved version (else the server starts from the take).
          // Offline: the editor works locally and joins when the connection is back (asking first if this device has edits).
@@ -369,7 +369,7 @@ index 65392675..14749076 100644
      }
  
      private fun deviceId(): String {
-@@ -1163,7 +1206,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1166,7 +1209,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
  
      private val sessionHost by lazy { object : SessionHost {
          override suspend fun renderFrame(project: EditProject, t: Double, width: Int): Pair<ByteArray?, String?> {
@@ -378,7 +378,7 @@ index 65392675..14749076 100644
              return runCatching { studio.muse.app.platform.edit.FrameStill(app, looks).png(composer.plan(playable(project), files), files, t, width) }
                  .fold({ it to null }, { null to "Couldn't render the frame" })
          }
-@@ -1192,7 +1235,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1195,7 +1238,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
      private suspend fun exportToPhone(format: ExportFormat) {
          val p = controller.project ?: return
          val u = controller.ui.value
@@ -387,7 +387,7 @@ index 65392675..14749076 100644
          u.export.refusal(u.duration, SuiteOps.editHasSound(playable(p)))?.let { return controller.setPhase(SuitePhase.Failed(it)) }
          withContext(Dispatchers.Main) { pause() }
          // Sound only: a small, quick picture (it's thrown away); a GIF: its own size and frame rate.
-@@ -1242,7 +1285,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1245,7 +1288,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          lastExportError = null
          val p = controller.project ?: return null
          val u = controller.ui.value
@@ -399,7 +399,7 @@ index 65392675..14749076 100644
          withContext(Dispatchers.Main) { pause() }
          val s = u.export.copy(format = ExportFormat.VIDEO) // versions are videos (Claude's export asks for one too)
          controller.setPhase(SuitePhase.Exporting(0f))
-@@ -1262,12 +1308,20 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1265,12 +1311,20 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          controller.setPhase(SuitePhase.Saving(0f))
          try {
              // The saved project is the edit as made (canvas = the exported size and fps; captions kept for reopening).
@@ -536,7 +536,7 @@ index 00000000..a6e1603e
 +    }
 +}
 diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt b/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt
-index ac122ccd..d876f3ea 100644
+index aca8a9dd..cf4c4292 100644
 --- a/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt
 +++ b/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt
 @@ -72,7 +72,9 @@ data class EditPlace(
@@ -556,9 +556,9 @@ index ac122ccd..d876f3ea 100644
          for (s in sessions) {
 -            if (s.status != "open") continue
 +            if (s.status != "open" || s.emptyBlank) continue
-             val at = maxOf(s.lastTouchedAt ?: 0, s.updatedAt, s.place?.at ?: 0)
-             out[s.id] = EditRecentItem(s.id, s.takeId, s.id, title(s.place, s.takeId, takeTitle), at, s.place)
-         }
+             // When the person last worked on it (the saved place); an edit no app has opened (Claude's) by its last change.
+             // A change landing later with no one there (a helper's result, Claude's note) doesn't move it up (run 604).
+             val at = s.place?.at?.takeIf { it > 0 } ?: maxOf(s.lastTouchedAt ?: 0, s.updatedAt)
 diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/Model.kt b/android/core/src/main/kotlin/studio/muse/core/edit/Model.kt
 index eb992890..ff1d1182 100644
 --- a/android/core/src/main/kotlin/studio/muse/core/edit/Model.kt
@@ -677,7 +677,7 @@ index 00000000..393ce3ce
 +    }
 +}
 diff --git a/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt b/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt
-index 1ed93d75..35a2cf57 100644
+index 5a8a663a..4b1d52e4 100644
 --- a/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt
 +++ b/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt
 @@ -36,6 +36,7 @@ class EditRecentTest {
@@ -685,6 +685,6 @@ index 1ed93d75..35a2cf57 100644
              RecentSession("es_2", "take_gone", updatedAt = 500, place = EditPlace(at = 3_000)), // left later than es_1 changed
              RecentSession("es_3", "take_a", status = "closed", updatedAt = 9_000),
 +            RecentSession("es_4", BLANK_SOURCE, updatedAt = 9_500, emptyBlank = true), // "New" pressed and left
+             // Left at 1 500, then a helper's result landed at 9 000 with no one there: still ranked by when it was left.
+             RecentSession("es_6", "take_b", updatedAt = 9_000, place = EditPlace(at = 1_500)),
          )
-         val items = EditRecent.items(sessions, emptyList()) { titles[it] }
-         assertEquals(listOf("es_2", "es_1"), items.map { it.id })

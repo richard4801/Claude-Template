@@ -1,5 +1,5 @@
 diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
-index a14058b3..6ca3060a 100644
+index a14058b3..251e7182 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
 +++ b/android/app/src/main/kotlin/studio/muse/app/data/FakeMuseApi.kt
 @@ -915,6 +915,7 @@ class FakeMuseApi(
@@ -10,20 +10,21 @@ index a14058b3..6ca3060a 100644
      )
      private val editSessions = mutableMapOf<String, FakeEditSession>()
      private var editSessionSeq = 0
-@@ -930,8 +931,12 @@ class FakeMuseApi(
+@@ -930,8 +931,13 @@ class FakeMuseApi(
          s.id, s.takeId, null, s.revision, s.project, durationSec = runCatching { edDurationSec(EdEditJson.parse(s.project)) }.getOrDefault(0.0),
          pending = s.pending.filter { it.status == "waiting" || it.status == "running" }, online = s.online.values.toList(), requests = s.requests.takeLast(10),
          history = s.history.asReversed().take(60).map { it.first },
 +        view = s.view, lastTouchedAt = editTouched(s),
      )
  
++    /** Like the server: when the person last worked on it (the view), else its last change. */
 +    private fun editTouched(s: FakeEditSession): Long =
-+        maxOf(s.updatedAt, ((s.view?.get("at") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0).toLong())
++        ((s.view?.get("at") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0).toLong().takeIf { it > 0 } ?: s.updatedAt
 +
      private fun editRow(id: String) = editSessions[id] ?: throw ApiException("not_found", "Edit session not found")
  
      private fun editCheck(p: kotlinx.serialization.json.JsonElement, takeId: String): kotlinx.serialization.json.JsonObject {
-@@ -947,7 +952,7 @@ class FakeMuseApi(
+@@ -947,7 +953,7 @@ class FakeMuseApi(
          val inverse = EdJsonPatch.diff(next, s.project)
          if (patch.isEmpty()) return null
          val base = s.revision
@@ -32,7 +33,7 @@ index a14058b3..6ca3060a 100644
          val entry = EditHistoryEntry(++editEntrySeq, s.revision, author, author == "claude", kind, label.take(200), undoes, false, now())
          s.history += Triple(entry, patch, inverse)
          if (undoes != null) s.history.replaceAll { if (it.first.id == undoes) it.copy(first = it.first.copy(undone = true)) else it }
-@@ -967,7 +972,7 @@ class FakeMuseApi(
+@@ -967,7 +973,7 @@ class FakeMuseApi(
                  listOf(EdTrack("main", EdTrackKind.MAIN, items = listOf(EdVideoClip("c1", "src", 0.0, t.durationSec ?: 8.0, 1.0,
                      look = t.look?.lut?.takeIf { it.isNotBlank() }?.let { EdLook(lut = it, strength = 1.0) })))),
              ))
@@ -41,7 +42,7 @@ index a14058b3..6ca3060a 100644
          editSessions[s.id] = s
          editView(s)
      }
-@@ -998,6 +1003,18 @@ class FakeMuseApi(
+@@ -998,6 +1004,18 @@ class FakeMuseApi(
      override suspend fun editPresence(id: String, presence: EditPresence) { lock.withLock { editRow(id).online[presence.device] = presence } }
      override suspend fun leaveEditSession(id: String, device: String) { lock.withLock { editSessions[id]?.online?.remove(device) } }
  
@@ -181,7 +182,7 @@ index 00000000..219e4465
 +    p.tab?.let { t -> Panel.entries.firstOrNull { it.name.equals(t, ignoreCase = true) && it != Panel.EXPORT && it != Panel.HISTORY }?.let { act(EditAction.Open(it)) } }
 +}
 diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
-index 0b41630d..65392675 100644
+index 0b41630d..4dadfbaf 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
 +++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
 @@ -10,6 +10,9 @@ import android.provider.MediaStore
@@ -367,7 +368,7 @@ index 0b41630d..65392675 100644
      private val app = context.applicationContext
      private val looks = LookLibrary(app)
      val controller = EditSuiteController(viewModelScope, RepoEditBackend(c, onAsset = { id, url -> fetchAsset(id, url) }), lookOf = { id -> runCatching { looks.pack.packLook(id) }.getOrNull() })
-@@ -418,6 +504,14 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -418,6 +504,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
  
      /** Edit's preview choice per project (plans/edit-platform-preview.md), on this device. */
      private val previewStore = app.getSharedPreferences("edit-preview", Context.MODE_PRIVATE)
@@ -375,6 +376,7 @@ index 0b41630d..65392675 100644
 +    private val recentFile = EditRecentFile.of(app.filesDir)
 +    private var placeTracking = false
 +    private var lastSentPlace: studio.muse.core.edit.EditPlace? = null
++    private var lastSentProject: EditProject? = null
 +    /** A member's (or an unshared) edit kept on this phone: what the editor reopens instead of the take's saved edit. */
 +    private val localResume: EditProject? get() = resume?.takeIf { it.sessionId == null }?.let { r ->
 +        recentFile.load().firstOrNull { "local:${it.key}" == r.id }?.project?.let { runCatching { EditJson.parse(it) }.getOrNull() }
@@ -382,7 +384,7 @@ index 0b41630d..65392675 100644
      private var previewKey: String? = null
      private fun previewPrefs() = studio.muse.core.edit.EditPreviewPrefs.decode(previewStore.getString("prefs", null))
  
-@@ -427,6 +521,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -427,6 +522,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          }
          load()
          loadKits()
@@ -394,7 +396,7 @@ index 0b41630d..65392675 100644
          viewModelScope.launch {
              controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p ->
                  if (p == null) return@collect
-@@ -474,7 +573,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -474,7 +574,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          work = viewModelScope.launch {
              controller.setPhase(SuitePhase.Loading())
              val takes = c.repo.state.value.takes
@@ -407,7 +409,7 @@ index 0b41630d..65392675 100644
              val target = editTargetFor(take, takes)
              val source = target?.source ?: take
              controller.update { u ->
-@@ -490,7 +593,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -490,7 +594,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                      val f = engine.fetchSource(url) { p -> controller.setPhase(SuitePhase.Loading(p)) }
                      sourceFile = f; sourceInfo = engine.probe(f)
                  }
@@ -416,7 +418,7 @@ index 0b41630d..65392675 100644
                  for (a in project.assets) if (a.take == source.id && a.kind == AssetKind.VIDEO) sourceFile?.let { files[a.id] = it }
                  controller.load(project, source.title, source.id, source.thumb, reopened = take.kind == "edit")
                  // Edit's preview: this project's remembered view (else this device's last), and the server's safe zones.
-@@ -501,6 +604,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -501,6 +605,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                  loadFrames(project)
                  fetchTakeAssets(controller.project ?: project)
                  fetchFonts(controller.project ?: project)
@@ -424,7 +426,7 @@ index 0b41630d..65392675 100644
                  loadContent()
                  loadWaves(controller.project ?: project)
              } catch (e: kotlinx.coroutines.CancellationException) { throw e
-@@ -566,6 +670,51 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -566,6 +671,53 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
              } ?: continue
              runCatching { engine.fetchSource(url) {} }.getOrNull()?.let { files[a.id] = it }
          }
@@ -469,14 +471,16 @@ index 0b41630d..65392675 100644
 +        // Kept here when no session shares it: a member's edit, or one whose take was deleted (it can't be shared any more).
 +        recentFile.save(studio.muse.core.edit.EditRecentEntry(takeId, sid, if (live == null) EditJson.encode(project) else null, place,
 +            u.title, System.currentTimeMillis()))
-+        if (sid != null && lastSentPlace?.samePlace(place) != true) {
-+            lastSentPlace = place
++        // The session's place is also "when the person last worked on it" (Recent edits' order): sent when the place moved
++        // or the edit itself changed.
++        if (sid != null && (lastSentPlace?.samePlace(place) != true || lastSentProject != project)) {
++            lastSentPlace = place; lastSentProject = project
 +            c.scope.launch { runCatching { c.repo.api.saveEditView(sid, place.toJson()) } }
 +        }
      }
  
      private fun playable(p: EditProject): EditProject = playableProject(p, files.keys)
-@@ -1146,6 +1295,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1146,6 +1298,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
      }
  
      override fun onCleared() {
@@ -649,10 +653,10 @@ index 00000000..10000d50
 +}
 diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt b/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt
 new file mode 100644
-index 00000000..ac122ccd
+index 00000000..aca8a9dd
 --- /dev/null
 +++ b/android/core/src/main/kotlin/studio/muse/core/edit/EditRecent.kt
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,178 @@
 +package studio.muse.core.edit
 +
 +import kotlinx.serialization.json.Json
@@ -755,7 +759,9 @@ index 00000000..ac122ccd
 +        val out = LinkedHashMap<String, EditRecentItem>()
 +        for (s in sessions) {
 +            if (s.status != "open") continue
-+            val at = maxOf(s.lastTouchedAt ?: 0, s.updatedAt, s.place?.at ?: 0)
++            // When the person last worked on it (the saved place); an edit no app has opened (Claude's) by its last change.
++            // A change landing later with no one there (a helper's result, Claude's note) doesn't move it up (run 604).
++            val at = s.place?.at?.takeIf { it > 0 } ?: maxOf(s.lastTouchedAt ?: 0, s.updatedAt)
 +            out[s.id] = EditRecentItem(s.id, s.takeId, s.id, title(s.place, s.takeId, takeTitle), at, s.place)
 +        }
 +        for (d in local) {
@@ -831,10 +837,10 @@ index 00000000..ac122ccd
 +
 diff --git a/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt b/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt
 new file mode 100644
-index 00000000..1ed93d75
+index 00000000..5a8a663a
 --- /dev/null
 +++ b/android/core/src/test/kotlin/studio/muse/core/edit/EditRecentTest.kt
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,106 @@
 +package studio.muse.core.edit
 +
 +import kotlinx.serialization.json.Json
@@ -873,12 +879,14 @@ index 00000000..1ed93d75
 +            RecentSession("es_1", "take_a", updatedAt = 1_000),
 +            RecentSession("es_2", "take_gone", updatedAt = 500, place = EditPlace(at = 3_000)), // left later than es_1 changed
 +            RecentSession("es_3", "take_a", status = "closed", updatedAt = 9_000),
++            // Left at 1 500, then a helper's result landed at 9 000 with no one there: still ranked by when it was left.
++            RecentSession("es_6", "take_b", updatedAt = 9_000, place = EditPlace(at = 1_500)),
 +        )
 +        val items = EditRecent.items(sessions, emptyList()) { titles[it] }
-+        assertEquals(listOf("es_2", "es_1"), items.map { it.id })
++        assertEquals(listOf("es_2", "es_6", "es_1"), items.map { it.id })
 +        assertEquals(EditRecent.UNTITLED, items[0].title) // its take is gone: still listed
-+        assertEquals("Café review", items[1].title)
-+        assertEquals("es_1", items[1].sessionId)
++        assertEquals("Café review", items[2].title)
++        assertEquals("es_1", items[2].sessionId)
 +    }
 +
 +    @Test fun thePhonesEntriesJoinTheList() {

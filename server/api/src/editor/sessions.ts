@@ -254,7 +254,7 @@ export class EditSessions {
     this.owner(u);
     const rows = await this.ctx.db.select().from(editSessions).where(and(eq(editSessions.studioId, u.studioId), eq(editSessions.status, 'open')))
       .orderBy(desc(editSessions.updatedAt)).limit(100);
-    // A session only looked at recently (view.at) can be older by updatedAt: sort on the later of the two.
+    // Sorted on when the person last worked on it (lastTouched), not on the last change from anyone.
     const top = rows.sort((a, b) => lastTouched(b) - lastTouched(a)).slice(0, Math.min(50, Math.max(1, limit)));
     return Promise.all(top.map(r => this.view(r, { history: false })));
   }
@@ -461,10 +461,15 @@ export class EditSessions {
   }
 }
 
-/** The later of the last change and the last time an app left the editor on it. */
+/**
+ * When the person last worked on the edit: the last time an app saved where its editor was (`view.at`, which the apps
+ * refresh while it's open and as it changes). An edit no app has opened yet (Claude's) counts by its last change. Changes
+ * that land later without anyone there (a paid helper's result, Claude's note) don't make an edit "the last one you were
+ * editing" (run 604).
+ */
 export const lastTouched = (s: Pick<Session, 'updatedAt' | 'view'>) => {
   const at = Number((s.view as { at?: unknown } | null)?.at);
-  return Math.max(s.updatedAt, Number.isFinite(at) ? at : 0);
+  return Number.isFinite(at) && at > 0 ? at : s.updatedAt;
 };
 
 /** An app's editor view, kept to known fields of sane size (an older or newer app's extra fields are dropped). */

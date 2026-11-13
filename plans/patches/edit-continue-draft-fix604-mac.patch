@@ -1,0 +1,113 @@
+commit 5390a0894a5ef72dafd1cc3c2084557ad7d3e722
+Author: Claude <noreply@anthropic.com>
+Date:   Fri Nov 13 04:52:35 2026 +0000
+
+    Recent edits ranked by when the person last worked on it (run 604)
+
+diff --git a/mac/Muse/App/Edit/EditSuiteResume.swift b/mac/Muse/App/Edit/EditSuiteResume.swift
+index e3fb6feb..7bf2e5b0 100644
+--- a/mac/Muse/App/Edit/EditSuiteResume.swift
++++ b/mac/Muse/App/Edit/EditSuiteResume.swift
+@@ -53,6 +53,7 @@ extension EditSuiteSession {
+             seek(state.playhead)
+         }
+         lastSentView = nil
++        lastSentProject = nil
+         viewTracking = true
+         // The edit is the last one worked on from now (even if nothing changes).
+         saveViewNow()
+@@ -82,8 +83,11 @@ extension EditSuiteSession {
+             recentStore.save(EditLocalDraft(takeId: draftTakeId, sessionId: sid, localId: isBlankStart && sid == nil ? localBlankId : nil,
+                                             project: keepProject ? project : nil, view: v, title: draftTitle, savedAt: now))
+         }
+-        guard let sid, lastSentView.map({ !$0.samePlace(v) }) ?? true else { return }
++        // The session's view is also "when the person last worked on it" (Recent edits' order): sent when the place moved or
++        // the edit itself changed, so editing without moving the playhead still counts.
++        guard let sid, lastSentView.map({ !$0.samePlace(v) }) ?? true || lastSentProject != project else { return }
+         lastSentView = v
++        lastSentProject = project
+         let api = self.api
+         Task { try? await api.saveEditSessionView(sessionId: sid, v) }
+     }
+diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
+index 76f1357a..dce267d6 100644
+--- a/mac/Muse/App/Edit/EditSuiteSession.swift
++++ b/mac/Muse/App/Edit/EditSuiteSession.swift
+@@ -58,6 +58,7 @@ final class EditSuiteSession {
+     @ObservationIgnored var viewTracking = false
+     @ObservationIgnored var viewTask: Task<Void, Never>?
+     @ObservationIgnored var lastSentView: EditSessionView?
++    @ObservationIgnored var lastSentProject: E.Project?
+     @ObservationIgnored let recentStore = EditRecentStore.standard
+     /// A member's blank project kept on this Mac (one id per blank, so two blanks don't overwrite each other).
+     @ObservationIgnored var localBlankId = UUID().uuidString
+diff --git a/mac/Muse/App/SnapshotRunner+EditResume.swift b/mac/Muse/App/SnapshotRunner+EditResume.swift
+index ba935908..b15960c3 100644
+--- a/mac/Muse/App/SnapshotRunner+EditResume.swift
++++ b/mac/Muse/App/SnapshotRunner+EditResume.swift
+@@ -81,7 +81,8 @@ extension SnapshotRunner {
+         check("no_auto_open", store.suite.editCurrent == nil, "an editor opened by itself on \(store.suite.editCurrent?.take.id ?? "?")")
+         let draft = store.suite.recentEdits.first
+         check("choice_continue_draft", draft?.takeId == "rz_resume" && draft?.title == "Beach walk",
+-              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing")")
++              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing"); order: " +
++              store.suite.recentEdits.prefix(4).map { "\($0.takeId) at \(Int64($0.lastEditedAt)) view \($0.view?.at.map { String(Int64($0)) } ?? "-")" }.joined(separator: ", "))
+         capture(dir.appendingPathComponent("mac_a_edit_choice.png"))
+         note("START reopen_last")
+         if let draft { store.suite.editResume = draft }
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
+index 2f143e4d..16a3961a 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditRecent.swift
+@@ -174,7 +174,9 @@ public enum EditRecent {
+             let p = try? JSONPatch.decode(EditV2.Project.self, s.project)
+             // A blank project nothing was added to is not an edit yet ("New edit" pressed and left).
+             if s.takeId == EditV2.blankSourceId, let p, p.assets.isEmpty { continue }
+-            let at = max(s.lastTouchedAt ?? 0, s.updatedAt ?? 0, s.view?.at ?? 0)
++            // When the person last worked on it: the last saved view; an edit no app has opened (Claude's) by its last change.
++            // A change landing later with no one there (a helper's result, Claude's note) doesn't move it up (run 604).
++            let at = s.view?.at.flatMap { $0 > 0 ? $0 : nil } ?? max(s.lastTouchedAt ?? 0, s.updatedAt ?? 0)
+             out[s.id] = EditRecentItem(id: s.id, takeId: s.takeId, sessionId: s.id, title: title(view: s.view, takeId: s.takeId, takeTitle: takeTitle),
+                                        thumbTakeId: thumbTake(takeId: s.takeId, project: p), lastEditedAt: at, view: s.view)
+         }
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift b/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
+index 0470a658..ac1e93e2 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/FakeMuseAPI+EditSessions.swift
+@@ -219,7 +219,8 @@ extension FakeMuseAPI {
+     /// Continue a draft: open sessions, the last worked on (changed or left) first, without history.
+     public func recentEditSessions(limit: Int) throws -> [EditSession] {
+         try editOwner()
+-        func touched(_ s: EditSession) -> Double { max(s.updatedAt ?? 0, s.view?.at ?? 0) }
++        // Like the server: when the person last worked on it (the view), else its last change.
++        func touched(_ s: EditSession) -> Double { s.view?.at.flatMap { $0 > 0 ? $0 : nil } ?? (s.updatedAt ?? 0) }
+         return editSessions.values.map(\.session).filter { $0.status == "open" }.sorted { touched($0) > touched($1) }
+             .prefix(max(1, min(50, limit))).map { s in
+                 var v = view(editSessions[s.id]!, history: false)
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
+index 9cccf666..f2fe4f99 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditRecentTests.swift
+@@ -111,16 +111,18 @@ final class EditRecentTests: XCTestCase {
+             try session("es_3", takeId: E.blankSourceId, project: blankUsed, updatedAt: 2_000, view: EditSessionView(title: "Promo")),
+             try session("es_4", takeId: E.blankSourceId, project: blankEmpty, updatedAt: 9_000),
+             try session("es_5", takeId: "take_a", project: p, updatedAt: 9_500, status: "closed"),
++            // Left at 1 500, then a helper's result landed at 9 000 with no one there: still ranked by when it was left.
++            try session("es_6", takeId: "take_b", project: p, updatedAt: 9_000, view: EditSessionView(at: 1_500)),
+         ]
+         let items = EditRecent.items(sessions: sessions, local: [], takeTitle: { titles[$0] })
+-        XCTAssertEqual(items.map(\.id), ["es_2", "es_3", "es_1"])
++        XCTAssertEqual(items.map(\.id), ["es_2", "es_3", "es_6", "es_1"])
+         XCTAssertEqual(items[0].title, EditRecent.untitled)      // its take is gone: still listed, still opens
+         XCTAssertEqual(items[1].title, "Promo")
+         XCTAssertEqual(items[1].thumbTakeId, "take_b")
+         XCTAssertTrue(items[1].isBlank)
+-        XCTAssertEqual(items[2].title, "Café review")
+-        XCTAssertEqual(items[2].thumbTakeId, "take_a")
+-        XCTAssertEqual(items[2].sessionId, "es_1")
++        XCTAssertEqual(items[3].title, "Café review")
++        XCTAssertEqual(items[3].thumbTakeId, "take_a")
++        XCTAssertEqual(items[3].sessionId, "es_1")
+     }
+ 
+     func testThisMacsDraftsJoinTheList() throws {
