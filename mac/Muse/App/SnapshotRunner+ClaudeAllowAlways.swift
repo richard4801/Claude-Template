@@ -132,12 +132,20 @@ extension SnapshotRunner {
         try? await Task.sleep(for: .seconds(1.0))
         check("settings_lists", service.fileSettings.allowedFolders == [shoot.path] && service.fileSettings.rules.map(\.id) == ["ffmpeg"],
               "folders \(service.fileSettings.allowedFolders), rules \(service.fileSettings.rules.map(\.id))")
-        let win = mainWindow?.contentView
-        let texts = win.map(Self.accessibilityTexts) ?? []
-        check("settings_shows_always_allowed", texts.contains { $0.contains("Always allowed") },
-              "no Always allowed heading in \(texts.count) texts; with Claude/Ask/About: \(texts.filter { $0.contains("Claude") || $0.contains("Ask") || $0.contains("About") }.prefix(8))")
-        check("settings_shows_rule", texts.contains("ffmpeg commands"), "rows \(texts.filter { $0.contains("ommands") })")
-        check("settings_shows_switch", texts.contains("Ask before anything"))
+        // SwiftUI exposes only the pickers' values to accessibility here (run 629: 9 texts), so the rows report where they
+        // were drawn (review-only frame probes) and each must sit inside the window.
+        SnapshotRunner.state.probeTick += 1
+        try? await Task.sleep(for: .seconds(0.5))
+        let frames = SnapshotRunner.state.composerFrames
+        let height = mainWindow?.contentView?.bounds.height ?? 0
+        func shown(_ key: String) -> (Bool, String) {
+            guard let f = frames[key] else { return (false, "not drawn") }
+            return (f.height > 0 && f.minY >= 0 && f.maxY <= height, "at y \(Int(f.minY))–\(Int(f.maxY)) in a window \(Int(height)) high")
+        }
+        let heading = shown("settings always allowed"), rule = shown("settings rule ffmpeg commands"), toggle = shown("settings ask before anything")
+        check("settings_shows_always_allowed", heading.0, "the Always allowed heading \(heading.1)")
+        check("settings_shows_rule", rule.0, "the ffmpeg commands row \(rule.1); rows drawn \(frames.keys.filter { $0.hasPrefix("settings rule") }.sorted())")
+        check("settings_shows_switch", toggle.0, "the Ask before anything row \(toggle.1)")
         capture(dir.appendingPathComponent("mac_a_claude_allow_settings.png"))
         SnapshotRunner.state.scrollTo = nil
         service.removeCommandRule("ffmpeg")

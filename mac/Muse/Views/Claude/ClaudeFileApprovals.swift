@@ -105,6 +105,7 @@ struct ClaudeFileSettingsSection: View {
                     .labelsHidden().toggleStyle(.switch)
                     .accessibilityIdentifier("settings.claude.askEverything")
             }
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings ask before anything") } }
         }
         SettingRow("When results arrive", hint: s.resultMode == .look
                    ? "When something you started from a chat finishes, Claude looks at it and tells you in that chat (a notification too)."
@@ -125,6 +126,7 @@ struct ClaudeFileSettingsSection: View {
             Text(s.askAll ? "Always allowed (paused)" : "Always allowed")
                 .scaled(t.scale.caption, t.roles.ink2).padding(.top, Space.s3)
                 .accessibilityIdentifier("settings.claude.alwaysAllowed")
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings always allowed") } }
             if s.allowedFolders.isEmpty && s.rules.isEmpty {
                 SettingRow("Nothing yet", hint: "Choose Allow always on a card in a chat") { EmptyView() }
             }
@@ -140,6 +142,7 @@ struct ClaudeFileSettingsSection: View {
                     RButton("Remove", kind: .plain, small: true) { service.removeCommandRule(rule.id) }
                         .accessibilityLabel("Remove \(rule.label)")
                 }
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings rule \(rule.label)") } }
                 .opacity(s.askAll ? 0.6 : 1)
             }
         }
