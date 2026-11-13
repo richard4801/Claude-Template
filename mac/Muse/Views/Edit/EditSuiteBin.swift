@@ -184,7 +184,7 @@ struct EditSuiteBin: View {
             } else {
                 LazyVGrid(columns: grid, alignment: .leading, spacing: Space.s3) {
                     ForEach(list) { tk in
-                        MediaTile(name: tk.title.isEmpty ? "Take" : tk.displayTitle, mark: "film-strip", length: EditSuite.UploadBin.length(tk.durationSec),
+                        BinTile(name: tk.title.isEmpty ? "Take" : tk.displayTitle, mark: "film-strip", length: EditSuite.UploadBin.length(tk.durationSec),
                                   used: session.project.assets.contains { $0.take == tk.id }, drag: BinDrag.take(tk.id),
                                   plusHelp: "Add at the playhead") {
                             session.placeTake(tk)
@@ -229,7 +229,7 @@ struct EditSuiteBin: View {
     private func uploadTile(_ u: EditSuite.Upload) -> some View {
         let mark = u.kind == .video ? "film-strip" : u.kind == .picture ? "image" : "waveform"
         let file = session.files[u.id]
-        return MediaTile(name: u.name, mark: mark, length: EditSuite.UploadBin.length(u.durationSec), drag: BinDrag.upload(u.id),
+        return BinTile(name: u.name, mark: mark, length: EditSuite.UploadBin.length(u.durationSec), drag: BinDrag.upload(u.id),
                          plusHelp: "Add at the playhead") {
             session.placeUpload(u.id)
         } thumb: {
@@ -487,7 +487,7 @@ private struct AddMenu<Items: View>: View {
 
 /// A media tile: the picture (or waveform) with its type mark and length on a scrim, the name under it (the full name
 /// on hover), "+" while the pointer is over it, and dragging onto the timeline places it.
-private struct MediaTile<Thumb: View>: View {
+private struct BinTile<Thumb: View>: View {
     @Environment(\.theme) private var t
     var name: String
     var mark: String

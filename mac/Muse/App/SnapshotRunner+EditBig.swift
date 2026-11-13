@@ -39,7 +39,7 @@ extension SnapshotRunner {
         }
         store.takes.removeAll { $0.id == take.id }
         store.takes.insert(take, at: 0)
-        fake.adoptTakes([take])
+        await fake.adoptTakes([take])
         defer { store.takes.removeAll { $0.id == "rx_big" } }
         guard let project = bigProject(takeId: take.id, videoUrl: long.absoluteString) else { line(false, "setup", "the big project didn't decode"); return }
         if let bad = EditV2.problem(project) { line(nil, "setup", "the model flags the big project: \(bad.field) \(bad.message)") }
@@ -107,9 +107,12 @@ extension SnapshotRunner {
              + "\(diffs.count) clips not back\(sample.isEmpty ? "" : " (\(sample.joined(separator: "; ")))")")
         line(toPortrait < 10 && toLandscape < 10, "shape switch time on 66 clips",
              String(format: "to 9:16 %.1f s, back to 16:9 %.1f s (fails above 10 s)", toPortrait, toLandscape))
-        let synced = await until(10) {
-            guard let doc = fake.fakeEditRecord(es.id)?.project, let p = try? JSONPatch.decode(EditV2.Project.self, doc) else { return false }
-            return p.canvas == before.canvas && p.mainClips.map(\.transform) == before.mainClips.map(\.transform)
+        var synced = false
+        for _ in 0..<50 where !synced {
+            if let doc = await fake.fakeEditRecord(es.id)?.project, let p = try? JSONPatch.decode(EditV2.Project.self, doc) {
+                synced = p.canvas == before.canvas && p.mainClips.map(\.transform) == before.mainClips.map(\.transform)
+            }
+            if !synced { try? await Task.sleep(for: .seconds(0.2)) }
         }
         line(synced, "shape round trip on Claude's session", "the session holds the 16:9 project as it was: \(synced)")
         store.go(.home)

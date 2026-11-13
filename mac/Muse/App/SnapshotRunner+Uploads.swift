@@ -52,7 +52,7 @@ extension SnapshotRunner {
     /// The panel alone in an off-screen window, drawn from its view (the window can sit anywhere on the runner's screen).
     private static func drawBin(_ s: EditSuiteSession, store: AppStore, theme: ThemeID, to url: URL) async {
         let t = Theme.get(theme)
-        let size = NSSize(width: EditSuiteView.mediaWidth, height: 760)
+        let size = NSSize(width: EditSuiteEditor.mediaWidth, height: 760)
         let root = EditSuiteBin(session: s, hide: {})
             .frame(width: size.width, height: size.height)
             .environment(store)

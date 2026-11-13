@@ -26,7 +26,7 @@ extension SnapshotRunner {
             if let t = c.take {
                 store.takes.removeAll { $0.id == t.id }
                 store.takes.insert(t, at: 0)
-                fakeMuse.adoptTakes([t])
+                await fakeMuse.adoptTakes([t])
             }
             // 1. Edit is open on the take (its own session).
             store.openEdit(takeId: takeId)
@@ -68,9 +68,12 @@ extension SnapshotRunner {
             let portrait = s.project.canvas.height > s.project.canvas.width
             await s.setRatio(.landscape)
             let landscape = s.project.canvas.width > s.project.canvas.height
-            let synced = await until(10) {
-                guard let doc = fakeMuse.fakeEditRecord(es.id)?.project, let p = try? JSONPatch.decode(EditV2.Project.self, doc) else { return false }
-                return p.canvas.width > p.canvas.height
+            var synced = false
+            for _ in 0..<50 where !synced {
+                if let doc = await fakeMuse.fakeEditRecord(es.id)?.project, let p = try? JSONPatch.decode(EditV2.Project.self, doc) {
+                    synced = p.canvas.width > p.canvas.height
+                }
+                if !synced { try? await Task.sleep(for: .seconds(0.2)) }
             }
             line(portrait && landscape && synced, name + ": shape buttons",
                  "9:16 \(portrait), back to 16:9 \(landscape) (\(s.project.canvas.width)×\(s.project.canvas.height)), on Claude's session \(synced)")
