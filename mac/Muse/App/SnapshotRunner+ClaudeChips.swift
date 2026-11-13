@@ -46,6 +46,11 @@ extension SnapshotRunner {
         store.takes.insert(take, at: 0)
         await fake.adoptTakes([take])
 
+        // A clean start (bundle-10 run 617: Recreate and the One Claude panel left open by earlier walks made the page
+        // "recreate" and showOneClaude a no-op).
+        store.closeRecreate()
+        store.oneClaude.open = false
+        state.overlay = nil
         note("START open_edit")
         store.openEdit(takeId: take.id)
         guard await wait(25, { store.suite.editCurrent?.isReady == true && store.suite.editCurrent?.take.id == take.id }),
@@ -55,7 +60,7 @@ extension SnapshotRunner {
         // No platform view (its safe-area chip would lead), no text, no captions, no music.
         s.view { $0.preview.safeArea = false }
         store.showOneClaude()
-        _ = await wait(10) { store.oneClaude.chatId != nil }
+        if !(await wait(10) { store.oneClaude.chatId != nil }) { await store.startOneClaude() }
         store.claudeChipsChanged(now: true)
 
         note("START no_captions")

@@ -44,11 +44,15 @@ extension SnapshotRunner {
         let out = shoot.appendingPathComponent("b.mp4").path
         try? Data("x".utf8).write(to: URL(fileURLWithPath: clip))
 
-        store.themeID = .a
+        // A clean start (bundle-10 run 617: Recreate and the One Claude panel left open by earlier walks made the page
+        // "recreate" and showOneClaude a no-op).
+        store.closeRecreate()
+        store.oneClaude.open = false
         state.overlay = nil
+        store.themeID = .a
         store.go(.home)
         store.showOneClaude()
-        _ = await wait(10) { store.oneClaude.chatId != nil }
+        if !(await wait(10) { store.oneClaude.chatId != nil }) { await store.startOneClaude() }
         guard let chat = store.oneClaude.chatId, let tid = (try? await service.openThread(contextKind: "chat", contextId: chat))?.thread.id else {
             note("FAIL setup: the one-Claude chat didn't open"); note("ALL DONE"); return
         }

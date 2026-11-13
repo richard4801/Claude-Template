@@ -165,6 +165,8 @@ extension SnapshotRunner {
         }
         line(synced, "shape round trip on Claude's session", "the session holds the 16:9 project as it was: \(synced)")
         store.go(.home)
+        store.closeRecreate()
+        store.oneClaude.open = false
         try? await Task.sleep(for: .seconds(1))
     }
 
