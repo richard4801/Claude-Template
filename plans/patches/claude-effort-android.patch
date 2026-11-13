@@ -1,0 +1,515 @@
+From ae32d71003117fa92ab5fb5c10bef6ce359c166d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 13 Nov 2026 14:11:44 +0000
+Subject: [PATCH] Android: model and Effort chips in the Claude chat header (as
+ on the Mac)
+
+- the chat's model, then its effort: only the levels the model takes, "(default)" on the model's own; effort hides for a
+  model without it; nothing shows before GET /v1/claude/models answers (or on an older server)
+- per chat (PATCH /v1/claude/chats/:id {model}/{effort}; null clears), the last effort choice for new chats
+- chips sit in a row already there (title, else the chat list row, else the status line): embedded chats keep their space
+- MuseMenu: an item with icon "" draws none (picker lists check only the chosen row)
+- ClaudeEffortTest (rules, store, HTTP bodies) and screenshot state claude_<theme>_model_effort_<390|360>
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxnJMgrcJzBU2H7pwjQ
+---
+ .../kotlin/studio/muse/app/data/ClaudeApi.kt  | 27 ++++++
+ .../studio/muse/app/data/ClaudeEffort.kt      | 38 ++++++++
+ .../studio/muse/app/data/FakeClaudeApi.kt     | 17 ++++
+ .../studio/muse/app/ui/components/Kit.kt      |  3 +-
+ .../app/ui/screens/claude/ChatSessions.kt     |  3 +-
+ .../muse/app/ui/screens/claude/ClaudeChat.kt  | 69 +++++++++++++-
+ .../app/ui/screens/claude/ClaudeChatStore.kt  | 20 ++++
+ .../muse/app/ui/screens/claude/ClaudeLogic.kt |  4 +
+ .../app/claude/ClaudeChatScreenshotTest.kt    |  6 +-
+ .../muse/app/claude/ClaudeEffortTest.kt       | 94 +++++++++++++++++++
+ 10 files changed, 273 insertions(+), 8 deletions(-)
+ create mode 100644 android/app/src/main/kotlin/studio/muse/app/data/ClaudeEffort.kt
+ create mode 100644 android/app/src/test/kotlin/studio/muse/app/claude/ClaudeEffortTest.kt
+
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/ClaudeApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/ClaudeApi.kt
+index 56ae052d..e1603b5c 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/ClaudeApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/ClaudeApi.kt
+@@ -69,8 +69,20 @@ data class ClaudeThread(
+     val createdAt: Long = 0, val updatedAt: Long = 0, val messages: List<ClaudeMessage>? = null, val activeTurn: ClaudeTurn? = null,
+     /** WS18: the list of chats it belongs to (`suite:photo`, `recreate:rx_1`…), its name (the owner's or its first words) and, in a list, its message count. */
+     val contextKey: String? = null, val title: String? = null, val messageCount: Int? = null,
++    /** The chat's own Claude model and effort level (null: the person's default model; their last effort, else the model's). */
++    val model: String? = null, val effort: String? = null,
+ )
+ 
++/** GET /v1/claude/models: a Claude model anyone can pick, with the effort levels it takes (empty: none) and its own default. */
++@Serializable
++data class ClaudeModelInfo(val id: String, val name: String = "", val speed: String = "", val cost: String = "", val good: String = "",
++    val efforts: List<String> = emptyList(), val defaultEffort: String? = null)
++
++/** The models, this person's default model (null: the studio's) and their last effort choice. */
++@Serializable
++data class ClaudeModelList(val models: List<ClaudeModelInfo> = emptyList(), val default: String? = null, val studioDefault: String? = null,
++    val defaultEffort: String? = null)
++
+ /** GET /v1/claude/threads?key= (WS18): one place's chats, newest first. */
+ @Serializable
+ data class ClaudeThreadList(val key: String = "", val threads: List<ClaudeThread> = emptyList())
+@@ -168,6 +180,12 @@ interface ClaudeApi {
+     /** Cards: Approve / Decline on a gated action's card; Undo on one row of "What I changed". */
+     suspend fun answerAction(id: String, approve: Boolean): String = throw ApiException("not_found", "This server can't answer Claude's actions yet")
+     suspend fun undoCardRow(messageId: String, row: Int): Unit = throw ApiException("not_found", "This server can't undo from the chat yet")
++    /** The Claude models to pick from (an older server has none: the picker hides). */
++    suspend fun claudeModels(): ClaudeModelList = throw ApiException("not_found", "This server has no model choice yet")
++    /** PATCH /v1/claude/chats/{id}: the chat's model (null: the person's default). */
++    suspend fun setChatModel(id: String, model: String?): Unit = throw ApiException("not_found", "This server has no model choice yet")
++    /** The chat's effort level (null: the last choice, else the model's default). A pick is also the person's last choice. */
++    suspend fun setChatEffort(id: String, effort: String?): Unit = throw ApiException("not_found", "This server has no effort choice yet")
+ 
+     object Unsupported : ClaudeApi {
+         private fun no(): Nothing = throw ApiException("unsupported", "Claude chat needs the studio server")
+@@ -267,6 +285,15 @@ class HttpClaudeApi(baseUrl: String, private val client: OkHttpClient, private v
+         val a = raw("DELETE", "v1/claude/threads/${enc(id)}", null)
+         if (a.code !in 200..299) throw errorOf(a.code, a.text)
+     }
++    override suspend fun claudeModels() = call("GET", "v1/claude/models", null, ClaudeModelList.serializer())
++    override suspend fun setChatModel(id: String, model: String?) = patchChat(id, "model", model)
++    override suspend fun setChatEffort(id: String, effort: String?) = patchChat(id, "effort", effort)
++    /** `null` is sent as JSON null (it clears the chat's own choice). */
++    private suspend fun patchChat(id: String, key: String, value: String?) {
++        val body = JsonObject(mapOf(key to (value?.let { JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull))).toString()
++        val a = raw("PATCH", "v1/claude/chats/${enc(id)}", body)
++        if (a.code !in 200..299) throw errorOf(a.code, a.text)
++    }
+ 
+     override suspend fun post(threadId: String, text: String, attachments: List<String>): ClaudeSend {
+         val a = raw("POST", "v1/claude/threads/${enc(threadId)}/messages", json.encodeToString(TextBody.serializer(), body(text, attachments)))
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/ClaudeEffort.kt b/android/app/src/main/kotlin/studio/muse/app/data/ClaudeEffort.kt
+new file mode 100644
+index 00000000..f1da85d7
+--- /dev/null
++++ b/android/app/src/main/kotlin/studio/muse/app/data/ClaudeEffort.kt
+@@ -0,0 +1,38 @@
++package studio.muse.app.data
++
++/**
++ * Effort (Claude Code's `--effort`, the API's output_config.effort): how long Claude thinks. Higher thinks longer and uses
++ * more of the Claude plan. The same rules as the Mac (MuseCore ClaudeEffort) and the server (claude/models.ts).
++ */
++object ClaudeEffort {
++    val ALL = listOf("low", "medium", "high", "xhigh", "max")
++    private val NAMES = mapOf("low" to "Low", "medium" to "Medium", "high" to "High", "xhigh" to "Extra high", "max" to "Max")
++    fun name(e: String) = NAMES[e] ?: e
++    fun valid(e: String?) = e != null && e in ALL
++
++    /** The levels a model takes, low to high (unknown words dropped; empty: the model takes no effort setting). */
++    fun levels(m: ClaudeModelInfo?): List<String> = ALL.filter { it in m?.efforts.orEmpty() }
++
++    /** The chat's own level, else the person's last choice, else the model's default; null when the model takes none. */
++    fun resolve(m: ClaudeModelInfo?, own: String?, last: String?): String? {
++        val l = levels(m)
++        if (l.isEmpty()) return null
++        return listOf(own, last, m?.defaultEffort).firstOrNull { it != null && it in l }
++    }
++
++    /** "Claude Opus 5.5" → "Opus 5.5": the chat header already says Claude. */
++    fun shortModel(name: String) = name.removePrefix("Claude ")
++}
++
++/** The model a chat runs on: its own, else the person's default, else the studio's; and whether it is the chat's own. */
++data class ClaudeModelChoice(val model: ClaudeModelInfo?, val ownModel: Boolean, val levels: List<String>, val effort: String?, val ownEffort: Boolean) {
++    companion object {
++        fun of(list: ClaudeModelList?, thread: ClaudeThread?): ClaudeModelChoice {
++            val id = thread?.model ?: list?.default ?: list?.studioDefault
++            val m = list?.models?.firstOrNull { it.id == id }
++            val levels = ClaudeEffort.levels(m)
++            val own = thread?.effort?.takeIf { it in levels }
++            return ClaudeModelChoice(m, thread?.model != null, levels, ClaudeEffort.resolve(m, own, list?.defaultEffort), own != null)
++        }
++    }
++}
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/FakeClaudeApi.kt b/android/app/src/main/kotlin/studio/muse/app/data/FakeClaudeApi.kt
+index 47527d23..8d43d8c5 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/FakeClaudeApi.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/FakeClaudeApi.kt
+@@ -82,6 +82,23 @@ class FakeClaudeApi(
+ 
+     override suspend fun newThread(contextKind: String, contextId: String): ClaudeThread = thread(contextKind, contextId, new = true)
+ 
++    // Model and effort (demo): the server's list in short; a chat's picks are kept on the thread.
++    @Volatile private var lastEffort: String? = null
++    override suspend fun claudeModels() = ClaudeModelList(listOf(
++        ClaudeModelInfo("claude-opus-5-5", "Claude Opus 5.5", "Steady", "Standard cost", "Most work", ClaudeEffort.ALL, "medium"),
++        ClaudeModelInfo("claude-sonnet-5-5", "Claude Sonnet 5.5", "Fast", "About half of Opus", "Everyday questions", ClaudeEffort.ALL, "high"),
++        ClaudeModelInfo("claude-haiku-5-5", "Claude Haiku 5.5", "Fastest", "Lowest cost", "Short answers", ClaudeEffort.ALL, "medium"),
++    ), default = null, studioDefault = "claude-opus-5-5", defaultEffort = lastEffort)
++    override suspend fun setChatModel(id: String, model: String?) = setOnThread(id) { it.copy(model = model) }
++    override suspend fun setChatEffort(id: String, effort: String?) { if (effort != null) lastEffort = effort; setOnThread(id) { it.copy(effort = effort) } }
++    private suspend fun setOnThread(id: String, f: (ClaudeThread) -> ClaudeThread) {
++        val t = lock.withLock {
++            val i = threads.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "No such thread")
++            f(threads[i]).also { threads[i] = it }
++        }
++        live(ClaudeLive("thread", thread = t))
++    }
++
+     override suspend fun renameThread(id: String, title: String): ClaudeThread {
+         val t = lock.withLock {
+             val i = threads.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "No such thread")
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/components/Kit.kt b/android/app/src/main/kotlin/studio/muse/app/ui/components/Kit.kt
+index 0e3fa159..31538d03 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/components/Kit.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/components/Kit.kt
+@@ -716,7 +716,8 @@ fun MuseMenu(expanded: Boolean, onDismiss: () -> Unit, items: List<MenuItem>) {
+                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                 ) {
+                     val c = if (it.danger) Color(0xFFC2362B) else m.t.ink
+-                    Ic(it.icon, 18.dp, c)
++                    // "" = no icon (a picker list: only the chosen row has its check); the labels still line up.
++                    if (it.icon.isNotEmpty()) Ic(it.icon, 18.dp, c) else Spacer(Modifier.width(18.dp))
+                     T(it.label, m.type.menu, c, upper = m.isA)
+                 }
+             }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ChatSessions.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ChatSessions.kt
+index 5af96af8..cf90798a 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ChatSessions.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ChatSessions.kt
+@@ -57,7 +57,7 @@ class ChatSessionActions(
+  * composer mode, Recreate, Edit and Camera one per reference, editor session or camera.
+  */
+ @Composable
+-fun ChatSessionsRow(ui: ClaudeChatUi, actions: ChatSessionActions, horizontal: Dp) {
++fun ChatSessionsRow(ui: ClaudeChatUi, actions: ChatSessionActions, horizontal: Dp, trailing: @Composable () -> Unit = {}) {
+     val m = muse
+     val current = ui.thread ?: return
+     val name = ClaudeSessions.displayTitle(ui.threads.firstOrNull { it.id == current.id } ?: current)
+@@ -80,6 +80,7 @@ fun ChatSessionsRow(ui: ClaudeChatUi, actions: ChatSessionActions, horizontal: D
+                 MenuItem("trash", "Delete chat", danger = true) { deleting = true },
+             ))
+         }
++        trailing()
+         Box(Modifier.size(48.dp).press(enabled = !empty && !ui.busy) { actions.newChat() }
+             .semantics { role = Role.Button; contentDescription = "New chat" }, contentAlignment = Alignment.Center) {
+             Ic("plus", 20.dp, if (empty || ui.busy) m.roles.ink2.copy(alpha = .4f) else m.roles.ink2)
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChat.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChat.kt
+index 0f81bc47..d814802b 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChat.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChat.kt
+@@ -100,12 +100,15 @@ import coil3.compose.AsyncImage
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.launch
+ import studio.muse.app.data.ApiException
++import studio.muse.app.data.ClaudeEffort
+ import studio.muse.app.data.ImageRef
+ import studio.muse.app.ui.LocalContainer
+ import studio.muse.app.ui.components.ImageViewer
+ import studio.muse.app.ui.components.RefImage
+ import studio.muse.app.ui.components.T
+ import studio.muse.app.ui.components.ViewerImage
++import studio.muse.app.ui.components.MenuItem
++import studio.muse.app.ui.components.MuseMenu
+ import studio.muse.app.ui.components.press
+ import studio.muse.app.ui.screens.Caption
+ import studio.muse.app.ui.screens.PrimaryButton
+@@ -143,6 +146,9 @@ class ClaudeChatActions(
+     /** Cards: Approve / Decline, Undo a row, open a clip's moment. */
+     val answerCard: (String, studio.muse.core.claude.ApproveTarget, Boolean) -> Unit = { _, _, _ -> },
+     val undoCard: (String, Int, String) -> Unit = { _, _, _ -> },
++    /** The chat's Claude model (null: the person's default) and effort level (null: the last choice / the model's default). */
++    val pickModel: (String?) -> Unit = {},
++    val pickEffort: (String?) -> Unit = {},
+ )
+ 
+ /** A store for one thread, fed by the app's live `claude` events, loaded once. */
+@@ -207,6 +213,8 @@ fun ClaudeChat(store: ClaudeChatStore, title: String, modifier: Modifier = Modif
+         sessions = ChatSessionActions(newChat = { store.newChat() }, open = { store.open(it) }, rename = { t, n -> store.rename(t, n) }, delete = { store.delete(it) }),
+         answerCard = store::answerCard,
+         undoCard = store::undoCard,
++        pickModel = { store.pickModel(it) },
++        pickEffort = { store.pickEffort(it) },
+     ), modifier)
+ }
+ 
+@@ -281,8 +289,12 @@ fun ClaudeChatContent(ui: ClaudeChatUi, title: String, actions: ClaudeChatAction
+     // Short (a phone on its side with the keyboard up): the header drops to its one status line.
+     val compact = maxHeight < 360.dp
+     Column(Modifier.fillMaxSize()) {
+-        ChatHeader(ui, title, horizontal, compact)
+-        if (ui.sessions && ui.thread != null && !compact) ChatSessionsRow(ui, actions.sessions, horizontal)
++        // The model and effort chips sit in a row that is there anyway (the title's, else the chat list's, else the status
++        // line), so an embedded chat (Camera, Edit) doesn't lose a line of transcript to them.
++        val listRow = ui.sessions && ui.thread != null && !compact
++        val chipsAt = when { title.isNotBlank() && !compact -> ChipsAt.TITLE; listRow -> ChipsAt.LIST; else -> ChipsAt.STATUS }
++        ChatHeader(ui, title, horizontal, compact, actions, chipsAt)
++        if (listRow) ChatSessionsRow(ui, actions.sessions, horizontal) { ModelEffortChips(ui, actions) }
+         Box(Modifier.weight(1f).fillMaxWidth()) {
+             when {
+                 !ui.loaded -> ChatSkeleton(Modifier.padding(horizontal = horizontal, vertical = MuseSpace.s3))
+@@ -387,8 +399,11 @@ private fun ChatSkeleton(modifier: Modifier = Modifier) {
+     }
+ }
+ 
++private enum class ChipsAt { TITLE, LIST, STATUS }
++
+ @Composable
+-private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp, compact: Boolean = false) {
++private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp, compact: Boolean = false, actions: ClaudeChatActions = ClaudeChatActions(),
++    chipsAt: ChipsAt = ChipsAt.TITLE) {
+     val m = muse
+     // No plan status yet (opening, or the thread couldn't load): don't claim "answered by your Mac" with a green dot.
+     val s = if (ui.status == null && (!ui.loaded || ui.error != null)) StatusLineText(if (ui.loaded) "Not connected" else "Connecting…", Tone.OFF) else ClaudeText.status(ui)
+@@ -397,15 +412,59 @@ private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp, compact:
+         if (title.isNotBlank() && !compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+             // Claude's orb as the avatar (the same state machine as the Mac's: it moves only with real events).
+             ClaudeOrbView(ClaudePanelOrb.current ?: rememberChatOrb(ui), 28.dp)
+-            T(title, m.scale.title, m.roles.ink, Modifier.semantics { heading() }, maxLines = 1)
++            T(title, m.scale.title, m.roles.ink, Modifier.weight(1f).semantics { heading() }, maxLines = 1)
++            if (chipsAt == ChipsAt.TITLE) ModelEffortChips(ui, actions)
+         }
+         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2), modifier = Modifier.heightIn(min = 24.dp)) {
+             Box(Modifier.size(8.dp).clip(CircleShape).background(toneColor(s.tone)))
+-            T(s.text, m.scale.caption, if (s.tone == Tone.OFF) m.roles.ink else m.roles.ink2, maxLines = 2)
++            T(s.text, m.scale.caption, if (s.tone == Tone.OFF) m.roles.ink else m.roles.ink2, maxLines = 2, modifier = Modifier.weight(1f, fill = false))
++            if (chipsAt == ChipsAt.STATUS && !compact) { Spacer(Modifier.weight(1f)); ModelEffortChips(ui, actions) }
+         }
+     }
+ }
+ 
++/**
++ * The chat's model, then its effort, as on the Mac: each a quiet chip opening a menu. Effort lists only the levels the
++ * model takes, the model's own default marked; it hides for a model with no effort setting. Nothing shows before the
++ * server has answered with its models (or on an older server).
++ */
++@Composable
++internal fun ModelEffortChips(ui: ClaudeChatUi, actions: ClaudeChatActions) {
++    val list = ui.models?.takeIf { it.models.isNotEmpty() } ?: return
++    if (ui.thread == null) return
++    val m = muse
++    val c = ui.choice
++    var models by remember { mutableStateOf(false) }
++    var efforts by remember { mutableStateOf(false) }
++    Row(verticalAlignment = Alignment.CenterVertically) {
++        Box {
++            HeaderChip(ClaudeEffort.shortModel(c.model?.name ?: "Claude"), "Claude model: ${c.model?.name ?: "default"}. Change it") { models = true }
++            MuseMenu(models, { models = false }, list.models.map { x ->
++                MenuItem(if (x.id == c.model?.id) "check" else "", "${x.name}: ${x.speed.lowercase()}, ${x.cost.lowercase()}") { actions.pickModel(x.id) }
++            } + listOfNotNull(if (c.ownModel) MenuItem("", "Use your default") { actions.pickModel(null) } else null))
++        }
++        val e = c.effort
++        if (e != null && c.levels.isNotEmpty()) Box {
++            HeaderChip(ClaudeEffort.name(e), "Effort: ${ClaudeEffort.name(e)}. Higher thinks longer and uses more of your Claude plan. Change it") { efforts = true }
++            MuseMenu(efforts, { efforts = false }, c.levels.map { level ->
++                MenuItem(if (level == e) "check" else "", ClaudeEffort.name(level) + if (level == c.model?.defaultEffort) " (default)" else "") { actions.pickEffort(level) }
++            })
++        }
++    }
++}
++
++/** A text chip with a caret: 48 dp tall for touch, caption-sized text. */
++@Composable
++private fun HeaderChip(text: String, description: String, onClick: () -> Unit) {
++    val m = muse
++    Row(Modifier.heightIn(min = 48.dp).press(onClick = onClick).padding(horizontal = MuseSpace.s1)
++        .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = description },
++        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
++        T(text, m.scale.caption, m.roles.ink2, maxLines = 1)
++        Ic("caret-down", 12.dp, m.roles.ink2)
++    }
++}
++
+ @Composable
+ private fun toneColor(t: Tone): Color = muse.roles.let { r -> when (t) { Tone.GOOD -> r.positive; Tone.WAIT -> r.caution; Tone.OFF -> r.ink2 } }
+ 
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChatStore.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChatStore.kt
+index 66312cf6..9605f87b 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChatStore.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeChatStore.kt
+@@ -46,6 +46,7 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
+ 
+     fun load() = scope.launch {
+         runCatching { api().status() }.onSuccess { s -> _ui.update { it.copy(status = s) } }
++        scope.launch { runCatching { api().claudeModels() }.onSuccess { l -> _ui.update { it.copy(models = l) } } }
+         val kind = _ui.value.contextKind
+         val id = _ui.value.contextId
+         // WS18: Recreate, Edit and Camera come back to the chat open last on this device (else the newest on the server).
+@@ -57,6 +58,25 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
+             .onFailure { e -> _ui.update { it.copy(loaded = true, error = e.message ?: "Couldn't open the chat") } }
+     }
+ 
++    // ------------------------------------------------------------ model and effort (per chat)
++
++    /** The open chat's model (null: back to the person's default). Its next message uses it. */
++    fun pickModel(id: String?) = scope.launch {
++        val t = _ui.value.thread ?: return@launch
++        runCatching { api().setChatModel(t.id, id) }
++            .onSuccess { _ui.update { u -> u.copy(thread = u.thread?.takeIf { it.id == t.id }?.copy(model = id) ?: u.thread) } }
++            .onFailure { e -> _ui.update { it.copy(notice = "Couldn't change the model. " + (e.message ?: "")) } }
++    }
++
++    /** The open chat's effort level; a pick is also the person's last choice, so new chats start from it. */
++    fun pickEffort(level: String?) = scope.launch {
++        val t = _ui.value.thread ?: return@launch
++        runCatching { api().setChatEffort(t.id, level) }
++            .onSuccess { _ui.update { u -> u.copy(thread = u.thread?.takeIf { it.id == t.id }?.copy(effort = level) ?: u.thread,
++                models = if (level != null) u.models?.copy(defaultEffort = level) else u.models) } }
++            .onFailure { e -> _ui.update { it.copy(notice = "Couldn't change the effort. " + (e.message ?: "")) } }
++    }
++
+     // ------------------------------------------------------------ sessions (WS18)
+ 
+     /** A chat on screen with its messages (from GET), remembered as this place's open chat. */
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeLogic.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeLogic.kt
+index 94d4cbf2..0eec0137 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeLogic.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/claude/ClaudeLogic.kt
+@@ -127,7 +127,11 @@ data class ClaudeChatUi(
+     /** WS18: this place's chats, newest first; [sessions] once the server answered with a list. */
+     val threads: List<ClaudeThread> = emptyList(),
+     val sessions: Boolean = false,
++    /** The Claude models to pick from (null: not loaded, or an older server: the model and effort chips hide). */
++    val models: studio.muse.app.data.ClaudeModelList? = null,
+ ) {
++    /** The open chat's model and effort (effort only with the levels its model takes). */
++    val choice get() = studio.muse.app.data.ClaudeModelChoice.of(models, thread)
+     val busy get() = turn?.active == true
+     /** Attaching images: not in Camera stage yet (the server refuses them there). */
+     val canAttach get() = contextKind != "camera"
+diff --git a/android/app/src/test/kotlin/studio/muse/app/claude/ClaudeChatScreenshotTest.kt b/android/app/src/test/kotlin/studio/muse/app/claude/ClaudeChatScreenshotTest.kt
+index 5aaf27fa..781c3429 100644
+--- a/android/app/src/test/kotlin/studio/muse/app/claude/ClaudeChatScreenshotTest.kt
++++ b/android/app/src/test/kotlin/studio/muse/app/claude/ClaudeChatScreenshotTest.kt
+@@ -66,7 +66,7 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
+     companion object {
+         private val CASES = listOf(
+             "streaming" to 390, "streaming" to 360, "idle" to 390, "offline" to 390, "offline" to 360, "offline_api" to 390,
+-            "sheet" to 390, "sheet" to 360, "panel" to 1024, "connections" to 390, "connections" to 360,
++            "sheet" to 390, "sheet" to 360, "panel" to 1024, "connections" to 390, "connections" to 360, "model_effort" to 390, "model_effort" to 360,
+         )
+ 
+         @JvmStatic
+@@ -102,6 +102,8 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
+             "streaming", "sheet", "panel" -> streaming
+             "offline" -> offline
+             "offline_api" -> offline.copy(status = offline.status!!.copy(apiFallback = ApiFallbackStatus(true, true)), refusal = ClaudeFallback(status.openInClaudeUrl, true))
++            // The chat's model, then its effort (High picked; the menu lists the levels the model takes).
++            "model_effort" -> idleUi.copy(thread = idleUi.thread!!.copy(effort = "high"), models = runBlocking { api.claudeModels() })
+             else -> idleUi
+         }
+         val conn = runBlocking { fake.camera.connections() }
+@@ -124,6 +126,7 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
+                             Box(Modifier.weight(1f).fillMaxHeight().background(m.t.surface2), contentAlignment = Alignment.Center) { T("Edit suite preview", m.type.tiny, m.t.muted) }
+                             ClaudeChatContent(ui, "Claude", ClaudeChatActions(), Modifier.width(380.dp).fillMaxHeight())
+                         }
++                        "model_effort" -> ClaudeChatContent(ui, "Claude", ClaudeChatActions(), Modifier.fillMaxSize())
+                         else -> ClaudeChatContent(ui, "Direct with Claude", ClaudeChatActions(), Modifier.fillMaxSize())
+                     }
+                 }
+@@ -138,6 +141,7 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
+             "idle" -> { has("On your Claude plan, answered by your Mac"); has("Shot draft · $1.92") }
+             "offline" -> { has("Open in Claude"); has("Turn on the API fallback") }
+             "offline_api" -> has("Use the studio API key")
++            "model_effort" -> { has("Opus 5.5"); has("Effort: High"); has("Claude model: Claude Opus 5.5") }
+             "connections" -> { has("Claude on your plan"); has("Add MUSE to Claude"); has("billed per use") }
+         }
+         compose.onRoot().captureRoboImage("build/outputs/roborazzi/claude_${theme}_${screen}_$width.png")
+diff --git a/android/app/src/test/kotlin/studio/muse/app/claude/ClaudeEffortTest.kt b/android/app/src/test/kotlin/studio/muse/app/claude/ClaudeEffortTest.kt
+new file mode 100644
+index 00000000..6588df40
+--- /dev/null
++++ b/android/app/src/test/kotlin/studio/muse/app/claude/ClaudeEffortTest.kt
+@@ -0,0 +1,94 @@
++package studio.muse.app.claude
++
++import kotlinx.coroutines.ExperimentalCoroutinesApi
++import kotlinx.coroutines.runBlocking
++import kotlinx.coroutines.test.advanceUntilIdle
++import kotlinx.coroutines.test.runTest
++import kotlinx.serialization.json.Json
++import okhttp3.Interceptor
++import okhttp3.MediaType.Companion.toMediaType
++import okhttp3.OkHttpClient
++import okhttp3.Protocol
++import okhttp3.Response
++import okhttp3.ResponseBody.Companion.toResponseBody
++import okio.Buffer
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import studio.muse.app.data.ClaudeEffort
++import studio.muse.app.data.ClaudeModelChoice
++import studio.muse.app.data.ClaudeModelInfo
++import studio.muse.app.data.ClaudeModelList
++import studio.muse.app.data.ClaudeThread
++import studio.muse.app.data.FakeCameraApi
++import studio.muse.app.data.FakeClaudeApi
++import studio.muse.app.data.HttpClaudeApi
++import studio.muse.app.ui.screens.claude.ClaudeChatStore
++
++/** Effort beside the model in the Claude chat (owner, 2026-11-13): the same rules as the Mac and the server. */
++@OptIn(ExperimentalCoroutinesApi::class)
++class ClaudeEffortTest {
++    private val opus = ClaudeModelInfo("claude-opus-5-5", "Claude Opus 5.5", efforts = ClaudeEffort.ALL, defaultEffort = "medium")
++    private val none = ClaudeModelInfo("claude-x", "Claude X")
++
++    @Test fun resolvesChatThenLastChoiceThenModelDefault() {
++        assertEquals("medium", ClaudeEffort.resolve(opus, null, null))
++        assertEquals("max", ClaudeEffort.resolve(opus, null, "max"))
++        assertEquals("low", ClaudeEffort.resolve(opus, "low", "max"))
++        val some = ClaudeModelInfo("m", "M", efforts = listOf("max", "low", "bogus"), defaultEffort = "low")
++        assertEquals(listOf("low", "max"), ClaudeEffort.levels(some))
++        assertEquals("low", ClaudeEffort.resolve(some, "high", null))
++        assertNull(ClaudeEffort.resolve(none, "high", "high"))
++        assertEquals(listOf("Low", "Medium", "High", "Extra high", "Max"), ClaudeEffort.ALL.map(ClaudeEffort::name))
++        assertEquals("Opus 5.5", ClaudeEffort.shortModel("Claude Opus 5.5"))
++    }
++
++    @Test fun choiceFollowsTheChatsModel() {
++        val list = ClaudeModelList(listOf(opus, none), default = null, studioDefault = "claude-opus-5-5", defaultEffort = "high")
++        val t = ClaudeThread("ct_1", contextKind = "chat")
++        assertEquals("high", ClaudeModelChoice.of(list, t).effort)
++        assertEquals("xhigh", ClaudeModelChoice.of(list, t.copy(effort = "xhigh")).effort)
++        val onNone = ClaudeModelChoice.of(list, t.copy(model = "claude-x", effort = "xhigh"))
++        assertTrue(onNone.levels.isEmpty())
++        assertNull(onNone.effort)
++        // An older server: no efforts in the list, so no picker.
++        val old = Json { ignoreUnknownKeys = true }.decodeFromString(ClaudeModelList.serializer(),
++            """{"models":[{"id":"claude-opus-5-5","name":"Claude Opus 5.5","speed":"Steady","cost":"x","good":"y"}],"default":null,"studioDefault":"claude-opus-5-5"}""")
++        assertNull(ClaudeModelChoice.of(old, t).effort)
++    }
++
++    @Test fun picksReachTheChatAndBecomeTheLastChoice() = runTest {
++        lateinit var store: ClaudeChatStore
++        val api = FakeClaudeApi(this, { 0L }, { store.onLive(it) }, stepDelayMs = 0)
++        store = ClaudeChatStore({ api }, this, "camera", FakeCameraApi.SEED_ID)
++        store.load(); advanceUntilIdle()
++        assertEquals("medium", store.ui.value.choice.effort)
++        store.pickEffort("high"); advanceUntilIdle()
++        assertEquals("high", store.ui.value.thread?.effort)
++        assertEquals("high", store.ui.value.choice.effort)
++        assertEquals("high", api.claudeModels().defaultEffort)
++        store.pickModel("claude-sonnet-5-5"); advanceUntilIdle()
++        assertEquals("claude-sonnet-5-5", store.ui.value.choice.model?.id)
++        assertEquals("high", store.ui.value.choice.effort)
++        assertEquals("claude-sonnet-5-5", api.getThread(store.ui.value.thread!!.id).model)
++    }
++
++    @Test fun httpSendsTheLevelAndNullClears() {
++        val bodies = mutableListOf<Pair<String, String>>()
++        val client = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
++            val r = chain.request()
++            val b = Buffer().also { r.body?.writeTo(it) }.readUtf8()
++            bodies += "${r.method} ${r.url.encodedPath}" to b
++            Response.Builder().request(r).protocol(Protocol.HTTP_1_1).code(200).message("OK")
++                .body("""{"id":"ct_1"}""".toResponseBody("application/json".toMediaType())).build()
++        }).build()
++        val api = HttpClaudeApi("https://muse.test/", client, Json { ignoreUnknownKeys = true })
++        runBlocking { api.setChatEffort("ct_1", "xhigh"); api.setChatEffort("ct_1", null); api.setChatModel("ct_1", "claude-haiku-5-5") }
++        assertEquals(listOf(
++            "PATCH /v1/claude/chats/ct_1" to """{"effort":"xhigh"}""",
++            "PATCH /v1/claude/chats/ct_1" to """{"effort":null}""",
++            "PATCH /v1/claude/chats/ct_1" to """{"model":"claude-haiku-5-5"}""",
++        ), bodies)
++    }
++}
+-- 
+2.43.0
+
