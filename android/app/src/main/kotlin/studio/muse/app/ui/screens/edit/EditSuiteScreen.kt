@@ -511,6 +511,9 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     private var placeTracking = false
     private var lastSentPlace: studio.muse.core.edit.EditPlace? = null
     private var lastSentProject: EditProject? = null
+    /** When the editor became ready and what it showed then (a place only counts once changed or after a moment open). */
+    private var placeOpenedAt = 0L
+    private var placeBase: Pair<studio.muse.core.edit.EditPlace, EditProject?>? = null
     /** A member's (or an unshared) edit kept on this phone: what the editor reopens instead of the take's saved edit. */
     private val localResume: EditProject? get() = resume?.takeIf { it.sessionId == null }?.let { r ->
         recentFile.load().firstOrNull { "local:${it.key}" == r.id }?.project?.let { runCatching { EditJson.parse(it) }.getOrNull() }
@@ -742,7 +745,10 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     private fun startPlace() {
         resume?.place?.let { controller.restorePlace(it) }
         placeTracking = true
-        savePlace()
+        // Not saved on opening (runs 604/607): it counts once the person changes something, or after a moment open.
+        placeOpenedAt = System.currentTimeMillis()
+        controller.ui.value.let { u -> placeBase = placeOf(u, resume?.place) to u.project }
+        viewModelScope.launch { delay(PLACE_COUNTS_AFTER_MS + 100); savePlace() }
     }
 
     /** Saves where the editor stands: on this phone (with a member's project) and, for the owner, on the session. */
@@ -751,6 +757,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
         val u = controller.ui.value
         val project = u.project ?: return
         val place = placeOf(u, resume?.place)
+        val changed = placeBase?.let { (p0, pr0) -> !p0.samePlace(place) || pr0 != project } ?: true
+        if (!changed && System.currentTimeMillis() - placeOpenedAt < PLACE_COUNTS_AFTER_MS) return
         // The owner's live session (or, its take deleted, the session it was opened from); a member's edit has none.
         val live = sync
         val sid = live?.sessionId ?: resume?.sessionId?.takeIf { live == null }
@@ -1409,6 +1417,9 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
     }
 
     companion object {
+        /** An editor open this long counts as worked on even without a change. */
+        const val PLACE_COUNTS_AFTER_MS = 2_000L
+
         /**
          * The whole source as one clip on a canvas the size of the source. [lut]: the take's suite look (workstream 1,
          * `Take.look.lut`, e.g. "palette:<id>"), put on the clip at full strength like the server's edit sessions do.
