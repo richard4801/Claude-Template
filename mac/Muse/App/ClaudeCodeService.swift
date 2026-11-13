@@ -530,6 +530,8 @@ final class ClaudeCodeService: ObservableObject {
     // MARK: Claude's orb (one state machine, MuseCore ClaudeOrb): fed by real events only
 
     @Published private(set) var orb = ClaudeOrb()
+    /// Claude's finished turns in the open chat (live chips ask again after each reply).
+    @Published private(set) var turnsEnded = 0
     static var now: Double { Date().timeIntervalSinceReferenceDate }
 
     /// The open chat's stream (this Mac's own turns and other devices' turns).
@@ -540,6 +542,7 @@ final class ClaudeCodeService: ObservableObject {
         case .text, .assistant, .tool, .image: orb.chunk(at: now)
         case .done(let ok, _, _):
             orb.turnEnded(ok: ok, at: now)
+            turnsEnded &+= 1
             if !ok { orbErrorEnds() }
         }
     }

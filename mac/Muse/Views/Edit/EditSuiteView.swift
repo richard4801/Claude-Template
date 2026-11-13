@@ -399,7 +399,12 @@ struct EditSuiteEditor: View {
         .onChange(of: SnapshotRunner.state.claudeTab) { _, tab in if tab != nil { showClaude = true } }
         // One Claude: Claude sees this edit (its take and live session).
         .onChange(of: session.liveConnected) { _, _ in reportClaudePage() }
-        .onDisappear { store.oneClaude.viewPage = nil }
+        .onDisappear { store.oneClaude.viewPage = nil; store.claudeEditChanged(nil) }
+        // Live chips (owner 2026-11-12): what is on the timeline now (captions, music and beats, the selection, text
+        // outside the platform view's safe area, unsaved); the store asks the server again after a moment.
+        .onChange(of: claudeFacts, initial: true) { _, q in
+            store.claudeEditChanged(q, assets: Dictionary(session.state.project.assets.map { ($0.id, $0.kind.rawValue) }, uniquingKeysWith: { a, _ in a }))
+        }
         // Shortcuts are off while a text box has the cursor (owner bug 2026-11-11: typing in Claude chat played,
         // split or deleted clips). The table lives in MuseCore (EditShortcuts) with its tests.
         .onKeyPress(.space) { shortcut(.space) }
@@ -490,6 +495,14 @@ struct EditSuiteEditor: View {
         let title = min(360, max(CGFloat(session.title.count) * 9, CGFloat(session.saveLine.count) * 7.2))
         let ratio = CGFloat(EditSuite.Ratio.allCases.count) * 56 + 4
         return 32 + 32 + 12 + title + 12 + 8 + 12 + ratio + 12 + 8 + 12 + quiet + 12 + 100 + 24
+    }
+
+    /// The edit as the live chips need it (ClaudeSuggestQuery.edit in MuseCore).
+    private var claudeFacts: ClaudeSuggestQuery {
+        var q = ClaudeSuggestQuery(page: nil)
+        q.edit(project: session.state.project, selection: session.state.selection, preview: session.state.preview,
+               unsaved: session.state.hasUnsavedChanges)
+        return q
     }
 
     private func reportClaudePage() {

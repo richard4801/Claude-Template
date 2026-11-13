@@ -57,6 +57,10 @@ struct OneClaudePanel: View {
             Button("Cancel", role: .cancel) {}
         } message: { Text(OneClaudeDeleteAsk.keeps) }
         .onChange(of: store.claudePage) { _, _ in store.oneClaudePageChanged() }
+        // Live chips: after each Claude reply, when one of the person's jobs ends, when the Suite composer changes.
+        .onChange(of: service.turnsEnded) { _, _ in store.claudeChipsChanged() }
+        .onChange(of: store.claudeJobsEnded) { _, _ in store.claudeChipsChanged() }
+        .onChange(of: store.suite.composer) { _, _ in if store.screen == .suite { store.claudeChipsChanged() } }
         // Claude's orb (MuseCore ClaudeOrb) hears what waits for the person and the job Claude started.
         .onChange(of: store.claudeWaitingCount, initial: true) { _, n in service.orbWaiting(n) }
         .onChange(of: store.claudeJobProgress, initial: true) { _, p in

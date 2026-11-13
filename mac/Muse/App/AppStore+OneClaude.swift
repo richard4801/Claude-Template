@@ -35,6 +35,8 @@ final class OneClaudeState {
     var answeredCards: [String: String] = [:]
     var answering: Set<String> = []
     var undoing: Set<String> = []
+    /// The Suite's own Claude panel's live chips (nil: its fixed ones, SuiteAssistClaude.suggestions).
+    var suiteChips: [ClaudeChip]?
     /// The quick-action chips over the composer, for the page Claude sees.
     var chips: [ClaudeChip] = ClaudeChip.fallback(page: nil, tool: nil)
     /// A job started from a card (its progress fills the activity strip until it ends).
@@ -49,6 +51,13 @@ final class OneClaudeState {
     var models: ClaudeModelList?
 
     @ObservationIgnored var feedTask: Task<Void, Never>?
+    /// Live chips (owner 2026-11-12): the pending refresh, the Edit page's facts as it sees them, the edit's assets (a new
+    /// video or sound = "just imported" for two minutes) and the page the chips are for (their places stay steady there).
+    @ObservationIgnored var chipsTask: Task<Void, Never>?
+    @ObservationIgnored var editFacts: ClaudeSuggestQuery?
+    @ObservationIgnored var editAssets: Set<String>?
+    @ObservationIgnored var imported: ClaudeImported?
+    @ObservationIgnored var chipsPage: String?
     @ObservationIgnored var pageTask: Task<Void, Never>?
     @ObservationIgnored var lastSentPage: ClaudePage?
     @ObservationIgnored var lastSentChat: String?
@@ -57,6 +66,13 @@ final class OneClaudeState {
     init() {}
 
     var current: ClaudeChatSummary? { chats.first { $0.id == chatId } }
+}
+
+/// A video or sound that just came into the open edit (the chips offer to watch or listen to it for two minutes).
+struct ClaudeImported {
+    var kind: String
+    var id: String
+    var at: Date
 }
 
 extension AppStore {
@@ -200,7 +216,7 @@ extension AppStore {
             guard let self, !Task.isCancelled else { return }
             await self.oneClaudeLinkSuite()
             let p = self.claudePage
-            if p.name != self.oneClaude.lastSentPage?.name || p.tool != self.oneClaude.lastSentPage?.tool { await self.loadClaudeChips() }
+            if p != self.oneClaude.lastSentPage || id != self.oneClaude.lastSentChat { await self.loadClaudeChips() }
             guard p != self.oneClaude.lastSentPage || id != self.oneClaude.lastSentChat else { return }
             try? await api.setChatPage(id, page: p)
             self.oneClaude.lastSentPage = p
@@ -402,16 +418,75 @@ extension AppStore {
         return min(1, max(0, j.progress > 1 ? j.progress / 100 : j.progress))
     }
 
-    /// The chips for the page Claude sees (the server's list; this app's copy when it is older or offline).
-    func loadClaudeChips() async {
+    /// What is on screen changed (the edit, the composer, a reply, a job): new live chips after a moment (~1 s), so a
+    /// burst of changes asks once.
+    func claudeChipsChanged(now: Bool = false) {
+        guard oneClaude.open else { return }
+        oneClaude.chipsTask?.cancel()
+        oneClaude.chipsTask = Task { [weak self] in
+            if !now { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+            guard let self, !Task.isCancelled else { return }
+            await self.loadClaudeChips()
+        }
+    }
+
+    /// The Edit page's facts (EditSuiteView): asks for new chips when they change; a new video or sound in the edit is
+    /// "just imported".
+    func claudeEditChanged(_ facts: ClaudeSuggestQuery?, assets: [String: String] = [:]) {
+        guard let facts else {
+            oneClaude.editFacts = nil
+            oneClaude.editAssets = nil
+            oneClaude.imported = nil
+            return
+        }
+        if let known = oneClaude.editAssets,
+           let new = assets.filter({ !known.contains($0.key) && ($0.value == "video" || $0.value == "audio") }).min(by: { $0.key < $1.key }) {
+            oneClaude.imported = ClaudeImported(kind: new.value, id: new.key, at: Date())
+        }
+        oneClaude.editAssets = Set(assets.keys)
+        guard facts != oneClaude.editFacts else { return }
+        oneClaude.editFacts = facts
+        claudeChipsChanged()
+    }
+
+    /// Jobs that ended (done or failed): a change asks for new chips ("Why did it fail?", "Watch the new take").
+    var claudeJobsEnded: String {
+        let ended = jobs.filter { $0.isDone || $0.isFailed }
+        return "\(ended.count)·\(ended.filter(\.isFailed).count)"
+    }
+
+    /// The Suite's own Claude panel (Shot composer): its chips follow the composer too (same server rules, page suite).
+    func loadSuiteSuggestions() async {
+        guard let api = oneClaudeAPI, let a = suite.claude.assist else { return }
+        let q = ClaudeSuggestQuery(page: ClaudePage(name: "suite", tool: suite.composer.tool.rawValue, ids: ["assistId": a.id]), chatId: nil)
+        guard let list = try? await api.claudeSuggestions(q), !list.isEmpty else { return }
+        let old = oneClaude.suiteChips ?? []
+        let next = ClaudeChip.steady(old: old, new: list)
+        if oneClaude.suiteChips != next { oneClaude.suiteChips = next }
+    }
+
+    /// What the server needs for the live chips: the page Claude sees, the chat, and on Edit what is on screen there.
+    var claudeSuggestQuery: ClaudeSuggestQuery {
         let p = claudePage
-        var list = ClaudeChip.fallback(page: p.name, tool: p.tool)
+        var q = (p.name == "edit" ? oneClaude.editFacts : nil)?.on(p, chatId: oneClaude.chatId) ?? ClaudeSuggestQuery(page: p, chatId: oneClaude.chatId)
+        if p.name == "edit", let i = oneClaude.imported, Date().timeIntervalSince(i.at) < 120 { q.imported = i.kind; q.importedId = i.id }
+        return q
+    }
+
+    /// The chips for what Claude sees now (the server's live list; the page's fixed copy when it is older or offline).
+    /// On the same page a chip that stays keeps its place, so the row doesn't jump.
+    func loadClaudeChips() async {
+        let q = claudeSuggestQuery
+        var list = ClaudeChip.fallback(page: q.page, tool: q.tool)
         if let api = oneClaudeAPI {
-            do { list = try await api.claudeChips(page: p.name, tool: p.tool); oneClaude.serverCards = true }
+            do { list = try await api.claudeSuggestions(q); oneClaude.serverCards = true }
             catch let e as ApiError where e.code == "not_found" { oneClaude.serverCards = false }
             catch {}
         }
-        if oneClaude.chips != list { oneClaude.chips = list }
+        let samePage = oneClaude.chipsPage == q.page
+        let next = samePage ? ClaudeChip.steady(old: oneClaude.chips, new: list) : list
+        oneClaude.chipsPage = q.page
+        if oneClaude.chips != next { oneClaude.chips = next }
     }
 
     /// Approve or Decline on Claude's card. The server runs it as this person and leaves "Done: …" in the chat.

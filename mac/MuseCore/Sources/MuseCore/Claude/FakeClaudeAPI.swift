@@ -25,6 +25,14 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
 
     public init(now: @escaping () -> Double = { Date().timeIntervalSince1970 * 1000 }) { self.now = now }
 
+    /// Live chips (GET v1/claude/suggestions): the queries asked, for review-mode checks; answered by the demo copy of
+    /// the server's Edit rules.
+    public private(set) var suggestionQueries: [ClaudeSuggestQuery] = []
+    public func claudeSuggestions(_ q: ClaudeSuggestQuery) async throws -> [ClaudeChip] {
+        locked { suggestionQueries.append(q) }
+        return ClaudeChip.demoSuggestions(q)
+    }
+
     private func locked<T>(_ f: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
