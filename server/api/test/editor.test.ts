@@ -485,7 +485,7 @@ describe('Replicate provider (fake Replicate on localhost)', () => {
     const r = await done(j.id);
     expect(r.state, JSON.stringify(r)).toBe('done');
     expect(r.result.words.map((w: any) => w.text)).toEqual(['Hello', 'um', 'there']);
-    expect(r.costUsd).toBeCloseTo(12.5 * 0.0014 * 2, 6); // billed GPU time × rate × 2
+    expect(r.costUsd).toBeCloseTo(Math.min(12.5 * 0.0014 * 2, r.estimateUsd), 6); // billed GPU time × rate × 2, never above the estimate (ci_238dd2979f5a)
     const c = creates.find(x => x.version === 'v_whisper');
     expect(c.input).toMatchObject({ align_output: true, batch_size: 32 });
     expect(c.input.audio_file).toMatch(/^http/);

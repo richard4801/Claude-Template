@@ -2,6 +2,7 @@
 // run; paid ones need `confirm: true` AND the owner's yes in the app), look at frames, and ask an online MUSE app to
 // save or export. Guardrails: no posting, no deleting takes, no spend without the owner, every call logged in the
 // session history and every change undoable. Owner only (the MCP server already admits only owner tokens).
+import { RANGED_KINDS, clipWindow } from './range.js';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { previewView } from './safeArea.js';
 import { takes, uploads } from '../db/schema.js';
@@ -80,7 +81,12 @@ async function helper(env: ToolEnv, a: Record<string, unknown>, o: { kind: 'capt
   const p = s.project as M.EditProject;
   const itemId = typeof a[o.itemKey ?? 'itemId'] === 'string' ? (a[o.itemKey ?? 'itemId'] as string) : undefined;
   const asset = svc.sourceAsset(p, s.takeId, itemId);
-  const source = asset.take ? { takeId: asset.take } : asset.upload ? { uploadId: asset.upload, durationSec: asset.durationSec } : null;
+  // ci_238dd2979f5a: a paid per-clip helper works on (and is priced on) the clip's own source range, not the whole source:
+  // the item's [inSec, outSec], or with no item every clip the result lands on (range.ts pads it and puts the result back).
+  const spans = !RANGED_KINDS.includes(o.kind) ? [] : p.tracks.flatMap(t => (t.items as M.VideoClip[]).filter(c => c.asset === asset.id && typeof c.inSec === 'number' && typeof c.outSec === 'number'
+    && (itemId ? c.id === itemId : o.kind === 'denoise' || t.kind === 'main' || t.kind === 'video')));
+  const range = clipWindow(spans, asset.durationSec);
+  const source = asset.take ? { takeId: asset.take, ...(range ? { range } : {}) } : asset.upload ? { uploadId: asset.upload, durationSec: asset.durationSec, ...(range ? { range } : {}) } : null;
   if (!source) throw badRequest('That item has no stored media to analyse');
   const body = { kind: o.kind, source, options: o.options ?? {} };
   const est = await ai.estimate(env.user, body);

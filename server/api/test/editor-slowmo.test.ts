@@ -109,7 +109,7 @@ describe.skipIf(!hasFfmpeg)('slow motion job (fake fal)', () => {
     fs.writeFileSync(out, Buffer.concat(await (async () => { const o = await a.ctx.storage.get(key); const bs: Buffer[] = []; for await (const c of o!.body as any) bs.push(c); return bs; })()));
     const info = await probe('ffprobe', out);
     expect(Math.abs(info.duration - 4)).toBeLessThan(0.1); expect(Math.round(info.fps)).toBe(30); expect(info.audioCodec).toBeNull();
-    expect(r.costUsd).toBeCloseTo(slowmoUsd(12.5, 2), 6);
+    expect(r.costUsd).toBeCloseTo(Math.min(slowmoUsd(12.5, 2), r.estimateUsd), 6); // never above the approved estimate (ci_238dd2979f5a)
     expect((await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, j.id))).map(x => x.kind).sort()).toEqual(['hold', 'settle']);
     expect(leftovers()).toEqual([]);
 

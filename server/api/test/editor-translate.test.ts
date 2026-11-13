@@ -100,7 +100,7 @@ describe('translate job (fake Claude)', () => {
     expect(r.result.words[0].startSec).toBeCloseTo(lines[0]!.startSec, 3); expect(r.result.words.at(-1).endSec).toBeCloseTo(lines.at(-1)!.endSec, 3);
     // Settled on what the calls used: 50K in + 40K out per call on Haiku, × 2.
     const expected = translateUsd('standard', { input: 50_000 * calls.length, output: 40_000 * calls.length }, 2);
-    expect(r.costUsd).toBeCloseTo(expected, 6);
+    expect(r.costUsd).toBeCloseTo(Math.min(expected, r.estimateUsd), 6); // never above the approved estimate (ci_238dd2979f5a)
     const rows = await a.ctx.db.select().from(ledger).where(eq(ledger.jobId, j.id));
     expect(rows.map(x => x.kind).sort()).toEqual(['hold', 'settle']);
     expect(calls[0]).toMatchObject({ model: 'claude-haiku-5-5', output_config: { format: { type: 'json_schema' } } });

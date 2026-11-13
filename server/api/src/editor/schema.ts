@@ -7,7 +7,8 @@ const ms = (name: string) => bigint(name, { mode: 'number' });
 export type EditorJobKind = 'captions' | 'cuts' | 'matte' | 'denoise' | 'beats' | 'reverse' | 'stabilize' | 'translate' | 'slowmo' | 'separate' | 'cutout' | 'briefs' | 'objectswap' | 'restyle' | 'layers';
 export type EditorJobState = 'running' | 'done' | 'failed' | 'cancelled';
 /** What the job works on: a take of the studio, or an upload of the studio (with the duration the app measured). */
-export type EditorSource = { takeId?: string; uploadId?: string; durationSec: number };
+/** `range` (matte, layers, denoise): the window of it processed and priced, in source seconds (editor/range.ts). */
+export type EditorSource = { takeId?: string; uploadId?: string; durationSec: number; range?: { startSec: number; endSec: number } };
 
 export const editorJobs = pgTable('editor_jobs', {
   id: text('id').primaryKey(),

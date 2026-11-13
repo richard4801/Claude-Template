@@ -33,6 +33,7 @@ import { AssemblyAI, ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from './assemblyai.js';
 import { exportLanguages, exportNotice } from './scripts.js';
 import { CUTOUT_LIMITS, composeCutout, prepareStill } from './cutout.js';
 import { editorJobs, type EditorJobKind, type EditorSource } from './schema.js';
+import { RANGED_KINDS, padToSource, parseRange, sourceSec, trimRange } from './range.js';
 import { GENJUTSU_HELPERS, GENJUTSU_LIMITS, genjutsuHelperInput, genjutsuSeconds, genjutsuUsd, isGenjutsuHelper, parseGenjutsuOptions, runGenjutsu, type GenjutsuImage, type GenjutsuOptions } from './genjutsu.js';
 import { GENJUTSU_NO_ACCESS } from '../engines/purposes.js';
 
@@ -87,11 +88,11 @@ function parseOptions(kind: EditorJobKind, o: any): JobOptions {
       const n = (k: string, lo: number, hi: number, d?: number) => { const v = q[k] ?? d; if (typeof v !== 'number' || !Number.isFinite(v) || v < lo || v > hi) throw badRequest(`options.points.${i}.${k}: from ${lo} to ${hi}`); return Math.round(v * 10000) / 10000; };
       if (q.keep !== undefined && typeof q.keep !== 'boolean') throw badRequest(`options.points.${i}.keep: true or false`);
       // A still has one moment: its points are all at t = 0.
-      return { x: n('x', 0, 1), y: n('y', 0, 1), t: kind === 'cutout' ? 0 : n('t', 0, EDITOR_LIMITS.maxMatteSec, 0), keep: q.keep !== false };
+      return { x: n('x', 0, 1), y: n('y', 0, 1), t: kind === 'cutout' ? 0 : n('t', 0, EDITOR_LIMITS.maxSourceSec, 0), keep: q.keep !== false };
     });
     if (!out.points!.some(q => q.keep)) throw badRequest('options.points: tap at least one thing to keep');
   }
-  if (kind === 'layers') out.objects = parseObjects(o.objects, LAYERS_LIMITS.maxSec);
+  if (kind === 'layers') out.objects = parseObjects(o.objects, EDITOR_LIMITS.maxSourceSec); // t is checked against the window in estimate()
   if (kind === 'translate') {
     // Only languages the export can draw (scripts.ts): the others would show in the app but vanish from exports.
     if (typeof o.targetLanguage !== 'string' || !TRANSLATE_LANGUAGES[o.targetLanguage] || !exportLanguages().has(o.targetLanguage)) throw badRequest(`options.targetLanguage: one of ${translateTargets().join(', ')}`);
@@ -208,7 +209,8 @@ export class EditorAiService {
       const d = Number((t.media as { durationSec?: number } | null)?.durationSec ?? s.durationSec);
       if (!(d > 0)) throw badRequest('source.durationSec: unknown video length');
       const md = (t.media ?? {}) as { width?: number; height?: number; fps?: number };
-      return { source: { takeId: t.id, durationSec: d }, key: t.mediaKey, contentType: String((t.media as { contentType?: string } | null)?.contentType ?? 'video/mp4'),
+      const range = parseRange(s.range, d);
+      return { source: { takeId: t.id, durationSec: d, ...(range ? { range } : {}) }, key: t.mediaKey, contentType: String((t.media as { contentType?: string } | null)?.contentType ?? 'video/mp4'),
         ...(md.width && md.height ? { size: { width: md.width, height: md.height, ...(md.fps ? { fps: md.fps } : {}) } } : {}) };
     }
     if (typeof s.uploadId === 'string') {
@@ -219,7 +221,8 @@ export class EditorAiService {
       if (!(await this.ctx.storage.head(up.storageKey))) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it to the URL first');
       // A video or audio upload is made ready with its size, never read into memory (a phone video can be hundreds of MB).
       if (up.state !== 'ready') await readyIfStored(this.ctx, up);
-      return { source: { uploadId: up.id, durationSec: s.durationSec }, key: up.storageKey, contentType: up.contentType };
+      const range = parseRange(s.range, s.durationSec);
+      return { source: { uploadId: up.id, durationSec: s.durationSec, ...(range ? { range } : {}) }, key: up.storageKey, contentType: up.contentType };
     }
     throw badRequest('source: {takeId} or {uploadId, durationSec}');
   }
@@ -269,8 +272,11 @@ export class EditorAiService {
       return { kind, opts, src, reuse: null, usd: usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * this.markup * 10000) / 10000) : 0 };
     }
     const src = await this.source(u, body?.source);
-    const d = src.source.durationSec;
-    if (d > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
+    if (src.source.range && !RANGED_KINDS.includes(kind)) throw badRequest(`source.range: only for ${RANGED_KINDS.join(', ')}`);
+    // ci_238dd2979f5a: an item-scoped job is priced on the seconds it sends (its window), the same seconds the run bills.
+    const d = sourceSec(src.source), win0 = src.source.range?.startSec ?? 0, win1 = src.source.range?.endSec ?? src.source.durationSec;
+    const inWindow = (t: number) => t >= win0 - 0.05 && t <= win1 + 0.05;
+    if (src.source.durationSec > EDITOR_LIMITS.maxSourceSec) throw badRequest(`source: at most ${EDITOR_LIMITS.maxSourceSec / 60} minutes`);
     // Genjutsu helpers (Higgsfield): object swap / restyle, priced per source second (first 30 s) × the editor markup.
     if (isGenjutsuHelper(kind)) {
       if (!this.ctx.suite.providers.higgsfield.configured()) throw badRequest('kind: Genjutsu is not available on this server');
@@ -285,8 +291,8 @@ export class EditorAiService {
       // Find layers (plans/layers-edit.md): the tracker once per object; the same objects on the same video again are free.
       if (!this.matteAvailable) throw badRequest('Layers are coming soon');
       if (d > LAYERS_LIMITS.maxSec + 0.05) throw badRequest(`source: layers work on clips up to ${LAYERS_LIMITS.maxSec} s · trim it first`);
-      if (opts.objects!.some(ob => ob.points.some(q => q.t > d + 0.05))) throw badRequest(`options.objects: t must be within the clip (0–${d} s)`);
-      if (await this.layersBefore(u.studioId, src.key, opts.objects!)) return { kind, opts, src, reuse: null, usd: 0 };
+      if (opts.objects!.some(ob => ob.points.some(q => !inWindow(q.t)))) throw badRequest(`options.objects: t must be within the clip (${win0}–${win1} s of its source)`);
+      if (await this.layersBefore(u.studioId, src.key, opts.objects!, src.source.range)) return { kind, opts, src, reuse: null, usd: 0 };
       const usd = GPU_SEC.layers(d, opts.objects!.length) * this.provider.rates.track;
       return { kind, opts, src, reuse: null, usd: usd > 0 ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(usd * this.markup * 10000) / 10000) : 0 };
     }
@@ -332,7 +338,7 @@ export class EditorAiService {
       }
     }
     else if (kind === 'matte' && opts.points) {
-      if (opts.points.some(q => q.t > d)) throw badRequest(`options.points: t must be within the clip (0–${d} s)`);
+      if (opts.points.some(q => !inWindow(q.t))) throw badRequest(`options.points: t must be within the clip (${win0}–${win1} s of its source)`);
       usd = GPU_SEC.track(d) * p.rates.track;
     } else if (kind === 'matte') usd = GPU_SEC.matte(d) * p.rates.matte;
     else if (!opts.analyzeOnly) usd = GPU_SEC.separate(d) * p.rates.separate;
@@ -395,10 +401,12 @@ export class EditorAiService {
   /** Whether slow motion can run: fal is set up and ffmpeg is here. */
   async slowmoAvailable() { return !!this.ctx.config.FAL_KEY && await (this.slowTools ??= mediaToolsAvailable(this.ctx.config.FFMPEG_PATH, this.ctx.config.FFPROBE_PATH)); }
   /** The same objects (names and taps) found on the same video before, by anyone in the studio, within the reuse window. */
-  private async layersBefore(studioId: string, key: string, objects: LayerObject[]) {
+  /** A run on a window (range) is reused only by a job whose window lies inside it (the mattes are black outside it). */
+  private async layersBefore(studioId: string, key: string, objects: LayerObject[], range?: EditorSource['range']) {
     const since = Date.now() - EDITOR_LIMITS.reuseDays * 86_400_000, want = objectsKey(objects);
     const prev = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'layers'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'), sql`${editorJobs.createdAt} > ${since}`)).orderBy(desc(editorJobs.createdAt)).limit(20);
-    return prev.find(r => objectsKey((r.options as JobOptions).objects ?? []) === want && !!r.result && !(r.result as { reused?: boolean }).reused && (r.result as { aligned?: boolean }).aligned === true) ?? null;
+    const covers = (r: Row) => { const w = r.source.range; return !w || (!!range && w.startSec <= range.startSec + 1e-6 && w.endSec >= range.endSec - 1e-6); };
+    return prev.find(r => objectsKey((r.options as JobOptions).objects ?? []) === want && covers(r) && !!r.result && !(r.result as { reused?: boolean }).reused && (r.result as { aligned?: boolean }).aligned === true) ?? null;
   }
   private async slowmoBefore(studioId: string, key: string, o: JobOptions) {
     const prev = await this.ctx.db.select().from(editorJobs).where(and(eq(editorJobs.studioId, studioId), eq(editorJobs.kind, 'slowmo'), eq(editorJobs.mediaKey, key), eq(editorJobs.state, 'done'))).orderBy(desc(editorJobs.createdAt)).limit(20);
@@ -474,7 +482,8 @@ export class EditorAiService {
 
   private async run(row: Row, u: AuthUser, src: { key: string; contentType: string; source: EditorSource; size?: { width: number; height: number; fps?: number } }, reuse: { words: Word[]; language: string } | null,
     resume = false) {
-    const id = row.id, d = src.source.durationSec, o = row.options as JobOptions, p = this.provider;
+    // d: the seconds the provider sees and bills (the job's window, ci_238dd2979f5a); full: the source's own length.
+    const id = row.id, d = sourceSec(src.source), full = src.source.durationSec, win = src.source.range, o = row.options as JobOptions, p = this.provider;
     /** Genjutsu / slow motion after a restart or a recover: the saved provider request is polled, never started again. */
     const resumeId = resume ? row.predictionId : null;
     const recovering = resume && !!(row.result as { recovering?: boolean } | null)?.recovering;
@@ -493,12 +502,31 @@ export class EditorAiService {
     };
     const needsGpu = row.estimate > 0;
     if (needsGpu) await this.slot();
-    let file: string | null = null;
+    let file: string | null = null, windowKey: string | null = null;
     const temps: string[] = [];
+    /** A result made on the window, back at its place in the source (black / silence around it); the mock's is left as made. */
+    const toSource = async (f: string | null, kind: 'video' | 'audio') => {
+      if (!win || !f || p.name === 'mock') return f;
+      const outF = path.join(os.tmpdir(), `${uid('edpad')}.${kind === 'video' ? 'mp4' : 'wav'}`);
+      temps.push(outF);
+      await this.localSlot();
+      try { await padToSource(this.ctx.config.FFMPEG_PATH, f, outF, win, full, kind); } finally { this.localFree(); }
+      return outF;
+    };
     try {
       if (this.stopping.has(id)) throw new ReplicateError('Cancelled', 'cancelled');
       await this.patch(id, { phase: recovering ? 'Recovering the result' : PHASE[row.kind], progress: 5 });
-      const url = await this.ctx.storage.presignGet(src.key, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
+      let url = await this.ctx.storage.presignGet(src.key, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
+      if (win && needsGpu && p.name !== 'mock' && RANGED_KINDS.includes(row.kind)) {
+        // Only the window goes to the provider (it bills the seconds it is sent).
+        const cut = path.join(os.tmpdir(), `${uid('edwin')}.${row.kind === 'denoise' ? 'wav' : 'mp4'}`);
+        temps.push(cut);
+        await this.localSlot();
+        try { await this.withLocalInput(src.key, input => trimRange(this.ctx.config.FFMPEG_PATH, input, cut, win, row.kind === 'denoise' ? 'audio' : 'video')); } finally { this.localFree(); }
+        windowKey = `t/${uid('edwin')}.${row.kind === 'denoise' ? 'wav' : 'mp4'}`;
+        await this.ctx.storage.putStream(windowKey, fs.createReadStream(cut), row.kind === 'denoise' ? 'audio/wav' : 'video/mp4', fs.statSync(cut).size);
+        url = await this.ctx.storage.presignGet(windowKey, this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC);
+      }
       let result: Record<string, unknown>, gpuSec: number | null = null, rate = 0, spentUsd: number | null = null;
       const transcript = async () => {
         if (reuse) return reuse;
@@ -601,7 +629,7 @@ export class EditorAiService {
         const s = suggestCuts(t.words, d, o);
         result = { ...s, words: t.words, language: t.language, options: { ...CUT_DEFAULTS, ...o }, durationSec: d };
       } else if (row.kind === 'layers') {
-        const prev = await this.layersBefore(u.studioId, src.key, o.objects!);
+        const prev = await this.layersBefore(u.studioId, src.key, o.objects!, src.source.range);
         if (prev) result = { ...(prev.result as Record<string, unknown>), reused: true };
         else {
           const out: Record<string, unknown>[] = [], objs = o.objects!;
@@ -609,34 +637,35 @@ export class EditorAiService {
           for (let k = 0; k < objs.length; k++) {
             const ob = objs[k]!;
             const part: Hooks = { ...hooks, onProgress: async (f, ph) => { await hooks.onProgress?.((k + f) / objs.length, ph ? `${ph} · ${ob.name}` : `Finding ${ob.name}`); } };
-            const pts = await this.pixelPoints(src.key, ob.points, src.size, p.name === 'mock');
+            const pts = await this.pixelPoints(src.key, ob.points, src.size, p.name === 'mock', win?.startSec ?? 0);
             const fps = await this.sourceFps(src.key, src.size);
             const made = await paid(p.rates.track, () => p.track(url, d, pts, part, { fps }));
             if (made.file) temps.push(made.file);
             if (made.gpuSec == null) known = false; else billed += made.gpuSec;
-            const matte = made.file && p.name !== 'mock' ? await this.alignMatte(made.file, d, temps, id) : made.file;
+            const matte = await toSource(made.file && p.name !== 'mock' ? await this.alignMatte(made.file, d, temps, id) : made.file, 'video');
             // Where the object is over time, for pinned text (best effort: a layer without it just can't take a pin).
             const boxes = matte ? await matteBoxes(this.ctx.config.FFMPEG_PATH, matte).catch(e => { this.ctx.log.warn({ err: (e as Error).message, job: id }, 'layer boxes failed'); return null; }) : null;
             const warning = boxes ? coverageWarning(ob, boxes, LAYERS_LIMITS.trackFps) : null;
-            const asset = await this.store(u, src, matte, made.contentType, 'video', d);
+            const asset = await this.store(u, src, matte, made.contentType, 'video', full);
             out.push({ name: ob.name, asset, ...(boxes ? { track: { fps: LAYERS_LIMITS.trackFps, boxes } } : {}), ...(warning ? { warning } : {}) });
           }
           gpuSec = known ? billed : null; rate = p.rates.track;
           // aligned: the mattes run at the source's length (results from before this fix aren't reused).
-          result = { layers: out, durationSec: d, reused: false, aligned: true };
+          result = { layers: out, durationSec: full, reused: false, aligned: true, ...(win ? { window: win } : {}) };
         }
       } else if (row.kind === 'matte' || (row.kind === 'denoise' && !o.analyzeOnly)) {
         const tracked = row.kind === 'matte' && !!o.points?.length;
-        const pts = tracked ? await this.pixelPoints(src.key, o.points!, src.size, p.name === 'mock') : [];
+        const pts = tracked ? await this.pixelPoints(src.key, o.points!, src.size, p.name === 'mock', win?.startSec ?? 0) : [];
         const trackFps = tracked ? await this.sourceFps(src.key, src.size) : undefined;
         const out = row.kind !== 'matte' ? await paid(p.rates.separate, () => p.separate(url, d, hooks))
           : tracked ? await paid(p.rates.track, () => p.track(url, d, pts, hooks, { fps: trackFps })) : await paid(p.rates.matte, () => p.matte(url, d, hooks));
         if (tracked && out.file && p.name !== 'mock') { temps.push(out.file); out.file = await this.alignMatte(out.file, d, temps, id); }
         file = out.file; gpuSec = out.gpuSec; rate = row.kind !== 'matte' ? p.rates.separate : tracked ? p.rates.track : p.rates.matte;
-        const asset = await this.store(u, src, out.file, out.contentType, row.kind === 'matte' ? 'video' : 'audio', d);
+        const placed = await toSource(out.file, row.kind === 'matte' ? 'video' : 'audio');
+        const asset = await this.store(u, src, placed, placed !== out.file ? (row.kind === 'matte' ? 'video/mp4' : 'audio/wav') : out.contentType, row.kind === 'matte' ? 'video' : 'audio', full);
         // workstream 1: an alpha matte (white = keep) the apps apply to the original clip; no green composite, no chroma key.
         result = row.kind === 'matte'
-          ? { asset, alpha: true, mode: tracked ? 'tracked' : 'person', ...(tracked ? { points: o.points } : {}) }
+          ? { asset, alpha: true, mode: tracked ? 'tracked' : 'person', ...(tracked ? { points: o.points } : {}), ...(win ? { window: win } : {}) }
           : { asset, suggestion: noiseSuggestion((await this.transcriptFor(u, src.key, {}).catch(() => null))?.words ?? []) };
       } else {
         result = { suggestion: noiseSuggestion(reuse?.words ?? []) };
@@ -644,7 +673,14 @@ export class EditorAiService {
       // A cancel that arrives after the provider made the result doesn't throw the paid result away.
       if (this.stopping.has(id) && !made) throw new ReplicateError('Cancelled', 'cancelled');
       if (!(await this.owns(id))) return; // another server instance resumed it after a deploy
-      const actual = spentUsd != null ? spentUsd : !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * this.markup * 10000) / 10000) : row.estimate;
+      const billed = spentUsd != null ? spentUsd : !needsGpu ? 0 : gpuSec != null ? Math.max(EDITOR_LIMITS.minChargeUsd, Math.round(gpuSec * rate * this.markup * 10000) / 10000) : row.estimate;
+      // The owner's rule (ci_238dd2979f5a): never charge more than the approved estimate. A provider that billed more is
+      // MUSE's cost: the excess goes on studio overhead and is logged.
+      const actual = row.estimate > 0 ? Math.min(billed, row.estimate) : billed;
+      if (billed - actual > 1e-9) {
+        this.ctx.log.warn({ job: id, kind: row.kind, estimateUsd: row.estimate, billedUsd: billed, gpuSec, sourceSec: d }, 'editor job ran over its estimate · charged the estimate');
+        await this.ctx.money.overhead(u.studioId, Math.round((billed - actual) * 10000) / 10000, `Edit ${row.kind} ran over its estimate (job ${id})`).catch(() => {});
+      }
       if (row.holdTokens || actual > 0) await this.ctx.money.settle(u.studioId, u.id, id, row.holdTokens, actual, `Editor ${row.kind}`);
       await this.patch(id, { state: 'done', progress: 100, phase: 'Done', result, cost: actual, finishedAt: Date.now() });
     } catch (e) {
@@ -664,6 +700,7 @@ export class EditorAiService {
     } finally {
       rmQuiet(file);
       for (const t of temps) rmQuiet(t);
+      if (windowKey) await this.ctx.storage.delete(windowKey).catch(() => {});
       this.stopping.delete(id);
       if (needsGpu) this.free();
     }
@@ -736,11 +773,12 @@ export class EditorAiService {
     } finally { this.localFree(); }
   }
   /** Tap points (0–1, seconds) → pixels and frame numbers of the source (workstream 1). The mock may guess the size. */
-  private async pixelPoints(key: string, points: KeepPoint[], known: { width: number; height: number; fps?: number } | undefined, mock: boolean): Promise<TrackPoint[]> {
+  private async pixelPoints(key: string, points: KeepPoint[], known: { width: number; height: number; fps?: number } | undefined, mock: boolean, startSec = 0): Promise<TrackPoint[]> {
     const info = known ?? await this.withLocalInput(key, f => probe(this.ctx.config.FFPROBE_PATH, f)).catch(() => null);
     const w = info?.width || (mock ? 1080 : 0), h = info?.height || (mock ? 1920 : 0), fps = info?.fps || 30;
     if (!w || !h) throw new ReplicateError('Couldn’t read the video', 'failed');
-    return points.map(q => ({ x: q.x * (w - 1), y: q.y * (h - 1), frame: Math.round(q.t * fps), keep: q.keep }));
+    // A job on a window (range.ts) sends frames from its start: a tap at source t is frame (t − start) × fps there.
+    return points.map(q => ({ x: q.x * (w - 1), y: q.y * (h - 1), frame: Math.max(0, Math.round((q.t - startSec) * fps)), keep: q.keep }));
   }
 
   async withLocalInput<T>(key: string, fn: (input: string) => Promise<T>): Promise<T> {
