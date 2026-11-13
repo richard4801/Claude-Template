@@ -52,11 +52,16 @@ final class ClaudeFileAccessTests: XCTestCase {
         if case .allow = ClaudeFilePolicy.verdict(ask("Read", ["file_path": .string("/Users/me/MoviesOld/x.mov")]), mode: .ask, folders: folders, cwd: cwd, home: home) { XCTFail("prefix") }
     }
 
-    func testCommandsAlwaysAskAndNeverOfferAlways() {
-        for (cmd, why) in [("ls -la ~/Movies", "Commands ask every time"), ("rm -rf out", "Always asks: it deletes"), ("mv a /tmp/b", "Always asks: it moves files"),
-                           ("sudo ls", "Always asks: it needs admin rights"), ("curl https://x.y", "Always asks: it can reach the network"), ("/bin/rm x", "Always asks: it deletes")] {
+    func testCommandsAskUntilARuleCoversThemAndDangerousOnesNeverOfferAlways() {
+        guard case .ask(let ls) = ClaudeFilePolicy.verdict(ask("Bash", ["command": .string("ls -la ~/Movies/Shoot")]), mode: .ask, folders: [], cwd: cwd, home: home) else { return XCTFail() }
+        XCTAssertNil(ls.folder)
+        XCTAssertEqual(ls.alwaysLabel, "Allow always: ls commands")
+        for (cmd, why) in [("rm -rf out", "Always asks: it deletes files"), ("mv a /tmp/b", "Always asks: it moves or renames files"),
+                           ("sudo ls", "Always asks: it needs admin rights"), ("curl https://x.y", "Always asks: it uses the network or installs software"),
+                           ("/bin/rm x", "Always asks: it deletes files")] {
             guard case .ask(let c) = ClaudeFilePolicy.verdict(ask("Bash", ["command": .string(cmd)]), mode: .ask, folders: ["/"], cwd: cwd, home: home) else { return XCTFail(cmd) }
             XCTAssertNil(c.folder, cmd)
+            XCTAssertNil(c.alwaysLabel, cmd)
             XCTAssertEqual(c.detail, cmd)
             XCTAssertEqual(c.alwaysAsksBecause, why, cmd)
         }
@@ -98,17 +103,16 @@ final class ClaudeFileAccessTests: XCTestCase {
         XCTAssertEqual(ClaudeFilePolicy.verdict(ask("Read", ["file_path": .string("/Users/me/a.txt")]), mode: .off, folders: ["/"], cwd: cwd, home: home), .deny(ClaudeFilePolicy.offRefusal))
     }
 
-    func testSettingsKeepFoldersPerChat() throws {
+    func testSettingsKeepOneAllowedList() throws {
         var s = ClaudeFileSettings()
         XCTAssertEqual(s.mode, .ask)
-        s.allow("/Users/me/Movies", chatId: "ct_1", chatTitle: "Clip 8")
-        s.allow("/Users/me/Movies", chatId: "ct_1", chatTitle: "Clip 8")
-        XCTAssertEqual(s.folders(chatId: "ct_1"), ["/Users/me/Movies"])
-        XCTAssertEqual(s.folders(chatId: "ct_2"), [])
+        s.allowFolder("/Users/me/Movies")
+        s.allowFolder("/Users/me/Movies")
+        XCTAssertEqual(s.allowedFolders, ["/Users/me/Movies"])
         let back = try JSONDecoder().decode(ClaudeFileSettings.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(back, s)
-        s.remove(s.folders[0].id)
-        XCTAssertTrue(s.folders.isEmpty)
+        s.removeFolder("/Users/me/Movies")
+        XCTAssertTrue(s.allowedFolders.isEmpty)
     }
 
     func testPermissionLiveEvents() {

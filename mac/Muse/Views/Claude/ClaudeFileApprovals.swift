@@ -1,9 +1,11 @@
 import MuseCore
 import SwiftUI
 
-/// Files on this Mac (owner, 2026-11-11): the approval cards of one chat, above its composer. Each says exactly what Claude
-/// wants to do (read a file, change a file, run a command…) and waits: nothing happens until the person answers, and a
-/// stopped or finished turn ends its cards as a no. Commands never offer "Always".
+/// Files on this Mac (owner, 2026-11-11; Allow always 2026-11-12): the approval cards of one chat, above its composer. Each
+/// says exactly what Claude wants to do (read a file, change a file, run a command…) and waits: nothing happens until the
+/// person answers, and a stopped or finished turn ends its cards as a no. "Allow always" saves the folder, or the kind of
+/// command ("Allow always: ffmpeg commands"), for every chat on this Mac; deleting, moving, network, installs, admin rights,
+/// ~/Library and chained commands never offer it and say why in one line.
 struct ClaudeFileApprovals: View {
     @Environment(\.theme) private var t
     @ObservedObject private var service: ClaudeCodeService = .shared
@@ -14,31 +16,44 @@ struct ClaudeFileApprovals: View {
         let asks = service.fileAsks(threadId: threadId)
         if !asks.isEmpty {
             VStack(alignment: .leading, spacing: Space.s2) {
-                ForEach(asks) { a in card(a) }
+                ForEach(asks) { a in ClaudeFileCardView(card: a.card, id: a.id) }
             }
             .padding(.horizontal, Space.s4)
             .padding(.vertical, Space.s2)
         }
     }
+}
 
-    private func card(_ a: ClaudeCodeService.FileAsk) -> some View {
+/// One approval card: what Claude wants, then Allow once, Allow always (when offered) and a quiet Deny.
+struct ClaudeFileCardView: View {
+    @Environment(\.theme) private var t
+    let card: ClaudeFileCard
+    let id: String
+    var answer: (ClaudePermissionAnswer) -> Void = { _ in }
+
+    init(card: ClaudeFileCard, id: String, answer: ((ClaudePermissionAnswer) -> Void)? = nil) {
+        self.card = card
+        self.id = id
+        self.answer = answer ?? { a in ClaudeCodeService.shared.answerFile(id, a) }
+    }
+
+    var body: some View {
         let r = t.roles
-        return VStack(alignment: .leading, spacing: Space.s2) {
-            Text("Claude asks: \(a.card.action)").scaled(t.scale.body, r.ink)
-            Text(a.card.detail)
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text("Claude asks: \(card.action)").scaled(t.scale.body, r.ink)
+            Text(card.detail)
                 .font(.system(size: 12, design: .monospaced)).foregroundStyle(r.ink)
                 .lineLimit(6).truncationMode(.middle).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            if let f = a.card.folder { Text("Folder: \(f)").scaled(t.scale.caption, r.ink2).lineLimit(1).truncationMode(.middle) }
-            if let why = a.card.alwaysAsksBecause { Text(why).scaled(t.scale.caption, r.ink2) }
-            HStack(spacing: Space.s2) {
-                RButton("Allow once", kind: .action, small: true) { service.answerFile(a.id, .allowOnce) }
-                if let f = a.card.folder {
-                    RButton("Always allow in this folder (this chat)", kind: .quiet, small: true) {
-                        service.answerFile(a.id, .alwaysFolder(f), chatTitle: chatTitle)
-                    }
-                }
-                RButton("Deny", kind: .plain, small: true) { service.answerFile(a.id, .deny) }
+            if let why = card.alwaysAsksBecause {
+                Text(why).scaled(t.scale.caption, r.ink2).lineLimit(2)
+                    .accessibilityIdentifier("claude.card.why")
+            } else if let covers = card.alwaysCovers(home: NSHomeDirectory()) {
+                Text(covers).scaled(t.scale.caption, r.ink2).lineLimit(2).truncationMode(.middle)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Space.s2) { buttons }
+                VStack(alignment: .leading, spacing: Space.s2) { buttons }
             }
         }
         .padding(Space.s3)
@@ -46,12 +61,30 @@ struct ClaudeFileApprovals: View {
         .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(r.raised))
         .overlay(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).stroke(r.hairline, lineWidth: 1))
     }
+
+    @ViewBuilder private var buttons: some View {
+        RButton("Allow once", kind: .action, small: true) { answer(.allowOnce) }
+            .accessibilityIdentifier("claude.card.allowOnce")
+        if let always = card.alwaysLabel {
+            RButton(always, kind: .quiet, small: true) { answer(.always) }
+                .fixedSize()
+                .accessibilityIdentifier("claude.card.allowAlways")
+        }
+        RButton("Deny", kind: .plain, small: true) { answer(.deny) }
+            .accessibilityIdentifier("claude.card.deny")
+    }
 }
 
-/// Settings → Account → Claude: files on this Mac (each person's own), and the folders they always allowed.
+/// Settings → Account → Claude: files on this Mac (each person's own), the "Always allowed" list (folders and kinds of
+/// command, for every chat on this Mac) and "Ask before anything", which pauses the whole list.
 struct ClaudeFileSettingsSection: View {
     @Environment(\.theme) private var t
     @ObservedObject private var service: ClaudeCodeService = .shared
+
+    private func short(_ p: String) -> String {
+        let home = NSHomeDirectory()
+        return ClaudeFilePolicy.inside(p, home) ? "~" + p.dropFirst(home.count) : p
+    }
 
     var body: some View {
         let s = service.fileSettings
@@ -63,6 +96,15 @@ struct ClaudeFileSettingsSection: View {
                 ForEach(ClaudeFileMode.allCases, id: \.self) { m in Text(m.label).tag(m) }
             }
             .labelsHidden().pickerStyle(.menu).fixedSize()
+        }
+        if s.mode == .ask {
+            SettingRow("Ask before anything", hint: s.askAll
+                       ? "Every file and command asks, and the Always allowed list is paused"
+                       : "Folders and commands you always allowed run without asking. Deleting, moving, network, installs and ~/Library always ask.") {
+                Toggle("Ask before anything", isOn: Binding(get: { s.askAll }, set: { service.setAskEverything($0) }))
+                    .labelsHidden().toggleStyle(.switch)
+                    .accessibilityIdentifier("settings.claude.askEverything")
+            }
         }
         SettingRow("When results arrive", hint: s.resultMode == .look
                    ? "When something you started from a chat finishes, Claude looks at it and tells you in that chat (a notification too)."
@@ -79,12 +121,26 @@ struct ClaudeFileSettingsSection: View {
                 .labelsHidden().toggleStyle(.switch)
                 .accessibilityIdentifier("settings.claude.uiControl")
         }
-        if !s.folders.isEmpty {
-            Text("Always allowed").scaled(t.scale.caption, t.roles.ink2).padding(.top, Space.s3)
-            ForEach(s.folders) { f in
-                SettingRow(f.folder, hint: "In “\(f.chatTitle ?? "a chat")”") {
-                    RButton("Remove", kind: .plain, small: true) { service.removeAllowedFolder(f.id) }
+        if s.mode == .ask {
+            Text(s.askAll ? "Always allowed (paused)" : "Always allowed")
+                .scaled(t.scale.caption, t.roles.ink2).padding(.top, Space.s3)
+                .accessibilityIdentifier("settings.claude.alwaysAllowed")
+            if s.allowedFolders.isEmpty && s.rules.isEmpty {
+                SettingRow("Nothing yet", hint: "Choose Allow always on a card in a chat") { EmptyView() }
+            }
+            ForEach(s.allowedFolders, id: \.self) { f in
+                SettingRow(short(f), hint: "Folder: Claude reads and writes here in every chat") {
+                    RButton("Remove", kind: .plain, small: true) { service.removeAllowedFolder(f) }
+                        .accessibilityLabel("Remove \(short(f))")
                 }
+                .opacity(s.askAll ? 0.6 : 1)
+            }
+            ForEach(s.rules) { rule in
+                SettingRow(rule.label, hint: "Runs without asking inside your allowed folders") {
+                    RButton("Remove", kind: .plain, small: true) { service.removeCommandRule(rule.id) }
+                        .accessibilityLabel("Remove \(rule.label)")
+                }
+                .opacity(s.askAll ? 0.6 : 1)
             }
         }
     }

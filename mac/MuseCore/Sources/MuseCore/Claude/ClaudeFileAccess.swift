@@ -3,7 +3,7 @@ import Foundation
 /// Files on this Mac (owner, 2026-11-11): Claude Code in the one-Claude panel may read and write files and run commands on
 /// the person's own Mac, but only after they say yes. Claude Code runs with
 /// `--permission-prompt-tool mcp__muse__permission_prompt`; each question reaches the app as a `permission` live event
-/// and becomes an approval card in the chat (Allow once · Always allow in this folder · Deny). Keys, passwords and tokens
+/// and becomes an approval card in the chat (Allow once · Allow always · Deny; see ClaudeAlwaysRules). Keys, passwords and tokens
 /// are refused even when approved.
 public enum ClaudeFileMode: String, Codable, CaseIterable, Sendable {
     /// Ask every time (the default).
@@ -14,7 +14,7 @@ public enum ClaudeFileMode: String, Codable, CaseIterable, Sendable {
     public var label: String { self == .ask ? "Ask every time" : "Off" }
 }
 
-/// One folder the person always allows, for one chat.
+/// One folder allowed for one chat (before 2026-11-12). Read only to move old settings to the "Always allowed" list.
 public struct ClaudeAllowedFolder: Codable, Hashable, Sendable, Identifiable {
     public var folder: String
     public var chatId: String
@@ -27,29 +27,63 @@ public struct ClaudeAllowedFolder: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// The person's file settings on this Mac (stored per person in the app's defaults).
+/// The person's file settings on this Mac (stored per person in the app's defaults). "Always allowed" folders and command
+/// rules count in every chat on this Mac (owner, 2026-11-12).
 public struct ClaudeFileSettings: Codable, Hashable, Sendable {
     public var mode: ClaudeFileMode = .ask
+    /// Old per-chat folders: moved to `alwaysFolders` by `migrated(home:)`, then empty.
     public var folders: [ClaudeAllowedFolder] = []
     /// When results arrive (nil = the default: Claude looks and tells).
     public var results: ClaudeResultMode?
     /// "Let Claude operate MUSE's screen" (nil = the default: on).
     public var uiControl: Bool?
+    /// Folders Claude may read and write in, every chat.
+    public var alwaysFolders: [String]?
+    /// Kinds of command that run without a card inside the allowed folders.
+    public var commandRules: [ClaudeCommandRule]?
+    /// "Ask before anything": every rule is off (kept, not deleted) and every card asks.
+    public var askEverything: Bool?
+
     public init(mode: ClaudeFileMode = .ask, folders: [ClaudeAllowedFolder] = []) {
         self.mode = mode
         self.folders = folders
     }
     public var resultMode: ClaudeResultMode { results ?? .look }
     public var uiOn: Bool { uiControl ?? true }
+    public var askAll: Bool { askEverything ?? false }
+    public var allowedFolders: [String] { alwaysFolders ?? [] }
+    public var rules: [ClaudeCommandRule] { commandRules ?? [] }
+    /// What the checks use: nothing while "Ask before anything" is on.
+    public var activeFolders: [String] { askAll ? [] : allowedFolders }
+    public var activeRules: [ClaudeCommandRule] { askAll ? [] : rules }
 
-    public func folders(chatId: String) -> [String] { folders.filter { $0.chatId == chatId }.map(\.folder) }
-
-    public mutating func allow(_ folder: String, chatId: String, chatTitle: String?) {
-        guard !folders.contains(where: { $0.chatId == chatId && $0.folder == folder }) else { return }
-        folders.append(ClaudeAllowedFolder(folder: folder, chatId: chatId, chatTitle: chatTitle))
+    public mutating func allowFolder(_ folder: String) {
+        var list = allowedFolders
+        guard !list.contains(where: { ClaudeFilePolicy.inside(folder, $0) }) else { return }
+        list.removeAll { ClaudeFilePolicy.inside($0, folder) }   // a wider folder replaces those inside it
+        list.append(folder)
+        alwaysFolders = list
     }
 
-    public mutating func remove(_ id: String) { folders.removeAll { $0.id == id } }
+    public mutating func allowRule(_ rule: ClaudeCommandRule) {
+        var list = rules
+        guard !list.contains(rule) else { return }
+        list.append(rule)
+        commandRules = list
+    }
+
+    public mutating func removeFolder(_ folder: String) { alwaysFolders = allowedFolders.filter { $0 != folder } }
+    public mutating func removeRule(_ id: String) { commandRules = rules.filter { $0.id != id } }
+
+    /// Old per-chat folders become "Always allowed" folders for every chat. One too wide to always allow now (the home
+    /// folder, ~/Library, a system folder) is dropped and asks again.
+    public func migrated(home: String) -> ClaudeFileSettings {
+        guard !folders.isEmpty else { return self }
+        var s = self
+        for f in folders where ClaudeAlwaysRules.tooWide(f.folder, home: home) == nil { s.allowFolder(f.folder) }
+        s.folders = []
+        return s
+    }
 
     public static func key(userId: String) -> String { "claude.files.\(userId)" }
 }
@@ -87,10 +121,39 @@ public struct ClaudeFileCard: Hashable, Sendable {
     public var action: String
     /// The file path, folder or command, as it will run.
     public var detail: String
-    /// The folder "Always allow" would cover; nil when this kind of call always asks.
+    /// A file call: the folder "Allow always" would allow for every chat; nil when it can't.
     public var folder: String?
-    /// Why it always asks (deletes, moves, network, sudo, commands).
+    /// Why "Allow always" isn't offered (deletes, moves, network, admin, ~/Library, chained commands…).
     public var alwaysAsksBecause: String?
+    /// A command: the rule "Allow always" would save; nil when it can't.
+    public var rule: ClaudeCommandRule? = nil
+    /// A command: folders "Allow always" also allows (the ones it reaches outside the allowed folders).
+    public var ruleFolders: [String] = []
+
+    public init(action: String, detail: String, folder: String?, alwaysAsksBecause: String?, rule: ClaudeCommandRule? = nil, ruleFolders: [String] = []) {
+        self.action = action
+        self.detail = detail
+        self.folder = folder
+        self.alwaysAsksBecause = alwaysAsksBecause
+        self.rule = rule
+        self.ruleFolders = ruleFolders
+    }
+
+    /// The second button: "Allow always" for a file call, "Allow always: ffmpeg commands" for a command; nil when it isn't offered.
+    public var alwaysLabel: String? {
+        if let rule { return "Allow always: \(rule.label)" }
+        return folder != nil ? "Allow always" : nil
+    }
+
+    /// The line under the buttons' row that says what "Allow always" covers.
+    public func alwaysCovers(home: String) -> String? {
+        func short(_ p: String) -> String { ClaudeFilePolicy.inside(p, home) ? "~" + p.dropFirst(home.count) : p }
+        if rule != nil {
+            return ruleFolders.isEmpty ? "Inside your allowed folders, in every chat"
+                : "Also allows \(ruleFolders.map(short).joined(separator: ", ")) in every chat"
+        }
+        return folder.map { "Allow always covers \(short($0)) in every chat" }
+    }
 }
 
 public enum ClaudeFilePolicy {
@@ -181,35 +244,32 @@ public enum ClaudeFilePolicy {
         return path == f || path.hasPrefix(f + "/")
     }
 
-    /// Commands that never get "Always": deletes, moves, network, admin, installs.
-    public static func riskyCommand(_ command: String) -> String? {
-        let words = Set(command.lowercased().components(separatedBy: CharacterSet(charactersIn: " \t\n;|&()`$")).filter { !$0.isEmpty }.map { ($0 as NSString).lastPathComponent })
-        if !words.isDisjoint(with: ["rm", "rmdir", "unlink", "shred", "trash", "srm"]) { return "it deletes" }
-        if !words.isDisjoint(with: ["mv", "rsync", "ditto"]) { return "it moves files" }
-        if !words.isDisjoint(with: ["sudo", "su", "doas", "chown", "launchctl"]) { return "it needs admin rights" }
-        if !words.isDisjoint(with: ["curl", "wget", "ssh", "scp", "sftp", "nc", "ncat", "telnet", "ftp", "git", "npm", "npx", "pip", "pip3", "brew", "gh", "open", "osascript", "ping"]) {
-            return "it can reach the network"
-        }
-        return nil
-    }
-
     static func str(_ input: JSONValue?, _ k: String) -> String? {
         if case .object(let o)? = input, case .string(let s)? = o[k], !s.isEmpty { return s }
         return nil
     }
 
-    /// What to do with one question. `cwd` is the run's folder (~/MUSE/Claude/<chat>); `folders` are this chat's
-    /// always-allowed folders.
-    public static func verdict(_ ask: ClaudePermissionAsk, mode: ClaudeFileMode, folders: [String], cwd: String, home: String) -> ClaudeFileVerdict {
+    static let askAllReason = "You chose Ask before anything (Settings → Claude)"
+
+    /// What to do with one question. `cwd` is the run's folder (~/MUSE/Claude/<chat>); `folders` and `rules` are the
+    /// person's "Always allowed" list (empty while "Ask before anything" is on, then `askAll` is true too). `isDirectory`
+    /// and `readScript` look at the Mac (a command's folder arguments, an interpreter's script).
+    public static func verdict(_ ask: ClaudePermissionAsk, mode: ClaudeFileMode, folders: [String], cwd: String, home: String,
+                               rules: [ClaudeCommandRule] = [], askAll: Bool = false,
+                               isDirectory: (String) -> Bool = { _ in false }, readScript: (String) -> String? = { _ in nil }) -> ClaudeFileVerdict {
         guard mode == .ask else { return .deny(offRefusal) }
+        // A folder too wide to always allow (the disk, home, ~/Library) never counts, however it got on the list.
+        let folders = folders.filter { ClaudeAlwaysRules.tooWide($0, home: home) == nil }
         let tool = ask.toolName
         if tool == "Bash" {
             let cmd = str(ask.input, "command") ?? ""
             if cmd.isEmpty { return .deny("Empty command") }
             if mentionsSecret(cmd) { return .deny(credentialRefusal) }
-            // Every command asks: a folder can't vouch for what a command does.
-            return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil,
-                                       alwaysAsksBecause: riskyCommand(cmd).map { "Always asks: \($0)" } ?? "Commands ask every time"))
+            let c = ClaudeAlwaysRules.check(cmd, folders: folders, cwd: cwd, home: home, isDirectory: isDirectory, readScript: readScript)
+            if !askAll, c.clean, let r = c.rule, rules.contains(r) { return .allow }
+            if askAll { return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: askAllReason)) }
+            if let why = c.why { return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: "Always asks: \(why)")) }
+            return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: nil, rule: c.rule, ruleFolders: c.needFolders))
         }
         guard fileTools.contains(tool) else {
             return .ask(ClaudeFileCard(action: "Use \(tool)", detail: inputSummary(ask.input), folder: nil, alwaysAsksBecause: "Asks every time"))
@@ -220,8 +280,10 @@ public enum ClaudeFilePolicy {
         if tool == "Glob" || tool == "Grep", let pat = str(ask.input, "pattern"), isSecret(pat) || mentionsSecret(pat) { return .deny(credentialRefusal) }
         if tool == "Upload", uploadType(path) == nil { return .deny(uploadRefusal) }
         let isFile = !(tool == "Glob" || tool == "Grep" || tool == "LS")
-        let folder = isFile ? (path as NSString).deletingLastPathComponent : path
-        if folders.contains(where: { inside(path, $0) }) { return .allow }
+        var folder = isFile ? (path as NSString).deletingLastPathComponent : path
+        if folder.isEmpty { folder = "/" }
+        let inLibrary = inside(path, home + "/Library")
+        if !askAll, !inLibrary, folders.contains(where: { inside(path, $0) }) { return .allow }
         let action: String
         switch tool {
         case "Read": action = "Read a file"
@@ -233,7 +295,11 @@ public enum ClaudeFilePolicy {
         }
         var detail = path
         if tool == "Glob" || tool == "Grep", let pat = str(ask.input, "pattern") { detail += " · \(pat)" }
-        return .ask(ClaudeFileCard(action: action, detail: detail, folder: folder.isEmpty ? "/" : folder, alwaysAsksBecause: nil))
+        if askAll { return .ask(ClaudeFileCard(action: action, detail: detail, folder: nil, alwaysAsksBecause: askAllReason)) }
+        if let wide = ClaudeAlwaysRules.tooWide(folder, home: home) {
+            return .ask(ClaudeFileCard(action: action, detail: detail, folder: nil, alwaysAsksBecause: "Always asks: \(wide)"))
+        }
+        return .ask(ClaudeFileCard(action: action, detail: detail, folder: folder, alwaysAsksBecause: nil))
     }
 
     static func inputSummary(_ v: JSONValue?) -> String {
@@ -251,7 +317,8 @@ public enum ClaudeFilePolicy {
 
 public enum ClaudePermissionAnswer: Hashable, Sendable {
     case allowOnce
-    case alwaysFolder(String)
+    /// "Allow always": the card's folder, or its command rule and folders, for every chat on this Mac.
+    case always
     case deny
 }
 

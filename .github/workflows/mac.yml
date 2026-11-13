@@ -205,6 +205,19 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # Allow always (owner 2026-11-12): a file card offers "Allow always", a safe command "Allow always: ffmpeg commands", a
+      # dangerous one (`…; rm -rf ~`) only Allow once / Deny with its why; Allow always saves the folder or rule for every
+      # chat and the next matching command runs without a card; "Ask before anything" pauses the list; Settings shows it
+      # (SnapshotRunner+ClaudeAllowAlways.swift; shots mac_a_claude_allow_*.png). Fails on any FAIL line or a missing ALL DONE.
+      - name: Claude allow-always check
+        working-directory: mac
+        run: |
+          f=snapshots/claude-allow-check.txt
+          if [ ! -f "$f" ]; then echo "no claude-allow-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # Every Edit operation must WORK, not just not crash (Mac Edit audit 2026-11-08, plans/mac-edit-audit.md): each runs
       # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
       # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
