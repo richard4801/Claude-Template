@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthUser } from '../src/ctx.js';
 import { users } from '../src/db/schema.js';
-import { balance, breakdownOf, chipsFor, draftChanges, publicCard, undoDraft, type ChangesCard } from '../src/claude/cards.js';
+import { balance, breakdownOf, chipsFor, clipInput, draftChanges, planInput, publicCard, undoDraft, type ChangesCard } from '../src/claude/cards.js';
 import { approveCard } from '../src/claude/actions.js';
 import { controlWords, stepOf } from '../src/claude/uiControl.js';
 import { registryByName } from '../src/claude/registry.js';
@@ -145,6 +145,38 @@ describe('cards in a chat (Suite, mock provider)', () => {
     await expect(run('show_plan', { chatId, planId: 'other' })).rejects.toMatchObject({ code: 'bad_request' });
     await expect(run('show_clip', { chatId, id: 'take_nope', moments: [{ from: 0, label: 'Start' }] })).rejects.toBeTruthy();
     await expect(run('show_plan', { chatId, steps: [{ text: 'x' }] }, { ...ownerU, id: 'someone_else' })).rejects.toBeTruthy();
+  });
+
+  it('card tools take Claude\'s natural input: no chatId, unknown keys, id for planId, steps as strings, more than 8 steps', async () => {
+    // No chatId (Claude Code over MCP): the request's chat, else the person's latest chat.
+    const r = await run('show_plan', { id: 'loose', title: 'Plan', extra: 'ignored', steps: ['Watch the clip', 'Swap the outfit'] }, { ...ownerU, chatId });
+    expect(r).toMatchObject({ ok: true, planId: 'loose' });
+    const latest = await run('show_plan', { planId: 'loose', done: [0] });
+    expect(latest).toMatchObject({ updated: true, done: 1, of: 2 });
+    const card = (await cards()).at(-1)!.tool.ui.card;
+    expect(card.steps).toEqual([{ text: 'Watch the clip', done: true }, { text: 'Swap the outfit', done: false }]);
+    // Ten steps: seven stay, the rest join the eighth, and Claude is told.
+    const ten = Array.from({ length: 10 }, (_, i) => ({ title: `Step ${i + 1}` }));
+    const big = await run('show_plan', { planId: 'big', steps: ten });
+    expect(big.note).toMatch(/Only 8 steps fit/);
+    const bigCard = (await cards()).at(-1)!.tool.ui.card;
+    expect(bigCard.steps).toHaveLength(8);
+    expect(bigCard.steps[7].text).toBe('Step 8 · Step 9 · Step 10');
+    // show_clip without chatId reaches the video check (not "chatId: required").
+    await expect(run('show_clip', { id: 'take_nope', moments: [{ start: 0, text: 'Start' }] })).rejects.not.toMatchObject({ message: expect.stringMatching(/chatId/) });
+    // A chat that isn't theirs, named outright, still fails.
+    await expect(run('show_plan', { chatId: 'cht_nope', steps: ['x'] })).rejects.toBeTruthy();
+  });
+  it('the loose readers: aliases, plain strings, done flags, moments sorted and capped', () => {
+    expect(planInput({ id: 'my plan!', steps: [' a ', { label: 'b', status: 'done' }, 3, ''] })).toMatchObject({ planId: 'my_plan_', steps: [{ text: 'a', done: false }, { text: 'b', done: true }] });
+    expect(planInput({ steps: 'one\ntwo' }).steps).toHaveLength(2);
+    expect(() => planInput({ steps: [1, 2] })).toThrow(/steps/);
+    const c = clipInput({ videoId: 'tk_1', foo: 1, moments: Array.from({ length: 10 }, (_, i) => ({ at: String(10 - i), title: `m${i}` })) });
+    expect(c.id).toBe('tk_1');
+    expect(c.moments).toHaveLength(8);
+    expect(c.dropped).toBe(2);
+    expect(c.moments[0]!.from).toBe(1);
+    expect(() => clipInput({ id: 'x', moments: [] })).toThrow(/moments/);
   });
 
   it('chips come from the server per page', async () => {

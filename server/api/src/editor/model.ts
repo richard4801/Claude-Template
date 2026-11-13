@@ -193,7 +193,7 @@ export type V1Segment = { inSec: number; outSec: number; speed: number; muted?: 
 export type EditListV1 = { version: 1; sourceTakeId: string; sourceDurationSec: number; segments: V1Segment[]; mute: boolean };
 
 export const LIMITS = {
-  maxJsonBytes: 256 * 1024, maxTracks: 16, maxItemsPerTrack: 300, maxItems: 600, maxAssets: 60, maxWords: 3000, maxKeyframes: 100,
+  maxJsonBytes: 256 * 1024, maxTracks: 16, maxItemsPerTrack: 300, maxItems: 600, maxAssets: 400, maxWords: 3000, maxKeyframes: 100,
   minClipSourceSec: 0.1, minItemSec: 0.05, minOutputSec: 0.5, maxOutputSec: 600, minSpeed: 0.1, maxSpeed: 10, endSlackSec: 0.05,
   minTransitionSec: 0.1, maxTransitionSec: 2, maxText: 500, overlapSlackSec: 0.001,
 } as const;

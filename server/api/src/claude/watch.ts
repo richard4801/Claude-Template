@@ -222,30 +222,93 @@ function run(bin: string, args: string[], timeoutMs: number): Promise<{ stdout: 
   }));
 }
 
+/** The picture facts grab needs beyond probe(): pixel format and colour (HDR transfer, primaries, matrix, range). */
+export type Colour = { pixFmt?: string; transfer?: string; primaries?: string; matrix?: string; range?: string };
+export async function colourOf(ffprobe: string, input: string): Promise<Colour> {
+  try {
+    const { stdout } = await run(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=pix_fmt,color_transfer,color_primaries,color_space,color_range', '-of', 'json', input], 30_000);
+    const st = (JSON.parse(stdout) as { streams?: Record<string, string>[] }).streams?.[0] ?? {};
+    const v = (k: string) => (st[k] && st[k] !== 'unknown' ? st[k] : undefined);
+    return { pixFmt: v('pix_fmt'), transfer: v('color_transfer'), primaries: v('color_primaries'), matrix: v('color_space'), range: v('color_range') };
+  } catch { return {}; }
+}
+/** HLG (iPhone HDR) and PQ (HDR10, Dolby Vision 8.x) sources need converting to SDR, or they come out dim/washed out. */
+export const isHdr = (c: Colour) => c.transfer === 'arib-std-b67' || c.transfer === 'smpte2084';
+
+const filterCache = new Map<string, Promise<boolean>>();
+/** Whether this ffmpeg has the zscale filter (libzimg); without it HDR goes through the plain conversion. */
+function hasZscale(ffmpeg: string) {
+  let p = filterCache.get(ffmpeg);
+  if (!p) { p = run(ffmpeg, ['-hide_banner', '-filters'], 15_000).then(r => /\szscale\s/.test(r.stdout)).catch(() => false); filterCache.set(ffmpeg, p); }
+  return p;
+}
+/** The SDR conversion for an HDR source, after scaling (cheap at tile size): a direct zscale to BT.709 full range
+ * (closest to how the phone shows it; a tonemap curve made mid-tones darker in tests). */
+function sdrChain(c: Colour) {
+  const tin = c.transfer!, pin = c.primaries === 'bt709' ? 'bt709' : 'bt2020', min = c.matrix === 'bt709' ? 'bt709' : 'bt2020nc', rin = c.range === 'pc' ? 'pc' : 'tv';
+  return `zscale=tin=${tin}:pin=${pin}:min=${min}:rin=${rin}:npl=100:t=bt709:p=bt709:m=bt709:r=pc`;
+}
+
+/** The frame rate frame numbers are counted at: the video's own (probed) rate, kept within 1–60. */
+export const gridFps = (fps: number) => (Number.isFinite(fps) && fps > 0 ? Math.min(60, Math.max(1, fps)) : 30);
+
+/** Mean luma (0–255) of a JPEG tile. */
+export async function lumaOf(jpg: Buffer) {
+  const st = await sharp(jpg).greyscale().stats();
+  return st.channels[0]!.mean;
+}
+/** Below this mean luma a tile reads as black. */
+export const BLACK_LUMA = 10;
+
 /**
- * The source frames `frames` (frame numbers counted from `fromSec`) as JPEGs fitted inside `edge`×`edge`, in one
- * decoding pass (2 threads). Frames past the end are left out.
+ * The frames `frames` (frame numbers on a constant `fps` grid counted from `fromSec`: frame k is the picture showing
+ * at fromSec + k/fps) as JPEGs fitted inside `edge`×`edge`. Frames past the end are left out.
+ *
+ * The decoded stream is first put on that constant grid (fps filter), so frame k is the picture at k/fps even when the
+ * source is variable-frame-rate (phone videos, screen recordings) or its probed rate is wrong: counting raw decoded
+ * frames there picked the wrong moments (ci_592145d6bdee: a dense black lead-in made every pick black). Rotation is
+ * applied by ffmpeg (autorotate); HLG/PQ HDR is converted to SDR; the result is plain 8-bit full range for JPEG.
+ * If every frame still comes out black, the old raw-frame pick is tried once and the brighter set kept.
  */
-async function grab(ffmpeg: string, input: string, frames: number[], edge: number, fromSec = 0, lenSec?: number): Promise<Map<number, Buffer>> {
+export async function grab(ffmpeg: string, input: string, frames: number[], edge: number, fromSec = 0, lenSec?: number,
+  o: { fps?: number; colour?: Colour } = {}): Promise<Map<number, Buffer>> {
   const want = [...new Set(frames)].sort((a, b) => a - b);
+  const fps = gridFps(o.fps ?? 30);
+  let hdr = !!o.colour && isHdr(o.colour) && (await hasZscale(ffmpeg));
   // The box is small (~512 MB shared with the API): one decode thread, one filter thread, and at most GRAB_CHUNK frames
   // per ffmpeg run, so a big source (4K, 10-bit HEVC, 60 fps) never holds many full-size frames at once. A run that
   // still fails for memory is retried once in smaller chunks.
-  const runChunk = async (part: number[], out: Map<number, Buffer>) => {
+  const runChunk = async (part: number[], out: Map<number, Buffer>, raw: boolean) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-watch-'));
     try {
       const sel = part.map(f => `eq(n,${f})`).join('+');
-      await run(ffmpeg, ['-v', 'error', '-threads', '1', '-filter_threads', '1', ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-i', input, ...(lenSec ? ['-t', lenSec.toFixed(3)] : []), '-an', '-sn', '-dn',
-        '-vf', `select='${sel}',scale=${edge}:${edge}:force_original_aspect_ratio=decrease:flags=bilinear`, '-fps_mode', 'vfr', '-frames:v', String(part.length), '-q:v', '5', path.join(dir, 'f%04d.jpg')], 180_000);
+      const vf = () => [raw ? '' : `fps=${fps.toFixed(6)}:round=near`, `select='${sel}'`, `scale=${edge}:${edge}:force_original_aspect_ratio=decrease:flags=bilinear`,
+        hdr && !raw ? sdrChain(o.colour!) : '', 'format=yuvj420p'].filter(Boolean).join(',');
+      const go = () => run(ffmpeg, ['-v', 'error', '-threads', '1', '-filter_threads', '1', ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-i', input, ...(lenSec ? ['-t', lenSec.toFixed(3)] : []), '-an', '-sn', '-dn',
+        '-vf', vf(), '-fps_mode', 'passthrough', '-frames:v', String(part.length), '-q:v', '5', path.join(dir, 'f%04d.jpg')], 180_000);
+      try { await go(); } catch (e) {
+        // An HDR conversion this ffmpeg can't do (odd colour tags): the plain conversion instead.
+        if (!hdr || /alloc|memory|killed|SIGKILL/i.test(String((e as Error)?.message ?? e))) throw e;
+        hdr = false; fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir); await go();
+      }
       const files = fs.readdirSync(dir).filter(f => f.endsWith('.jpg')).sort();
       files.forEach((f, i) => { if (part[i] !== undefined) out.set(part[i]!, fs.readFileSync(path.join(dir, f))); });
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   };
-  const out = new Map<number, Buffer>();
-  const pass = async (size: number) => { for (let i = 0; i < want.length; i += size) { const part = want.slice(i, i + size).filter(f => !out.has(f)); if (part.length) await runChunk(part, out); } };
-  try { await pass(GRAB_CHUNK); } catch (e) {
-    if (!/alloc|memory|killed|SIGKILL/i.test(String((e as Error)?.message ?? e))) throw e;
-    await pass(Math.max(8, GRAB_CHUNK >> 2));
+  const take = async (raw: boolean) => {
+    const out = new Map<number, Buffer>();
+    const pass = async (size: number) => { for (let i = 0; i < want.length; i += size) { const part = want.slice(i, i + size).filter(f => !out.has(f)); if (part.length) await runChunk(part, out, raw); } };
+    try { await pass(GRAB_CHUNK); } catch (e) {
+      if (!/alloc|memory|killed|SIGKILL/i.test(String((e as Error)?.message ?? e))) throw e;
+      await pass(Math.max(8, GRAB_CHUNK >> 2));
+    }
+    return out;
+  };
+  const mean = async (m: Map<number, Buffer>) => { if (!m.size) return 0; let s = 0; for (const b of m.values()) s += await lumaOf(b); return s / m.size; };
+  const out = await take(false);
+  if (out.size && (await mean(out)) < BLACK_LUMA) {
+    const alt = await take(true).catch(() => null);
+    if (alt && alt.size && (await mean(alt)) > (await mean(out)) + 2) return alt;
   }
   return out;
 }
@@ -319,11 +382,12 @@ export async function watchVideo(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: un
     const mfps = dur > 600 ? 1 : dur > 120 ? 4 : undefined;
     const m = await measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { width: 64, maxSec: MAX_WATCH_SEC, inputArgs: ['-threads', '1'], ...(mfps ? { fps: mfps } : {}) });
     const picks = pickFrames(m, budgetFor(dur));
-    const fps = info.fps || m.fps, last = Math.max(0, Math.floor(dur * fps) - 1);
+    const fps = gridFps(info.fps || m.fps), last = Math.max(0, Math.floor(dur * fps) - 1);
+    const colour = await colourOf(c.FFPROBE_PATH, input);
     const frameOf = (t: number) => Math.min(last, Math.max(0, Math.round(t * fps)));
     // One decoding pass for both: the motion-picked overview and the even sweep (shrunk to sweep size after).
     const sweep = sweepFrames(dur, fps);
-    const got = await grab(c.FFMPEG_PATH, input, [...picks.map(p => frameOf(p.t)), ...sweep], TILE_EDGE);
+    const got = await grab(c.FFMPEG_PATH, input, [...picks.map(p => frameOf(p.t)), ...sweep], TILE_EDGE, 0, undefined, { fps, colour });
     const tiles = picks.flatMap(p => { const jpg = got.get(frameOf(p.t)); return jpg ? [{ t: frameOf(p.t) / fps, tag: p.why === 'cut' ? 'CUT' : p.why === 'motion peak' ? '★' : undefined, jpg }] : []; });
     const sh = await sheets(tiles, TILE_EDGE);
     const cuts = findCuts(m).map(x => x.t);
@@ -369,12 +433,13 @@ export async function watchCloser(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: u
   return oneAtATime(() => editorAi(ctx).withLocalInput(v.key, async input => {
     const info = await probe(c.FFPROBE_PATH, input);
     if (from >= info.duration) throw badRequest(`fromSec: the video is ${info.duration.toFixed(2)} s long`);
-    const fps = info.fps || 30, end = Math.min(to, info.duration);
+    const fps = gridFps(info.fps || 30), end = Math.min(to, info.duration);
+    const colour = await colourOf(c.FFPROBE_PATH, input);
     const all = Math.max(1, Math.floor((end - from) * fps) + 1), n = Math.min(all, max);
     const rel = [...new Set(Array.from({ length: n }, (_, i) => (n === 1 ? 0 : Math.round((i * (all - 1)) / (n - 1)))))];
     // Up to 16 frames large (12 a sheet); a longer run (a sweep window) at sweep size, 24 a sheet.
     const single = rel.length === 1, wide = rel.length > CLOSER_MAX, edge = single ? SINGLE_EDGE : wide ? SWEEP_EDGE : CLOSER_EDGE;
-    const got = await grab(c.FFMPEG_PATH, input, rel, edge, from, end - from + 2 / fps);
+    const got = await grab(c.FFMPEG_PATH, input, rel, edge, from, end - from + 2 / fps, { fps, colour });
     const tiles = rel.flatMap(f => { const jpg = got.get(f); return jpg ? [{ t: from + f / fps, jpg }] : []; });
     const step = rel.length > 1 ? (rel[1]! - rel[0]!) : 1;
     const meta = { id: v.id, fromSec: from, toSec: end, fps, frames: tiles.map(x => Math.round(x.t * 1000) / 1000),

@@ -227,54 +227,122 @@ export function chipsFor(page: PageName | undefined, tool?: string): Chip[] {
 
 const str = (d: string, max?: number) => ({ type: 'string', description: d, ...(max ? { maxLength: max } : {}) });
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
-const CHAT_ID = str('This chat (filled in for you in the app)');
-const chatOf = (env: { user: AuthUser }, a: Record<string, unknown>) => (typeof a.chatId === 'string' && a.chatId ? a.chatId : env.user.chatId);
+const CHAT_ID = str('Optional: this chat (filled in for you; left out = the chat you are talking in)');
 
-const PlanIn = z.object({ chatId: z.string().optional(), planId: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional(), title: z.string().trim().min(1).max(80).optional(),
-  steps: z.array(z.object({ text: z.string().trim().min(1).max(140), done: z.boolean().optional() }).strict()).min(1).max(8).optional(),
-  done: z.array(z.number().int().min(0).max(7)).max(8).optional() }).strict();
-const ClipIn = z.object({ chatId: z.string().optional(), id: z.string().min(1).max(300), title: z.string().trim().max(60).optional(), summary: z.string().trim().max(160).optional(),
-  durationSec: z.number().positive().max(36000).optional(),
-  moments: z.array(z.object({ from: z.number().min(0), to: z.number().min(0).optional(), label: z.string().trim().min(1).max(80) }).strict()).min(1).max(8) }).strict();
+/** The chat a card goes to: the one named (must be the person's own), else the chat the request came from, else the
+ * person's most recent chat (Claude Code over MCP has no chat of its own). Never fails just because chatId is missing. */
+async function chatFor(env: { ctx: Ctx; user: AuthUser }, a: Record<string, unknown>) {
+  if (typeof a.chatId === 'string' && a.chatId) return ownChat(env.ctx, env.user, a.chatId);
+  if (env.user.chatId) { const t = await ownChat(env.ctx, env.user, env.user.chatId).catch(() => null); if (t) return t; }
+  const [t] = await env.ctx.db.select().from(claudeThreads).where(and(eq(claudeThreads.ownerId, env.user.id), eq(claudeThreads.studioId, env.user.studioId)))
+    .orderBy(desc(claudeThreads.updatedAt)).limit(1);
+  if (!t) throw badRequest('chatId: no Claude chat is open; open the Claude panel first');
+  return t;
+}
+
+const MAX_STEPS = 8, MAX_MOMENTS = 8;
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+const firstStr = (o: Record<string, unknown>, keys: string[]) => { for (const k of keys) if (typeof o[k] === 'string' && (o[k] as string).trim()) return (o[k] as string).trim(); return undefined; };
+const firstNum = (o: Record<string, unknown>, keys: string[]) => { for (const k of keys) { const v = o[k]; const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v; if (typeof n === 'number' && Number.isFinite(n)) return n; } return undefined; };
+const isTrue = (v: unknown) => v === true || v === 'done' || v === 'true' || v === 'completed' || v === 'complete';
+
+/** A plan step as Claude writes it: "Watch the clip", {text}, {title}, {label}, {step}, {name}; done may be a flag or a status. */
+function stepOfInput(x: unknown): { text: string; done: boolean } | null {
+  if (typeof x === 'string') return x.trim() ? { text: clip(x.trim(), 140), done: false } : null;
+  if (!x || typeof x !== 'object') return null;
+  const o = x as Record<string, unknown>;
+  const text = firstStr(o, ['text', 'title', 'label', 'step', 'name', 'description']);
+  return text ? { text: clip(text, 140), done: isTrue(o.done) || isTrue(o.status) || isTrue(o.checked) } : null;
+}
+
+/** More than eight steps don't fit the card: the first seven stay, the rest are joined into the eighth. */
+export function fitSteps(list: { text: string; done: boolean }[]): { steps: { text: string; done: boolean }[]; merged?: number } {
+  if (list.length <= MAX_STEPS) return { steps: list };
+  const rest = list.slice(MAX_STEPS - 1);
+  return { steps: [...list.slice(0, MAX_STEPS - 1), { text: clip(rest.map(s => s.text).join(' · '), 140), done: rest.every(s => s.done) }], merged: list.length };
+}
+
+/** show_plan's input, read loosely: unknown keys are ignored, `id` means planId, steps may be plain strings. */
+export function planInput(a: Record<string, unknown>) {
+  const rawId = firstStr(a, ['planId', 'id', 'plan_id']);
+  const planId = rawId ? (rawId.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 40) || 'plan') : undefined;
+  const title = firstStr(a, ['title', 'name', 'heading']);
+  const raw = Array.isArray(a.steps) ? a.steps : Array.isArray(a.items) ? a.items : typeof a.steps === 'string' ? a.steps.split(/\n+/) : undefined;
+  const all = raw?.map(stepOfInput).filter((s): s is { text: string; done: boolean } => !!s);
+  if (raw && !all!.length) throw badRequest('steps: write each step as a short line, e.g. ["Watch the clip", "Swap the outfit"]');
+  const fit = all ? fitSteps(all) : undefined;
+  const doneRaw = Array.isArray(a.done) ? a.done : typeof a.done === 'number' ? [a.done] : [];
+  const done = doneRaw.map(v => (typeof v === 'string' ? Number(v) : v)).filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0);
+  return { planId, title: title ? clip(title, 80) : undefined, steps: fit?.steps, merged: fit?.merged, done };
+}
+
+/** show_clip's input, read loosely: unknown keys ignored, the video under id/videoId/takeId/url, moments as {from|start|at|t, to|end, label|text|title}. */
+export function clipInput(a: Record<string, unknown>) {
+  const id = firstStr(a, ['id', 'videoId', 'takeId', 'clipId', 'uploadId', 'jobId', 'url', 'video']);
+  if (!id) throw badRequest('id: the video you watched (take, clip, upload or job id, or its /uploads/… link)');
+  const raw = Array.isArray(a.moments) ? a.moments : Array.isArray(a.keyMoments) ? a.keyMoments : [];
+  const all = raw.map(x => {
+    if (!x || typeof x !== 'object') return null;
+    const o = x as Record<string, unknown>;
+    const from = firstNum(o, ['from', 'start', 'startSec', 'at', 't', 'time', 'sec']);
+    const label = firstStr(o, ['label', 'text', 'title', 'what', 'description']);
+    if (from === undefined || from < 0 || !label) return null;
+    const to = firstNum(o, ['to', 'end', 'endSec']);
+    return compact({ from, to: to !== undefined && to > from ? to : undefined, label: clip(label, 80) }) as Moment;
+  }).filter((m): m is Moment => !!m).sort((x, y) => x.from - y.from);
+  if (!all.length) throw badRequest('moments: at least one {from (seconds), label}');
+  const durationSec = firstNum(a, ['durationSec', 'duration', 'lengthSec']);
+  const title = firstStr(a, ['title']), summary = firstStr(a, ['summary', 'description']);
+  return { id, title: title ? clip(title, 60) : undefined, summary: summary ? clip(summary, 160) : undefined,
+    durationSec: durationSec !== undefined && durationSec > 0 ? durationSec : undefined, moments: all.slice(0, MAX_MOMENTS), dropped: Math.max(0, all.length - MAX_MOMENTS) };
+}
 
 export const CARD_TOOLS: EditTool[] = [
   {
     name: 'show_plan', title: 'Show a plan (checklist)', scope: 'edit:read',
-    description: 'Puts a plan in the chat as a checklist card (title + 1–8 short steps) when the person asks for a plan or the work has several steps. Call it again with the same planId as you go: `done: [0, 1]` ticks those steps (0-based), or send `steps` to rewrite them. Write each step as a plain action ("Watch the clip and lock her look"). Free; changes nothing in MUSE.',
-    inputSchema: obj({ chatId: CHAT_ID, planId: str('Your id for this plan ("swap"); the same id updates it', 40), title: str('"Plan: outfit swap"', 80),
-      steps: { type: 'array', maxItems: 8, items: obj({ text: str('One step', 140), done: { type: 'boolean' } }, ['text']) },
-      done: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 7 }, description: 'Steps now finished (0-based)' } }),
+    description: 'Puts a plan in the chat as a checklist card when the person asks for a plan or the work has several steps. Shape: '
+      + '{planId?: "swap", title?: "Plan: outfit swap", steps?: ["Watch the clip", "Swap the outfit"], done?: [0]}. steps is a list of short plain '
+      + 'lines (objects {text, done?} also work); at most 8 fit, more are joined into the 8th. Call it again with the same planId as you go: '
+      + '`done: [0, 1]` ticks those steps (0-based), `steps` rewrites them. The chat is filled in for you. Free; changes nothing in MUSE.',
+    inputSchema: { type: 'object', properties: { chatId: CHAT_ID, planId: str('Your id for this plan ("swap"); the same id updates it. Default "plan"', 40), title: str('"Plan: outfit swap"', 80),
+      steps: { type: 'array', description: 'Short plain lines, e.g. ["Watch the clip", "Swap the outfit"] (1–8; more are joined into the last)', items: { anyOf: [{ type: 'string', maxLength: 140 }, obj({ text: str('One step', 140), done: { type: 'boolean' } }, ['text'])] } },
+      done: { type: 'array', items: { type: 'integer', minimum: 0 }, description: 'Steps now finished (0-based)' } }, required: [] },
     run: async (env, a) => {
-      const b = parse(PlanIn, a);
-      const chat = await ownChat(env.ctx, env.user, chatOf(env, a));
+      const b = planInput(a);
+      const chat = await chatFor(env, a);
       const planId = b.planId ?? 'plan';
       const old = await planRow(env.ctx, chat.id, planId);
       const prev = old ? ((old.tool!.ui as { card: PlanCard }).card) : undefined;
-      let steps = b.steps ? b.steps.map(s => ({ text: s.text, done: !!s.done })) : prev?.steps;
-      if (!steps) throw badRequest('steps: the plan\'s steps (1–8)');
-      if (b.done) steps = steps.map((s, i) => ({ ...s, done: s.done || b.done!.includes(i) }));
+      let steps = b.steps ?? prev?.steps;
+      if (!steps) throw badRequest(`steps: the plan's steps, e.g. ["Watch the clip", "Swap the outfit"] (no plan "${planId}" in this chat to update)`);
+      // A tick past the last step (a merged plan) ticks the last one.
+      if (b.done.length) steps = steps.map((s, i) => ({ ...s, done: s.done || b.done.some(n => Math.min(n, steps!.length - 1) === i) }));
       const card: PlanCard = { kind: 'plan', planId, title: b.title ?? prev?.title ?? 'Plan', steps };
-      if (old) { await replaceCard(env.ctx, env.user, old, card); return { ok: true, updated: true, planId, done: steps.filter(s => s.done).length, of: steps.length }; }
+      const note = b.merged ? `Only ${MAX_STEPS} steps fit the card: steps ${MAX_STEPS}–${b.merged} were joined into step ${MAX_STEPS}. Plan in at most ${MAX_STEPS} steps next time.` : undefined;
+      if (old) { await replaceCard(env.ctx, env.user, old, card); return compact({ ok: true, updated: true, planId, done: steps.filter(s => s.done).length, of: steps.length, note }); }
       await postCard(env.ctx, env.user, chat.id, card);
-      return { ok: true, planId, note: 'The person sees the checklist. Tick steps with show_plan {planId, done: [n]} as you finish them.' };
+      return { ok: true, planId, note: [note, 'The person sees the checklist. Tick steps with show_plan {planId, done: [n]} as you finish them.'].filter(Boolean).join(' ') };
     },
   },
   {
     name: 'show_clip', title: 'Show a clip with its key moments', scope: 'edit:read',
-    description: 'After you WATCHED a video, puts it in the chat as a "Clip analysis" card: the video (play), its length, one line on what you found and its key moments ({from, to?, label} in seconds as watch labels them, 1–8), each of which the person can click to jump there. Use it when the moments matter for what comes next (where the face is clear, where a cut is). Free.',
-    inputSchema: obj({ chatId: CHAT_ID, id: str('The video, as you watched it (take, clip, upload, job id or /uploads/… link)', 300), title: str('Default "Clip analysis"', 60),
+    description: 'After you WATCHED a video, puts it in the chat as a "Clip analysis" card: the video (play), its length, one line on what you found and its key moments, each of which the person can click to jump there. '
+      + 'Shape: {id: "<the video as you watched it>", summary?: "Three moments", durationSec?: 22.1, moments: [{from: 3.2, to?: 5, label: "Face clear"}]} (seconds as watch labels them; at most 8 moments, more are dropped). '
+      + 'Use it when the moments matter for what comes next (where the face is clear, where a cut is). The chat is filled in for you. Free.',
+    inputSchema: { type: 'object', properties: { chatId: CHAT_ID, id: str('The video, as you watched it (take, clip, upload, job id or /uploads/… link)', 300), title: str('Default "Clip analysis"', 60),
       summary: str('One line ("Three moments in your clip")', 160), durationSec: { type: 'number', description: 'Its length (from watch)' },
-      moments: { type: 'array', minItems: 1, maxItems: 8, items: obj({ from: { type: 'number', minimum: 0 }, to: { type: 'number', minimum: 0 }, label: str('What happens', 80) }, ['from', 'label']) } }, ['id', 'moments']),
+      moments: { type: 'array', minItems: 1, description: '1–8 moments, e.g. [{from: 3.2, label: "Face clear"}]', items: obj({ from: { type: 'number', minimum: 0, description: 'Seconds' }, to: { type: 'number', minimum: 0, description: 'Seconds (optional)' }, label: str('What happens', 80) }, ['from', 'label']) } }, required: ['id', 'moments'] },
     run: async (env, a) => {
-      const b = parse(ClipIn, a);
-      const chat = await ownChat(env.ctx, env.user, chatOf(env, a));
+      const b = clipInput(a);
+      const chat = await chatFor(env, a);
       const v = await videoOf(env.ctx, env.user, b.id);
-      const moments = b.moments.map(m => compact({ from: m.from, to: m.to !== undefined && m.to > m.from ? m.to : undefined, label: m.label }) as Moment).sort((x, y) => x.from - y.from);
-      if (b.durationSec !== undefined && moments.some(m => m.from > b.durationSec! + 0.5)) throw badRequest('moments: a moment starts after the video ends');
+      const moments = b.durationSec !== undefined ? b.moments.filter(m => m.from <= b.durationSec! + 0.5) : b.moments;
+      if (!moments.length) throw badRequest('moments: every moment starts after the video ends');
       const card: MediaCard = compact({ kind: 'media' as const, title: b.title || 'Clip analysis', summary: b.summary, durationSec: b.durationSec,
         video: compact({ id: v.id, kind: v.kind, url: `/uploads/${v.key.replace(/^\/?uploads\//, '')}`, title: v.title }), moments }) as MediaCard;
       await postCard(env.ctx, env.user, chat.id, card);
-      return { ok: true, note: 'The person sees the clip with its moments; clicking one plays it from there.' };
+      const skipped = b.dropped + (b.moments.length - moments.length);
+      return { ok: true, note: ['The person sees the clip with its moments; clicking one plays it from there.', skipped ? `${skipped} moment${skipped === 1 ? ' was' : 's were'} left out (at most ${MAX_MOMENTS}, none past the end).` : ''].filter(Boolean).join(' ') };
     },
   },
 ];

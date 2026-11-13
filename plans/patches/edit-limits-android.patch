@@ -1,0 +1,13 @@
+diff --git a/android/core/src/main/kotlin/studio/muse/core/edit/Model.kt b/android/core/src/main/kotlin/studio/muse/core/edit/Model.kt
+index ff1d118..0fd4ffd 100644
+--- a/android/core/src/main/kotlin/studio/muse/core/edit/Model.kt
++++ b/android/core/src/main/kotlin/studio/muse/core/edit/Model.kt
+@@ -466,7 +466,7 @@ object EditLimits {
+     const val MAX_TRACKS = 16
+     const val MAX_ITEMS_PER_TRACK = 300
+     const val MAX_ITEMS = 600
+-    const val MAX_ASSETS = 60
++    const val MAX_ASSETS = 400
+     const val MAX_WORDS = 3000
+     const val MAX_KEYFRAMES = 100
+     const val MIN_CLIP_SOURCE_SEC = 0.1
