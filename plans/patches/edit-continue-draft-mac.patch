@@ -132,10 +132,10 @@ index e9acc864..c8eb5a43 100644
              if let id = attachSessionId {
 diff --git a/mac/Muse/App/Edit/EditSuiteResume.swift b/mac/Muse/App/Edit/EditSuiteResume.swift
 new file mode 100644
-index 00000000..7bf2e5b0
+index 00000000..5e607e21
 --- /dev/null
 +++ b/mac/Muse/App/Edit/EditSuiteResume.swift
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,108 @@
 +import Foundation
 +import MuseCore
 +
@@ -168,6 +168,9 @@ index 00000000..7bf2e5b0
 +// continues at the same place. A member's edit itself is kept on this Mac too (their editor has no server copy).
 +extension EditSuiteSession {
 +    static let viewSaveAfter: UInt64 = 800_000_000
++    /// An editor open this long counts as worked on even without a change (runs 604/607: one opened and left at once, by a
++    /// walk or by code, must not become "the last draft you were editing").
++    static let countsAfter: TimeInterval = 2
 +
 +    /// The edit's name in Recent edits.
 +    var draftTitle: String {
@@ -193,13 +196,24 @@ index 00000000..7bf2e5b0
 +        lastSentView = nil
 +        lastSentProject = nil
 +        viewTracking = true
-+        // The edit is the last one worked on from now (even if nothing changes).
-+        saveViewNow()
++        // Not saved on opening: it counts once the person changes something, or after it has been open a moment.
++        openedAt = Date()
++        stayTask?.cancel()
++        stayTask = Task { @MainActor [weak self] in
++            try? await Task.sleep(nanoseconds: UInt64(Self.countsAfter * 1_000_000_000) + 100_000_000)
++            guard let self, !Task.isCancelled, !self.closed else { return }
++            self.saveViewNow()
++        }
 +    }
++
++    /// The person was really here: they changed something, or the editor has been open a moment.
++    var workedOn: Bool { personChanged || (openedAt.map { Date().timeIntervalSince($0) >= Self.countsAfter } ?? false) }
 +
 +    /// Something the view or the edit shows changed: saved after a short pause.
 +    func viewChanged() {
 +        guard viewTracking else { return }
++        // A change from the live session (Claude's, another device's) isn't this person working here.
++        if !applyingRemote { personChanged = true }
 +        viewTask?.cancel()
 +        viewTask = Task { @MainActor [weak self] in
 +            try? await Task.sleep(nanoseconds: Self.viewSaveAfter)
@@ -210,7 +224,7 @@ index 00000000..7bf2e5b0
 +
 +    /// Saves where the editor is now (this Mac at once; the session when it changed).
 +    func saveViewNow() {
-+        guard viewTracking, isReady else { return }
++        guard viewTracking, isReady, workedOn else { return }
 +        var v = state.viewSnapshot(binTab: binTab, mode: mode.rawValue, title: draftTitle)
 +        if playing { v.playhead = (playhead * 1000).rounded() / 1000 }
 +        let sid = isOwner ? draftSessionId : nil
@@ -231,10 +245,10 @@ index 00000000..7bf2e5b0
 +    }
 +}
 diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
-index 318b12aa..dce267d6 100644
+index 318b12aa..a9ccefef 100644
 --- a/mac/Muse/App/Edit/EditSuiteSession.swift
 +++ b/mac/Muse/App/Edit/EditSuiteSession.swift
-@@ -33,19 +33,35 @@ final class EditSuiteSession {
+@@ -33,19 +33,39 @@ final class EditSuiteSession {
      /// One Claude: the edit session to join (Claude opened it) instead of opening the take's.
      var attachSessionId: String?
      private(set) var phase: Phase = .loading("Opening the video…")
@@ -267,13 +281,17 @@ index 318b12aa..dce267d6 100644
 +    @ObservationIgnored var viewTask: Task<Void, Never>?
 +    @ObservationIgnored var lastSentView: EditSessionView?
 +    @ObservationIgnored var lastSentProject: E.Project?
++    /// When the editor became ready on this edit, whether the person changed anything since, and the "stayed a moment" save.
++    @ObservationIgnored var openedAt: Date?
++    @ObservationIgnored var personChanged = false
++    @ObservationIgnored var stayTask: Task<Void, Never>?
 +    @ObservationIgnored let recentStore = EditRecentStore.standard
 +    /// A member's blank project kept on this Mac (one id per blank, so two blanks don't overwrite each other).
 +    @ObservationIgnored var localBlankId = UUID().uuidString
      /// Frame strips per video asset (evenly over the whole file) and waveforms per sounding asset (0…1 peaks over the file).
      private(set) var strips: [String: [CGImage]] = [:]
      private(set) var waves: [String: [Float]] = [:]
-@@ -177,11 +193,16 @@ final class EditSuiteSession {
+@@ -177,11 +197,16 @@ final class EditSuiteSession {
      /// Opens the take: a v2 version re-opens its project on its source, a v1 version its edit list (fromV1), anything else
      /// starts fresh on the take's own video.
      func load() async {
@@ -291,7 +309,7 @@ index 318b12aa..dce267d6 100644
                  // "New blank project": nothing on the timeline yet, the default shape (the shape picker changes it).
                  project = E.Project.blank()
              } else if let p2 = take.editsV2, p2.isBlank, take.parentTakeId == nil {
-@@ -223,7 +244,11 @@ final class EditSuiteSession {
+@@ -223,7 +248,11 @@ final class EditSuiteSession {
              refreshMedia()
              refreshLookThumbs()
              if !isBlankStart, let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
@@ -303,7 +321,7 @@ index 318b12aa..dce267d6 100644
          } catch {
              phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
          }
-@@ -250,6 +275,7 @@ final class EditSuiteSession {
+@@ -250,6 +279,7 @@ final class EditSuiteSession {
              guard let link, let url = URL(string: link) else { continue }
              if let local = try? await EditSuiteMedia.localCopy(url, key: a.take ?? a.upload ?? a.id) { files[a.id] = local }
          }
@@ -311,7 +329,7 @@ index 318b12aa..dce267d6 100644
          await ensureContentFonts()
      }
  
-@@ -266,6 +292,10 @@ final class EditSuiteSession {
+@@ -266,6 +296,11 @@ final class EditSuiteSession {
      }
  
      func close() {
@@ -319,10 +337,11 @@ index 318b12aa..dce267d6 100644
 +        saveViewNow()
 +        viewTracking = false
 +        viewTask?.cancel()
++        stayTask?.cancel()
          stopLive()
          player.pause()
          player.replaceCurrentItem(with: nil)
-@@ -293,7 +323,7 @@ final class EditSuiteSession {
+@@ -293,7 +328,7 @@ final class EditSuiteSession {
          playhead = state.playhead
          // Mac Edit audit: a change the server would refuse is not made; say why instead of silently doing nothing.
          if !ok, let r = state.lastRefusal { lastError = Self.refusalText(r) }
@@ -331,7 +350,7 @@ index 318b12aa..dce267d6 100644
          return ok
      }
  
-@@ -326,12 +356,13 @@ final class EditSuiteSession {
+@@ -326,12 +361,13 @@ final class EditSuiteSession {
      }
  
      /// View-only changes (selection, zoom, tabs, snapping…).
@@ -346,7 +365,7 @@ index 318b12aa..dce267d6 100644
          Task { await ensureFiles(); rebuild(); refreshMedia() }
          if !applyingRemote { liveLocalChange() }
      }
-@@ -427,6 +458,7 @@ final class EditSuiteSession {
+@@ -427,6 +463,7 @@ final class EditSuiteSession {
          shuttle = 0
          playing = false
          state.playhead = playhead
@@ -354,7 +373,7 @@ index 318b12aa..dce267d6 100644
      }
  
      /// J / K / L: back faster, stop, forward faster (1×, 2×, 4×).
-@@ -452,12 +484,14 @@ final class EditSuiteSession {
+@@ -452,12 +489,14 @@ final class EditSuiteSession {
          playhead = v
          state.playhead = v
          player.seek(to: CMTime(seconds: v, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
@@ -371,10 +390,10 @@ index 318b12aa..dce267d6 100644
      func step(_ dir: Int) {
 diff --git a/mac/Muse/App/SnapshotRunner+EditResume.swift b/mac/Muse/App/SnapshotRunner+EditResume.swift
 new file mode 100644
-index 00000000..1bbf58d5
+index 00000000..54a0fb9d
 --- /dev/null
 +++ b/mac/Muse/App/SnapshotRunner+EditResume.swift
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,171 @@
 +import AppKit
 +import MuseCore
 +
@@ -459,6 +478,7 @@ index 00000000..1bbf58d5
 +        var ourAt: Double?
 +        if let sid, let s = try? await fake.editSession(id: sid) {
 +            ourAt = s.view?.at
++            note("NOTE left rz_resume: its view.at \(ourAt.map { String(Int64($0)) } ?? "none") at \(Int64(Date().timeIntervalSince1970 * 1000))")
 +            check("view_on_server", s.view?.zoom == 150 && s.view?.binTab == "uploads" && s.view?.safeArea == "off",
 +                  "server view \(String(describing: s.view))")
 +        } else { note("FAIL view_on_server: session not readable") }

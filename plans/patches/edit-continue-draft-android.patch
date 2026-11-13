@@ -182,7 +182,7 @@ index 00000000..219e4465
 +    p.tab?.let { t -> Panel.entries.firstOrNull { it.name.equals(t, ignoreCase = true) && it != Panel.EXPORT && it != Panel.HISTORY }?.let { act(EditAction.Open(it)) } }
 +}
 diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
-index 0b41630d..4dadfbaf 100644
+index 0b41630d..7863a49e 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
 +++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteScreen.kt
 @@ -10,6 +10,9 @@ import android.provider.MediaStore
@@ -368,7 +368,7 @@ index 0b41630d..4dadfbaf 100644
      private val app = context.applicationContext
      private val looks = LookLibrary(app)
      val controller = EditSuiteController(viewModelScope, RepoEditBackend(c, onAsset = { id, url -> fetchAsset(id, url) }), lookOf = { id -> runCatching { looks.pack.packLook(id) }.getOrNull() })
-@@ -418,6 +504,15 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -418,6 +504,18 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
  
      /** Edit's preview choice per project (plans/edit-platform-preview.md), on this device. */
      private val previewStore = app.getSharedPreferences("edit-preview", Context.MODE_PRIVATE)
@@ -377,6 +377,9 @@ index 0b41630d..4dadfbaf 100644
 +    private var placeTracking = false
 +    private var lastSentPlace: studio.muse.core.edit.EditPlace? = null
 +    private var lastSentProject: EditProject? = null
++    /** When the editor became ready and what it showed then (a place only counts once changed or after a moment open). */
++    private var placeOpenedAt = 0L
++    private var placeBase: Pair<studio.muse.core.edit.EditPlace, EditProject?>? = null
 +    /** A member's (or an unshared) edit kept on this phone: what the editor reopens instead of the take's saved edit. */
 +    private val localResume: EditProject? get() = resume?.takeIf { it.sessionId == null }?.let { r ->
 +        recentFile.load().firstOrNull { "local:${it.key}" == r.id }?.project?.let { runCatching { EditJson.parse(it) }.getOrNull() }
@@ -384,7 +387,7 @@ index 0b41630d..4dadfbaf 100644
      private var previewKey: String? = null
      private fun previewPrefs() = studio.muse.core.edit.EditPreviewPrefs.decode(previewStore.getString("prefs", null))
  
-@@ -427,6 +522,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -427,6 +525,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          }
          load()
          loadKits()
@@ -396,7 +399,7 @@ index 0b41630d..4dadfbaf 100644
          viewModelScope.launch {
              controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p ->
                  if (p == null) return@collect
-@@ -474,7 +574,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -474,7 +577,11 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
          work = viewModelScope.launch {
              controller.setPhase(SuitePhase.Loading())
              val takes = c.repo.state.value.takes
@@ -409,7 +412,7 @@ index 0b41630d..4dadfbaf 100644
              val target = editTargetFor(take, takes)
              val source = target?.source ?: take
              controller.update { u ->
-@@ -490,7 +594,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -490,7 +597,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                      val f = engine.fetchSource(url) { p -> controller.setPhase(SuitePhase.Loading(p)) }
                      sourceFile = f; sourceInfo = engine.probe(f)
                  }
@@ -418,7 +421,7 @@ index 0b41630d..4dadfbaf 100644
                  for (a in project.assets) if (a.take == source.id && a.kind == AssetKind.VIDEO) sourceFile?.let { files[a.id] = it }
                  controller.load(project, source.title, source.id, source.thumb, reopened = take.kind == "edit")
                  // Edit's preview: this project's remembered view (else this device's last), and the server's safe zones.
-@@ -501,6 +605,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -501,6 +608,7 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                  loadFrames(project)
                  fetchTakeAssets(controller.project ?: project)
                  fetchFonts(controller.project ?: project)
@@ -426,7 +429,7 @@ index 0b41630d..4dadfbaf 100644
                  loadContent()
                  loadWaves(controller.project ?: project)
              } catch (e: kotlinx.coroutines.CancellationException) { throw e
-@@ -566,6 +671,53 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -566,6 +674,58 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
              } ?: continue
              runCatching { engine.fetchSource(url) {} }.getOrNull()?.let { files[a.id] = it }
          }
@@ -455,7 +458,10 @@ index 0b41630d..4dadfbaf 100644
 +    private fun startPlace() {
 +        resume?.place?.let { controller.restorePlace(it) }
 +        placeTracking = true
-+        savePlace()
++        // Not saved on opening (runs 604/607): it counts once the person changes something, or after a moment open.
++        placeOpenedAt = System.currentTimeMillis()
++        controller.ui.value.let { u -> placeBase = placeOf(u, resume?.place) to u.project }
++        viewModelScope.launch { delay(PLACE_COUNTS_AFTER_MS + 100); savePlace() }
 +    }
 +
 +    /** Saves where the editor stands: on this phone (with a member's project) and, for the owner, on the session. */
@@ -464,6 +470,8 @@ index 0b41630d..4dadfbaf 100644
 +        val u = controller.ui.value
 +        val project = u.project ?: return
 +        val place = placeOf(u, resume?.place)
++        val changed = placeBase?.let { (p0, pr0) -> !p0.samePlace(place) || pr0 != project } ?: true
++        if (!changed && System.currentTimeMillis() - placeOpenedAt < PLACE_COUNTS_AFTER_MS) return
 +        // The owner's live session (or, its take deleted, the session it was opened from); a member's edit has none.
 +        val live = sync
 +        val sid = live?.sessionId ?: resume?.sessionId?.takeIf { live == null }
@@ -480,7 +488,7 @@ index 0b41630d..4dadfbaf 100644
      }
  
      private fun playable(p: EditProject): EditProject = playableProject(p, files.keys)
-@@ -1146,6 +1298,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+@@ -1146,6 +1306,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
      }
  
      override fun onCleared() {
@@ -489,6 +497,16 @@ index 0b41630d..4dadfbaf 100644
          recorder?.let { runCatching { it.stop() }; it.release() }; recorder = null
          work?.cancel(); exporting?.cancel()
          sync?.stop(c.scope); sync = null
+@@ -1153,6 +1315,9 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
+     }
+ 
+     companion object {
++        /** An editor open this long counts as worked on even without a change. */
++        const val PLACE_COUNTS_AFTER_MS = 2_000L
++
+         /**
+          * The whole source as one clip on a canvas the size of the source. [lut]: the take's suite look (workstream 1,
+          * `Take.look.lut`, e.g. "palette:<id>"), put on the clip at full strength like the server's edit sessions do.
 diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
 index 966becd4..9c532e14 100644
 --- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/edit/EditSuiteState.kt
