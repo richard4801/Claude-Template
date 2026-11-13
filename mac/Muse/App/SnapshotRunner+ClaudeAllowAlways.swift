@@ -126,7 +126,10 @@ extension SnapshotRunner {
         note("START settings")
         store.oneClaude.open = false
         store.openSettings(.account)
-        try? await Task.sleep(for: .seconds(1.5))
+        try? await Task.sleep(for: .seconds(1.0))
+        // The Claude section sits below Appearance and Notifications: bring it on screen before reading the texts.
+        SnapshotRunner.state.scrollTo = "settings.claude"
+        try? await Task.sleep(for: .seconds(1.0))
         check("settings_lists", service.fileSettings.allowedFolders == [shoot.path] && service.fileSettings.rules.map(\.id) == ["ffmpeg"],
               "folders \(service.fileSettings.allowedFolders), rules \(service.fileSettings.rules.map(\.id))")
         let win = mainWindow?.contentView
@@ -135,6 +138,7 @@ extension SnapshotRunner {
         check("settings_shows_rule", texts.contains("ffmpeg commands"), "rows \(texts.filter { $0.contains("ommands") })")
         check("settings_shows_switch", texts.contains("Ask before anything"))
         capture(dir.appendingPathComponent("mac_a_claude_allow_settings.png"))
+        SnapshotRunner.state.scrollTo = nil
         service.removeCommandRule("ffmpeg")
         service.removeAllowedFolder(shoot.path)
         check("settings_remove", service.fileSettings.rules.isEmpty && service.fileSettings.allowedFolders.isEmpty)

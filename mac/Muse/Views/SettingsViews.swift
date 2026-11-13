@@ -81,7 +81,7 @@ private struct AccountSettings: View {
     var body: some View {
         Group { who; appearance }
         Group { notifications }
-        Group { ClaudeFileSettingsSection() }
+        Group { ClaudeFileSettingsSection() }.id("settings.claude")
         Group { about }
     }
 
