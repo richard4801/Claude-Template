@@ -85,7 +85,8 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
     public var suiteToolOf: @Sendable (String) async -> String = { _ in "shot" }
 
     private func thread(contextKind: String, contextId: String, new: Bool) async throws -> ClaudeThread {
-        guard ["camera", "edit", "recreate", "suite"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
+        // "chat": One Claude's own chats, as the server has them (bundle-10 run 620: the allow-always walk couldn't open one).
+        guard ["camera", "edit", "recreate", "suite", "chat"].contains(contextKind) else { throw ApiError("bad_request", "contextKind") }
         // A recreate thread is on one of the owner's references (rx_…), else 404 (as the server).
         if contextKind == "recreate", !contextId.hasPrefix("rx_") { throw ApiError("not_found", "Reference not found") }
         var key = "\(contextKind):\(contextId)"
