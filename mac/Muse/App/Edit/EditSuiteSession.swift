@@ -35,6 +35,8 @@ final class EditSuiteSession {
     private(set) var phase: Phase = .loading("Opening the video…")
     /// The load ran on a cancelled task (it can't finish the attach to a live session then); review mode checks it.
     private(set) var loadWasCancelled = false
+    /// close() ran: a load still running (it outlives the view) starts nothing live after it.
+    @ObservationIgnored private(set) var closed = false
     /// The editor state. Change it through `edit` so the preview follows.
     private(set) var state: EditSuiteState
     var mode: Mode = .timeline { didSet { viewChanged() } }
@@ -241,7 +243,10 @@ final class EditSuiteSession {
             refreshMedia()
             refreshLookThumbs()
             if !isBlankStart, let n = try? await api.takeVersions(takeId: sourceTakeId).count { versionNumber = n + 1 }
+            // Edit closed while this loaded: nothing live starts (and a close during startLive's await stops it).
+            guard !closed else { return }
             if isOwner { await startLive() }
+            guard !closed else { stopLive(); return }
             restoreView()
         } catch {
             phase = .failed((error as? ApiError)?.message ?? "Couldn't open this video")
@@ -286,6 +291,7 @@ final class EditSuiteSession {
     }
 
     func close() {
+        closed = true
         saveViewNow()
         viewTracking = false
         viewTask?.cancel()
