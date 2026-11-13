@@ -166,6 +166,19 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # Owner bugs, build 597 (SnapshotRunner+EditBig.swift): a 66-shot 16:9 edit with overlays and captions, opened the way
+      # Claude opens it while Edit is already on that take. It must land on Claude's session, sit under 40 % CPU when idle
+      # (the main thread's sample is printed), play, and a 16:9 → 9:16 → 16:9 Shape round trip must put every clip back.
+      - name: Big edit check
+        if: ${{ !cancelled() }}
+        working-directory: mac
+        run: |
+          f=snapshots/edit-big-check.txt
+          if [ ! -f "$f" ]; then echo "no edit-big-check.txt (review mode didn't reach the big edit check)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during the big edit check"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # Continue a draft (owner 2026-11-12): Edit opens on a choice, New or Continue draft (nothing opens by itself); Continue
       # draft reopens the last edit exactly where it was left (playhead, zoom, tab, Uploads bin, platform view); an edit whose
       # take was deleted opens with its clips marked missing; New starts a blank project (SnapshotRunner+EditResume.swift).

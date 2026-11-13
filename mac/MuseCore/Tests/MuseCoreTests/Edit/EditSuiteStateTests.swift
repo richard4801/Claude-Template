@@ -328,6 +328,44 @@ final class EditSuiteStateTests: XCTestCase {
         assertValid(s)
     }
 
+    /// Owner bug (build 597): 16:9 → 9:16 → 16:9 left the clips where 9:16 put them (x 0.667 → 1.181, never back).
+    func testShapeRoundTripPutsTheClipsBack() throws {
+        var p = try fixture("single clip")
+        p.assets[0].width = 1920
+        p.assets[0].height = 1080
+        p.canvas.width = 1920
+        p.canvas.height = 1080
+        p.tracks[0].items = p.tracks[0].items.map { it in
+            guard case .video(var c) = it else { return it }
+            c.transform = E.Transform(x: 0.667, scale: 1.5)
+            return .video(c)
+        }
+        var s = EditSuiteState(p)
+        XCTAssertEqual(s.export.ratio, .landscape)
+        let start = s.project
+        XCTAssertTrue(s.setRatio(.portrait, framing: ["c1": 0.8]))
+        XCTAssertNotEqual(s.project.mainClips[0].transform?.x, 0.667)
+        XCTAssertTrue(s.setRatio(.landscape))
+        XCTAssertEqual(s.project, start, "straight back: canvas and transforms exactly as they were")
+        XCTAssertEqual(s.export.ratio, .landscape)
+        assertValid(s)
+
+        // Without the memory (an older edit): x is only kept inside the no-edge range; a clip that exactly fills the
+        // canvas goes back to the centre.
+        var q = p
+        q.canvas.width = 1080
+        q.canvas.height = 1920
+        q.tracks[0].items = q.tracks[0].items.map { it in
+            guard case .video(var c) = it else { return it }
+            c.transform = E.Transform(x: 1.181)
+            return .video(c)
+        }
+        var t = EditSuiteState(q)
+        XCTAssertTrue(t.setRatio(.landscape))
+        XCTAssertNil(t.project.mainClips[0].transform, "x 1.181 can't stay on a canvas the clip exactly fills")
+        assertValid(t)
+    }
+
     func testClocks() {
         XCTAssertEqual(EditSuite.clockTenths(4.2), "0:04.2")
         XCTAssertEqual(EditSuite.clock(18), "0:18")

@@ -434,7 +434,9 @@ final class EditSuiteSession {
                     self.shuttle = 0
                     self.refreshLookThumbs()
                 }
-                self.playing = now
+                // Only on a change: @Observable notifies on every set, even of the same value, and every view reading
+                // `playing` re-renders (owner's 66-clip edit: the whole timeline 30 times a second).
+                if self.playing != now { self.playing = now }
             }
         }
     }

@@ -375,6 +375,8 @@ public struct EditSuiteState: Sendable {
     /// The project when the current drag began: trims and moves are measured from it, so a drag's target is absolute
     /// (owner audit 2026-11-08: the start handle of a main clip measured from the already-trimmed clip and ran away).
     public private(set) var gestureBase: E.Project?
+    /// The last shape switch (setRatio), for an exact switch back.
+    public private(set) var shapeReturn: ShapeReturn?
 
     public init(_ project: E.Project) {
         history = E.History(project)
@@ -1232,32 +1234,77 @@ public struct EditSuiteState: Sendable {
 
     /// Changes the canvas shape (keeps the resolution class). `framing` = each main clip's horizontal centre (0–1 of the
     /// source) to keep in view, from face detection in the app; clips are moved so that point is centred when it can be.
+    /// Owner bug (build 597): a 16:9 → 9:16 → 16:9 round trip left each clip's x where 9:16 put it (s44 0.667 → 1.181, never
+    /// back), so the picture slid off the canvas. Switching straight back now restores the canvas and every clip's transform
+    /// exactly; otherwise a clip's x is kept inside the range that shows no edge for the new shape (its scale counted).
     @discardableResult
     public mutating func setRatio(_ r: EditSuite.Ratio, framing: [String: Double] = [:]) -> Bool {
-        export.ratio = r
+        let fromRatio = export.ratio
         let size = r.canvas(shortSide: export.resolution.rawValue)
-        return apply { p in
+        // Straight back to the shape before the last switch, nothing else changed: exactly as it was.
+        if let m = shapeReturn, m.after == project, m.canvas.width == size.width, m.canvas.height == size.height {
+            export.ratio = r
+            let ok = apply { p in
+                var q = p
+                q.canvas = m.canvas
+                if let mi = q.tracks.firstIndex(where: { $0.kind == .main }) {
+                    q.tracks[mi].items = q.tracks[mi].items.map { it in
+                        guard case .video(var c) = it, let tf = m.transforms[c.id] else { return it }
+                        c.transform = tf
+                        return .video(c)
+                    }
+                }
+                return q == p ? nil : q
+            }
+            shapeReturn = nil
+            return ok
+        }
+        let before = project
+        export.ratio = r
+        let ok = apply { p in
             var q = p
             q.canvas.width = size.width
             q.canvas.height = size.height
             if let mi = q.tracks.firstIndex(where: { $0.kind == .main }) {
                 q.tracks[mi].items = q.tracks[mi].items.map { it in
-                    guard case .video(var c) = it, let fx = framing[c.id], let a = q.asset(c.asset), let w = a.width, let h = a.height else { return it }
+                    guard case .video(var c) = it, let a = q.asset(c.asset), let w = a.width, let h = a.height else { return it }
                     let (fw, _) = E.fittedSize(width: Double(w), height: Double(h), crop: c.crop, fit: c.fit ?? .cover,
                                                canvasWidth: Double(size.width), canvasHeight: Double(size.height))
-                    let over = fw / Double(size.width)   // fitted width in canvas widths (≥ 1 when it covers)
-                    guard over > 1.0001 else { return it }
-                    // centre x so that source point fx sits in the middle, without showing an edge.
-                    let x = 0.5 + (0.5 - fx) * over
-                    let lim = (over - 1) / 2
+                    let over = fw * (c.transform?.scale ?? 1) / Double(size.width)   // drawn width in canvas widths
+                    guard over > 0.9999 else { return it }   // narrower than the canvas (contain, scaled down): left as placed
+                    let lim = max(0, (over - 1) / 2)
                     var tf = c.transform ?? E.Transform()
-                    tf.x = E.r6(min(0.5 + lim, max(0.5 - lim, x)))
-                    c.transform = tf
+                    if let fx = framing[c.id], over > 1.0001 {
+                        // centre x so that source point fx sits in the middle, without showing an edge.
+                        tf.x = E.r6(min(0.5 + lim, max(0.5 - lim, 0.5 + (0.5 - fx) * over)))
+                    } else if let x = tf.x {
+                        // No face to follow: only kept inside the range that shows no edge.
+                        let kept = E.r6(min(0.5 + lim, max(0.5 - lim, x)))
+                        tf.x = kept == 0.5 ? nil : kept
+                    } else {
+                        return it
+                    }
+                    c.transform = tf == E.Transform() ? nil : tf
                     return .video(c)
                 }
             }
             return q == p ? nil : q
         }
+        if ok {
+            var keep: [String: E.Transform?] = [:]
+            for c in before.mainClips { keep[c.id] = .some(c.transform) }
+            shapeReturn = ShapeReturn(canvas: before.canvas, transforms: keep, after: project)
+        } else {
+            export.ratio = fromRatio
+        }
+        return ok
+    }
+
+    /// The last shape switch: what to put back when the next switch returns to the shape before it.
+    public struct ShapeReturn: Sendable {
+        var canvas: E.Canvas
+        var transforms: [String: E.Transform?]
+        var after: E.Project
     }
 }
 
