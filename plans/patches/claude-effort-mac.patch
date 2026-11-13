@@ -1,0 +1,629 @@
+From c899d47dfe113edfbcc4f773499632a89ba41f04 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 13 Nov 2026 13:29:42 +0000
+Subject: [PATCH] Mac: Effort picker beside the model in the Claude panel;
+ --effort to Claude Code
+
+- Low / Medium / High / Extra high / Max, only the levels the chat's model takes (hidden when it takes none)
+- per chat, else the person's last choice, else the model's own default (server 0036)
+- the relay passes --effort on the chat's next turn; the model chip drops the "Claude " prefix so effort fits
+- review check (claude-chat-check.txt): beside the model and fitting at 1000 x 700, High sent on the next turn,
+  hidden for a model without effort; shot mac_a_claude_effort.png
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxnJMgrcJzBU2H7pwjQ
+---
+ mac/Muse/App/AppStore+OneClaude.swift         | 24 +++++++
+ mac/Muse/App/ClaudeCodeService.swift          |  6 ++
+ .../App/SnapshotRunner+ClaudeChecks.swift     |  4 ++
+ .../App/SnapshotRunner+ClaudeEffort.swift     | 70 +++++++++++++++++++
+ mac/Muse/Views/Claude/OneClaudePanel.swift    | 41 ++++++++++-
+ .../Sources/MuseCore/Claude/ClaudeAPI.swift   | 11 +++
+ .../MuseCore/Claude/ClaudeCommand.swift       |  3 +
+ .../MuseCore/Claude/ClaudeModels.swift        |  5 +-
+ .../Sources/MuseCore/Claude/ClaudeRelay.swift | 26 ++++++-
+ .../MuseCore/Claude/ClaudeRunner.swift        |  4 ++
+ .../MuseCore/Claude/FakeClaudeAPI.swift       | 20 ++++--
+ .../Sources/MuseCore/Claude/OneClaude.swift   | 33 +++++++++
+ .../MuseCoreTests/ClaudeRunnerTests.swift     | 29 ++++++++
+ .../Tests/MuseCoreTests/ClaudeTests.swift     | 39 +++++++++++
+ 14 files changed, 308 insertions(+), 7 deletions(-)
+ create mode 100644 mac/Muse/App/SnapshotRunner+ClaudeEffort.swift
+
+diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
+index 1598c03..b56c615 100644
+--- a/mac/Muse/App/AppStore+OneClaude.swift
++++ b/mac/Muse/App/AppStore+OneClaude.swift
+@@ -573,6 +573,7 @@ extension AppStore {
+         guard let api = oneClaudeAPI, let list = try? await api.claudeModels() else { return }
+         oneClaude.models = list
+         await ClaudeCodeService.shared.relayDefaultModel(list.default)
++        await ClaudeCodeService.shared.relayEffortCatalog(list)
+     }
+ 
+     /// The model the open chat runs on, and whether it is the person's default.
+@@ -595,6 +596,29 @@ extension AppStore {
+         }
+     }
+ 
++    /// The open chat's effort: the levels its model takes (empty: no effort setting, the picker hides), the level the
++    /// next turn runs at, and whether it is the chat's own pick.
++    var oneClaudeEffort: (levels: [String], current: String?, isOwn: Bool, modelDefault: String?) {
++        let info = oneClaudeModel.info
++        let levels = ClaudeEffort.levels(info)
++        let own = oneClaude.current?.effort.flatMap { levels.contains($0) ? $0 : nil }
++        return (levels, ClaudeEffort.resolve(info, own: own, last: oneClaude.models?.defaultEffort), own != nil, info?.defaultEffort)
++    }
++
++    /// Picks the open chat's effort level (nil: back to the last choice / the model's default). The next message uses
++    /// it; a pick is also the person's last choice, so new chats start from it.
++    func setOneClaudeEffort(_ e: String?) async {
++        guard let api = oneClaudeAPI, let chat = oneClaude.chatId else { return }
++        do {
++            try await api.setChatEffort(chat, effort: e)
++            if let i = oneClaude.chats.firstIndex(where: { $0.id == chat }) { oneClaude.chats[i].effort = e }
++            if let e { oneClaude.models?.defaultEffort = e }
++            await ClaudeCodeService.shared.relayChatEffort(threadId: chat, e, last: oneClaude.models?.defaultEffort)
++        } catch {
++            showToast("Couldn't change the effort. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
++        }
++    }
++
+     /// The person's default for chats that don't pick one.
+     func setOneClaudeDefaultModel(_ id: String?) async {
+         guard let api = oneClaudeAPI else { return }
+diff --git a/mac/Muse/App/ClaudeCodeService.swift b/mac/Muse/App/ClaudeCodeService.swift
+index 2a3432b..a4dd01b 100644
+--- a/mac/Muse/App/ClaudeCodeService.swift
++++ b/mac/Muse/App/ClaudeCodeService.swift
+@@ -351,6 +351,12 @@ final class ClaudeCodeService: ObservableObject {
+     /// Step 6b: the person's default model and a chat's own, for the next Claude Code run (--model).
+     func relayDefaultModel(_ m: String?) async { await relay?.setDefaultModel(m) }
+     func relayChatModel(threadId: String, _ m: String?) async { await relay?.setModel(threadId: threadId, m) }
++    /// Effort (`--effort`): the models' levels and the person's last choice, and a chat's own pick.
++    func relayEffortCatalog(_ list: ClaudeModelList) async { await relay?.setEffortCatalog(list) }
++    func relayChatEffort(threadId: String, _ e: String?, last: String?) async {
++        await relay?.setEffort(threadId: threadId, e)
++        if e != nil { await relay?.setLastEffort(last) }
++    }
+ 
+     func isRunning(threadId: String) -> Bool { relayState.running[threadId] != nil }
+     func isAnsweringPhone(threadId: String) -> Bool { relayState.running[threadId]?.fromPhone == true }
+diff --git a/mac/Muse/App/SnapshotRunner+ClaudeChecks.swift b/mac/Muse/App/SnapshotRunner+ClaudeChecks.swift
+index aaac47e..4cf01fd 100644
+--- a/mac/Muse/App/SnapshotRunner+ClaudeChecks.swift
++++ b/mac/Muse/App/SnapshotRunner+ClaudeChecks.swift
+@@ -9,6 +9,7 @@ import MuseCore
+ //   draft_live       Claude sets the rig, the prompt and a reference in Photo; the composer shows all three
+ //   draft_after_tool the same with the live event missed: the draft is read again after Claude's tool step
+ //   draft_bound      the chat's context line names the draft the composer shows
++//   effort …         the effort picker beside the model (SnapshotRunner+ClaudeEffort.swift)
+ //   mode_sessions    each Suite mode has its own chats; closing the panel (or quitting) and opening the mode again returns
+ //                    to its latest chat with its messages and its draft
+ extension SnapshotRunner {
+@@ -192,6 +193,9 @@ extension SnapshotRunner {
+         }
+         store.oneClaude.open = false
+ 
++        // Effort beside the model (SnapshotRunner+ClaudeEffort.swift; shot mac_a_claude_effort.png).
++        await claudeEffortCheck(store, fakeChat: fakeChat, dir: dir, until: until, line: line)
++
+         // One Claude (owner bug, build 520): Claude opening an edit session (a new blank project) lands IN the editor on
+         // that session, not on the Edit home.
+         if let blank = try? await fakeMuse.openEditSession(EditSessionOpenRequest(takeId: EditV2.blankSourceId, device: "check")) {
+diff --git a/mac/Muse/App/SnapshotRunner+ClaudeEffort.swift b/mac/Muse/App/SnapshotRunner+ClaudeEffort.swift
+new file mode 100644
+index 0000000..b6219b3
+--- /dev/null
++++ b/mac/Muse/App/SnapshotRunner+ClaudeEffort.swift
+@@ -0,0 +1,70 @@
++import AppKit
++import MuseCore
++
++// Effort beside the model in the Claude panel (owner, 2026-11-13: "add effort levels for Claude in the app"). Demo mode
++// (FakeClaudeAPI and the scripted Claude Code; nothing is spent). Lines go into claude-chat-check.txt (CI fails on FAIL):
++//   effort beside the model   drawn right of the model chip on the same row; the header fits the panel at 1000 × 700
++//   effort reaches Claude Code  choosing High is sent on the chat's next turn (`--effort high`)
++//   effort hidden without support  a model that takes no effort setting shows no effort picker
++// Shot: mac_a_claude_effort.png (1000 × 700, panel open).
++extension SnapshotRunner {
++    static func claudeEffortCheck(_ store: AppStore, fakeChat: FakeClaudeAPI, dir: URL,
++                                  until: (Double, () -> Bool) async -> Bool, line: (Bool, String, String) -> Void) async {
++        let svc = ClaudeCodeService.shared
++        await store.loadClaudeModels()
++        guard let thread = try? await fakeChat.newThread(contextKind: "chat", contextId: "ct_effort_check") else {
++            line(false, "effort beside the model", "couldn't make a demo chat")
++            return
++        }
++        let savedChats = store.oneClaude.chats, savedChat = store.oneClaude.chatId
++        store.oneClaude.chats.insert(ClaudeChatSummary(id: thread.id, title: "Effort check"), at: 0)
++        store.pickOneClaudeChat(thread.id)
++
++        // 1. Drawn beside the model, fitting the panel, at 1000 × 700.
++        let win = mainWindow
++        let original = win?.frame
++        if let w = win, let o = original { w.setFrame(NSRect(x: o.minX, y: o.maxY - 700, width: 1000, height: 700), display: true) }
++        store.oneClaude.open = true
++        _ = await until(8) { SnapshotRunner.state.composerFrames["claude effort line"] != nil && SnapshotRunner.state.composerFrames["claude model line"] != nil }
++        try? await Task.sleep(for: .seconds(1))
++        let f = SnapshotRunner.state.composerFrames
++        if let ml = f["claude model line"], let el = f["claude effort line"], let h = f["claude header"] {
++            let panelWidth = f["one claude panel"]?.width ?? CGFloat(FloatingClaudePanel.defaultWidth)
++            let beside = el.minX >= ml.maxX - 1 && abs(el.midY - ml.midY) <= 6
++            // The header's three buttons (New chat, History, Hide: about 90 pt) still fit right of the effort chip.
++            let roomForButtons = el.maxX <= h.maxX - 80
++            line(beside && roomForButtons && h.width <= panelWidth + 1 && el.height <= 40, "effort beside the model",
++                 "model \(Int(ml.minX))–\(Int(ml.maxX)), effort \(Int(el.minX))–\(Int(el.maxX)) on the same row \(beside), buttons fit \(roomForButtons); header \(Int(h.width)) in a panel \(Int(panelWidth)) wide; showing \(store.oneClaudeEffort.current.map(ClaudeEffort.name) ?? "none")")
++        } else {
++            line(false, "effort beside the model", "not drawn (model \(f["claude model line"] != nil), effort \(f["claude effort line"] != nil), levels \(store.oneClaudeEffort.levels))")
++        }
++        capture(dir.appendingPathComponent("mac_a_claude_effort.png"))
++
++        // 2. High is sent on the next turn.
++        await store.setOneClaudeEffort("high")
++        let before = ClaudeScriptedLauncher.recent.arguments.count
++        svc.send(threadId: thread.id, text: "Effort check: say ok.")
++        func ours(_ a: [String]) -> Bool { a.contains { $0.contains("/\(thread.id)/") } }
++        let launched = await until(15) { ClaudeScriptedLauncher.recent.arguments.dropFirst(before).contains(where: ours) }
++        let args = ClaudeScriptedLauncher.recent.arguments.dropFirst(before).last(where: ours) ?? []
++        let sent = args.firstIndex(of: "--effort").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
++        line(launched && sent == "high" && store.oneClaudeEffort.current == "high", "effort reaches Claude Code",
++             "turn launched \(launched), --effort \(sent ?? "missing"), the picker shows \(store.oneClaudeEffort.current ?? "none")")
++        _ = await until(15) { svc.relayState.running[thread.id] == nil && (svc.relayState.queued[thread.id] ?? 0) == 0 }
++
++        // 3. A model without effort support hides the picker.
++        let none = ClaudeModelInfo(id: "claude-no-effort-check", name: "Claude No Effort", speed: "Fast", cost: "Low", good: "Check", efforts: nil, defaultEffort: nil)
++        store.oneClaude.models?.models.append(none)
++        if let i = store.oneClaude.chats.firstIndex(where: { $0.id == thread.id }) { store.oneClaude.chats[i].model = none.id }
++        let hidden = await until(5) { SnapshotRunner.state.composerFrames["claude effort line"] == nil }
++        line(hidden && store.oneClaudeEffort.levels.isEmpty && store.oneClaudeEffort.current == nil, "effort hidden without support",
++             "picker drawn \(!hidden), levels \(store.oneClaudeEffort.levels)")
++
++        // Leave the panel as it was.
++        store.oneClaude.models?.models.removeAll { $0.id == none.id }
++        store.oneClaude.open = false
++        store.oneClaude.chats = savedChats
++        if let c = savedChat { store.pickOneClaudeChat(c) } else { store.oneClaude.chatId = nil }
++        if let w = win, let o = original { w.setFrame(o, display: true) }
++    }
++}
+diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
+index 1be85a7..b2810b6 100644
+--- a/mac/Muse/Views/Claude/OneClaudePanel.swift
++++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
+@@ -82,6 +82,7 @@ struct OneClaudePanel: View {
+                     .help(o.current?.shownTitle ?? "New chat")
+                 Spacer(minLength: Space.s2)
+                 modelMenu
++                effortMenu
+                 Button { Task { await store.newOneClaudeChat() } } label: {
+                     Ph("plus", 16).foregroundStyle(r.ink2).frame(width: 28, height: 28).contentShape(Rectangle())
+                 }
+@@ -161,8 +162,9 @@ struct OneClaudePanel: View {
+             } label: {
+                 // A Menu label drops custom image sizing (owner bug, build 530: a ~300 pt chip icon pushed the header into the
+                 // editor), so no Phosphor image here: text and the system chevron, sized by the font, as ChatSessionsBar does.
++                // The header already says Claude: the chip names the model without it ("Opus 5.5"), so effort fits beside it.
+                 HStack(spacing: Space.s1) {
+-                    Text(cur.info?.name ?? "Claude").lineLimit(1).fixedSize()
++                    Text(Self.shortName(cur.info?.name) ?? "Claude").lineLimit(1).fixedSize()
+                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                 }
+                 .font(t.scale.caption.font).foregroundStyle(r.ink2)
+@@ -190,6 +192,43 @@ struct OneClaudePanel: View {
+         }
+     }
+ 
++    static func shortName(_ name: String?) -> String? {
++        guard let name else { return nil }
++        return name.hasPrefix("Claude ") ? String(name.dropFirst(7)) : name
++    }
++
++    // MARK: Effort beside the model: the levels the chat's model takes, per chat; hidden when the model takes none
++
++    @ViewBuilder private var effortMenu: some View {
++        let r = t.roles
++        let e = store.oneClaudeEffort
++        if let cur = e.current, !e.levels.isEmpty {
++            Menu {
++                Section("Effort for this chat") {
++                    ForEach(e.levels, id: \.self) { level in
++                        Button { Task { await store.setOneClaudeEffort(level) } } label: {
++                            let words = ClaudeEffort.name(level) + (level == e.modelDefault ? " (default)" : "")
++                            if level == cur { Label(words, systemImage: "checkmark") } else { Text(words) }
++                        }
++                    }
++                }
++            } label: {
++                HStack(spacing: Space.s1) {
++                    Text(ClaudeEffort.name(cur)).lineLimit(1).fixedSize()
++                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
++                }
++                .font(t.scale.caption.font).foregroundStyle(r.ink2)
++                .contentShape(Rectangle())
++            }
++            .menuStyle(.borderlessButton)
++            .menuIndicator(.hidden)
++            .fixedSize()
++            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude effort line") } }
++            .help("Effort. Higher thinks longer and uses more of your Claude plan.")
++            .accessibilityLabel("Effort: \(ClaudeEffort.name(cur)). Change it")
++        }
++    }
++
+     // MARK: Claude's lines: open a page, back, remembered
+ 
+     @ViewBuilder private var lines: some View {
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+index db23a55..c942faf 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeAPI.swift
+@@ -71,6 +71,8 @@ public protocol ClaudeAPI: Sendable {
+     /// Step 6b: the models, this person's default; a chat's model; this person's default.
+     func claudeModels() async throws -> ClaudeModelList
+     func setChatModel(_ id: String, model: String?) async throws
++    /// The chat's effort level (nil: back to the last choice / the model's default). A pick is also the person's last choice.
++    func setChatEffort(_ id: String, effort: String?) async throws
+     func setDefaultModel(_ model: String?) async throws
+     /// Files on this Mac: Claude Code's questions waiting for this person, and their answer.
+     func pendingPermissions() async throws -> [ClaudePermissionAsk]
+@@ -109,6 +111,7 @@ public extension ClaudeAPI {
+     func deleteMemory(_ id: String) async throws { throw ApiError("not_found", "This server has no Claude memory yet") }
+     func claudeModels() async throws -> ClaudeModelList { throw ApiError("not_found", "This server has no model choice yet") }
+     func setChatModel(_ id: String, model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
++    func setChatEffort(_ id: String, effort: String?) async throws { throw ApiError("not_found", "This server has no effort choice yet") }
+     func setDefaultModel(_ model: String?) async throws { throw ApiError("not_found", "This server has no model choice yet") }
+     func pendingPermissions() async throws -> [ClaudePermissionAsk] { [] }
+     func answerPermission(_ id: String, allow: Bool, message: String?) async throws { throw ApiError("not_found", "This server can't ask about files yet") }
+@@ -253,6 +256,11 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
+     public func pinMemory(_ id: String, pinned: Bool) async throws -> ClaudeMemoryRule {
+         try await call("PATCH", "v1/claude/memory/\(try ClaudeIds.check(id))", MemoryPin(pinned: pinned))
+     }
++    private struct EffortPatch: Encodable {
++        var effort: String?
++        func encode(to e: Encoder) throws { var c = e.container(keyedBy: K.self); try c.encode(effort, forKey: .effort) } // null clears
++        enum K: String, CodingKey { case effort }
++    }
+     private struct ModelPatch: Encodable {
+         var model: String?
+         func encode(to e: Encoder) throws { var c = e.container(keyedBy: K.self); try c.encode(model, forKey: .model) } // null clears
+@@ -267,6 +275,9 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
+     public func setChatModel(_ id: String, model: String?) async throws {
+         _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(ModelPatch(model: model))))
+     }
++    public func setChatEffort(_ id: String, effort: String?) async throws {
++        _ = try await send(request("PATCH", "v1/claude/chats/\(try ClaudeIds.check(id))", body: try encoder.encode(EffortPatch(effort: effort))))
++    }
+     public func pendingPermissions() async throws -> [ClaudePermissionAsk] {
+         let list: ClaudePermissionList = try await call("GET", "v1/claude/permissions")
+         return list.asks
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeCommand.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeCommand.swift
+index 95bf82a..b81e73c 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeCommand.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeCommand.swift
+@@ -34,6 +34,8 @@ public struct ClaudeCommand: Hashable, Sendable {
+     public var readDirectory: String?
+     /// Step 6b: the Claude model for this chat (`--model`); nil = Claude Code's own default.
+     public var model: String?
++    /// The chat's effort level (`--effort`: low, medium, high, xhigh, max); nil = Claude Code's own default.
++    public var effort: String?
+     /// Files on this Mac, asking every time (see above).
+     public var files = false
+ 
+@@ -74,6 +76,7 @@ public struct ClaudeCommand: Hashable, Sendable {
+         if let p = appendSystemPrompt, !p.isEmpty { a += ["--append-system-prompt", p] }
+         if let resume, !resume.isEmpty { a += ["--resume", resume] }
+         if let m = model, Self.validModel(m) { a += ["--model", m] }
++        if let e = effort, ClaudeEffort.valid(e) { a += ["--effort", e] }
+         return a
+     }
+ 
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeModels.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeModels.swift
+index 03baaa4..36c9fcd 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeModels.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeModels.swift
+@@ -81,12 +81,14 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
+     public var chatId: String?
+     /// Step 6b: the chat's own Claude model (Claude Code's --model); nil = the person's default.
+     public var model: String?
++    /// The chat's own effort level (Claude Code's --effort); nil = the person's last choice, else the model's default.
++    public var effort: String?
+ 
+     public init(prompt: String, tools: [String] = [], referenceId: String? = nil, sessionId: String? = nil, assistId: String? = nil, chatId: String? = nil) {
+         self.prompt = prompt; self.tools = tools; self.referenceId = referenceId; self.sessionId = sessionId; self.assistId = assistId; self.chatId = chatId
+     }
+ 
+-    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId, assistId, chatId, model }
++    enum CodingKeys: String, CodingKey { case prompt, tools, referenceId, sessionId, assistId, chatId, model, effort }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         prompt = (try? c.decode(String.self, forKey: .prompt)) ?? ""
+@@ -96,6 +98,7 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
+         assistId = try? c.decodeIfPresent(String.self, forKey: .assistId)
+         chatId = try? c.decodeIfPresent(String.self, forKey: .chatId)
+         model = try? c.decodeIfPresent(String.self, forKey: .model)
++        effort = try? c.decodeIfPresent(String.self, forKey: .effort)
+     }
+ 
+     /// What Claude Code is started with (`--append-system-prompt`): the server's prompt plus the id it acts on.
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeRelay.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeRelay.swift
+index 001dd06..173d9bc 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeRelay.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeRelay.swift
+@@ -134,7 +134,7 @@ public actor ClaudeRelay {
+     public func remember(threadId: String, claudeSessionId: String?, brief: ClaudeBrief? = nil) {
+         if let s = claudeSessionId, !s.isEmpty { sessions[threadId] = s }
+         if let p = brief?.systemPrompt { briefs[threadId] = p }
+-        if let brief { models[threadId] = brief.model ?? "" }
++        if let brief { models[threadId] = brief.model ?? ""; efforts[threadId] = brief.effort ?? "" }
+     }
+ 
+     /// Step 6b: each chat's own model ("" = none: the person's default), and the person's default.
+@@ -144,6 +144,28 @@ public actor ClaudeRelay {
+     public func setModel(threadId: String, _ m: String?) { models[threadId] = m ?? "" }
+     func model(threadId: String) -> String? { models[threadId].flatMap { $0.isEmpty ? nil : $0 } ?? defaultModel }
+ 
++    /// Effort: each chat's own ("" = none), the person's last choice, and the models (which levels each takes, its
++    /// default). The model a chat shows without one of its own is the studio's (`studioModel`).
++    private var efforts: [String: String] = [:]
++    private var lastEffort: String?
++    private var catalog: [String: ClaudeModelInfo] = [:]
++    private var studioModel: String?
++    public func setEffortCatalog(_ list: ClaudeModelList) {
++        catalog = Dictionary(list.models.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
++        studioModel = list.studioDefault
++        lastEffort = list.defaultEffort
++    }
++    public func setLastEffort(_ e: String?) { lastEffort = e }
++    public func setEffort(threadId: String, _ e: String?) { efforts[threadId] = e ?? "" }
++    /// The level for the chat's next turn: picked for the chat, else the last choice, else the model's default; none
++    /// when the model takes no effort setting. Before the models are known, only a level picked for the chat is sent.
++    func effort(threadId: String) -> String? {
++        let own = efforts[threadId].flatMap { $0.isEmpty ? nil : $0 }
++        guard !catalog.isEmpty else { return own.flatMap { ClaudeEffort.valid($0) ? $0 : nil } }
++        guard let id = model(threadId: threadId) ?? studioModel, let m = catalog[id] else { return own ?? lastEffort }
++        return ClaudeEffort.resolve(m, own: own, last: lastEffort)
++    }
++
+     /// The thread's brief as a system prompt (recreate and edit threads); "" = looked up, none.
+     private var briefs: [String: String] = [:]
+     public func systemPrompt(threadId: String) -> String? { briefs[threadId].flatMap { $0.isEmpty ? nil : $0 } }
+@@ -244,11 +266,13 @@ public actor ClaudeRelay {
+             if sessions[tid] == nil, let s = d.thread.claudeSessionId, !s.isEmpty { sessions[tid] = s }
+             briefs[tid] = d.thread.brief?.systemPrompt ?? ""
+             models[tid] = d.thread.brief?.model ?? ""
++            if efforts[tid] == nil { efforts[tid] = d.thread.brief?.effort ?? "" } // a pick made on this Mac already
+         }
+         var req = ClaudeRunRequest(threadId: tid, turnId: job.turnId, text: ClaudeAttachmentPrompt.text(job.text, images), resume: sessions[tid],
+                                    blender: await blender(), systemPrompt: systemPrompt(threadId: tid))
+         req.shownText = job.text
+         req.model = model(threadId: tid)
++        req.effort = effort(threadId: tid)
+         req.files = job.turnId == nil ? await files() : false
+         req.uploadIds = job.files.map(\.uploadId).filter { !$0.isEmpty }
+         if !images.isEmpty { req.readDirectory = ClaudeAttachmentCache.directory(threadId: tid).path }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeRunner.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeRunner.swift
+index 10acd10..120bf7f 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeRunner.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeRunner.swift
+@@ -18,6 +18,8 @@ public struct ClaudeRunRequest: Hashable, Sendable {
+     public var readDirectory: String?
+     /// Step 6b: the chat's Claude model (`--model`).
+     public var model: String?
++    /// The chat's effort level (`--effort`).
++    public var effort: String?
+     /// Files on this Mac (ask every time). Only the Mac's own turns: a phone turn has nobody at the Mac to answer.
+     public var files = false
+ 
+@@ -124,6 +126,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
+             var cmd = ClaudeCommand(mcpURL: token.mcpUrl.isEmpty ? "" : token.mcpUrl, token: token.token, blender: req.blender, resume: req.resume, appendSystemPrompt: req.systemPrompt)
+             cmd.readDirectory = req.readDirectory
+             cmd.model = req.model
++            cmd.effort = req.effort
+             cmd.files = req.files && req.turnId == nil
+             try Self.writePrivate(cmd.mcpConfigJSON(), to: config)
+         } catch {
+@@ -151,6 +154,7 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
+         var cmd = ClaudeCommand(mcpURL: token.mcpUrl, token: token.token, blender: req.blender, resume: resume, appendSystemPrompt: req.systemPrompt)
+         cmd.readDirectory = req.readDirectory
+         cmd.model = req.model
++        cmd.effort = req.effort
+         cmd.files = req.files && req.turnId == nil
+         let (lines, cont) = AsyncStream<String>.makeStream(bufferingPolicy: .unbounded)
+         let exit = ExitBox()
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift b/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
+index e0d58e5..3db17e1 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/FakeClaudeAPI.swift
+@@ -276,12 +276,15 @@ public final class FakeClaudeAPI: ClaudeAPI, @unchecked Sendable {
+     /// Step 6b: the demo's model list (the server's, in short), so the panel shows its model line in demo mode too.
+     public func claudeModels() async throws -> ClaudeModelList {
+         ClaudeModelList(models: [
+-            ClaudeModelInfo(id: "claude-opus-5-5", name: "Claude Opus 5.5", speed: "Steady", cost: "Standard cost", good: "Most work"),
+-            ClaudeModelInfo(id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", speed: "Fast", cost: "About half of Opus", good: "Everyday questions"),
+-            ClaudeModelInfo(id: "claude-haiku-5-5", name: "Claude Haiku 5.5", speed: "Fastest", cost: "Lowest cost", good: "Short answers"),
+-        ], default: nil, studioDefault: "claude-opus-5-5")
++            ClaudeModelInfo(id: "claude-opus-5-5", name: "Claude Opus 5.5", speed: "Steady", cost: "Standard cost", good: "Most work", efforts: ClaudeEffort.all, defaultEffort: "medium"),
++            ClaudeModelInfo(id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", speed: "Fast", cost: "About half of Opus", good: "Everyday questions", efforts: ClaudeEffort.all, defaultEffort: "high"),
++            ClaudeModelInfo(id: "claude-haiku-5-5", name: "Claude Haiku 5.5", speed: "Fastest", cost: "Lowest cost", good: "Short answers", efforts: ClaudeEffort.all, defaultEffort: "medium"),
++        ], default: nil, studioDefault: "claude-opus-5-5", defaultEffort: locked { lastEffort })
+     }
+     public func setChatModel(_ id: String, model: String?) async throws {}
++    /// Demo: a chat's effort pick is remembered as the last choice (as the server does).
++    private var lastEffort: String?
++    public func setChatEffort(_ id: String, effort: String?) async throws { if let effort { locked { lastEffort = effort } } }
+     public func setDefaultModel(_ model: String?) async throws {}
+ 
+     public func apiTurn(threadId: String, text: String) -> AsyncThrowingStream<ChatEvent, Error> {
+@@ -321,6 +324,14 @@ public final class ClaudeScriptedLauncher: ClaudeLauncher, @unchecked Sendable {
+     private let script: @Sendable (String) -> [String]
+     public let delay: Double
+     public private(set) var launches: [(arguments: [String], cwd: URL, stdin: String, config: String?)] = []
++    /// Every scripted launch's arguments in this process (demo mode makes a launcher per turn; the review checks read it).
++    public static let recent = Recent()
++    public final class Recent: @unchecked Sendable {
++        private let lock = NSLock()
++        private var all: [[String]] = []
++        func add(_ a: [String]) { lock.lock(); all.append(a); if all.count > 50 { all.removeFirst() }; lock.unlock() }
++        public var arguments: [[String]] { lock.lock(); defer { lock.unlock() }; return all }
++    }
+ 
+     /// `script` gets the user's text and returns the lines to print.
+     public init(delay: Double = 0, script: @escaping @Sendable (String) -> [String] = { ClaudeDemoScript.lines($0) }) {
+@@ -335,6 +346,7 @@ public final class ClaudeScriptedLauncher: ClaudeLauncher, @unchecked Sendable {
+         lock.lock()
+         launches.append((arguments, cwd, stdin, config))
+         lock.unlock()
++        Self.recent.add(arguments)
+         let text: String = {
+             guard let d = stdin.data(using: .utf8), case .object(let o)? = try? JSONDecoder().decode(JSONValue.self, from: d),
+                   case .object(let m)? = o["message"] else { return "" }
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift b/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
+index 568e97b..c6dda5c 100644
+--- a/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
++++ b/mac/MuseCore/Sources/MuseCore/Claude/OneClaude.swift
+@@ -56,6 +56,8 @@ public struct ClaudeChatSummary: Codable, Hashable, Sendable, Identifiable {
+     public var messageCount: Int?
+     /// Step 6b: the chat's own Claude model; nil = the person's default.
+     public var model: String?
++    /// The chat's own effort level; nil = the person's last choice, else the model's default.
++    public var effort: String?
+ 
+     public init(id: String, title: String? = nil, kind: String = "chat", page: ClaudePage? = nil, lastOn: String? = nil, updatedAt: Double = 0, messageCount: Int? = nil) {
+         self.id = id; self.title = title; self.kind = kind; self.page = page; self.lastOn = lastOn; self.updatedAt = updatedAt; self.messageCount = messageCount
+@@ -132,6 +134,14 @@ public struct ClaudeModelInfo: Codable, Hashable, Sendable, Identifiable {
+     public var speed: String
+     public var cost: String
+     public var good: String
++    /// The effort levels the model takes, low to high (empty or missing: no effort setting, the picker hides).
++    public var efforts: [String]?
++    /// The model's own default level.
++    public var defaultEffort: String?
++
++    public init(id: String, name: String, speed: String, cost: String, good: String, efforts: [String]? = nil, defaultEffort: String? = nil) {
++        self.id = id; self.name = name; self.speed = speed; self.cost = cost; self.good = good; self.efforts = efforts; self.defaultEffort = defaultEffort
++    }
+ }
+ 
+ public struct ClaudeModelList: Codable, Hashable, Sendable {
+@@ -139,4 +149,27 @@ public struct ClaudeModelList: Codable, Hashable, Sendable {
+     /// This person's default (nil: the studio's).
+     public var `default`: String?
+     public var studioDefault: String?
++    /// The effort level this person picked last (chats without their own start from it).
++    public var defaultEffort: String?
++}
++
++/// Effort (Claude Code's `--effort`, the API's output_config.effort): how long Claude thinks. Higher thinks longer and
++/// uses more of the Claude plan.
++public enum ClaudeEffort {
++    public static let all = ["low", "medium", "high", "xhigh", "max"]
++    private static let names = ["low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"]
++    public static func name(_ e: String) -> String { names[e] ?? e }
++    public static func valid(_ e: String) -> Bool { all.contains(e) }
++
++    /// The levels a model takes, in order (unknown words dropped).
++    public static func levels(_ m: ClaudeModelInfo?) -> [String] { all.filter { (m?.efforts ?? []).contains($0) } }
++
++    /// The level a turn runs at: the chat's own, else the person's last choice, else the model's default. nil when the
++    /// model takes no effort setting (nothing is sent). A level the model doesn't take falls through to the next.
++    public static func resolve(_ m: ClaudeModelInfo?, own: String?, last: String?) -> String? {
++        let l = levels(m)
++        guard !l.isEmpty else { return nil }
++        for e in [own, last, m?.defaultEffort] { if let e, l.contains(e) { return e } }
++        return nil
++    }
+ }
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeRunnerTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeRunnerTests.swift
+index 38ea6b3..078e99b 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ClaudeRunnerTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeRunnerTests.swift
+@@ -129,6 +129,35 @@ final class ClaudeRunnerTests: XCTestCase {
+         XCTAssertEqual(Array(launcher.launches[1].arguments.suffix(2)), ["--resume", "5f1c2a9e-7d1b-4c1e-9a55-3c2f9b8e1d01"])
+     }
+ 
++    /// Effort: the chat's pick goes to Claude Code on its next turn; without one, the last choice, else the model's default.
++    func testRelaySendsTheChatsEffort() async throws {
++        let api = FakeClaudeAPI()
++        let thread = try await api.thread(contextKind: "chat", contextId: "ct_effort")
++        let launcher = try scripted()
++        let sink = Sink()
++        let root = self.root!
++        let relay = ClaudeRelay(api: api, makeRunner: {
++            ClaudeTurnRunner(api: api, launcher: launcher, tokens: ClaudeTokenCache(), executable: "/x", root: root, environment: [:], flushInterval: 0.01)
++        }, onEvent: { sink.add($0, $1, $2) })
++        func effort(_ i: Int) -> String? {
++            let a = launcher.launches[i].arguments
++            return a.firstIndex(of: "--effort").map { a[$0 + 1] }
++        }
++        await relay.setEffortCatalog(try await api.claudeModels())
++        await relay.submit(threadId: thread.id, text: "one")
++        try await waitFor { sink.dones == 1 }
++        XCTAssertEqual(effort(0), "medium", "Opus 5.5's own default (the studio's model)")
++        await relay.setEffort(threadId: thread.id, "high")
++        await relay.submit(threadId: thread.id, text: "two")
++        try await waitFor { sink.dones == 2 }
++        XCTAssertEqual(effort(1), "high")
++        await relay.setEffort(threadId: thread.id, nil)
++        await relay.setLastEffort("max")
++        await relay.submit(threadId: thread.id, text: "three")
++        try await waitFor { sink.dones == 3 }
++        XCTAssertEqual(effort(2), "max")
++    }
++
+     func testClaimRefusedTurnIsNotRun() async throws {
+         let api = FakeClaudeAPI()
+         api.claimError = "already_claimed"
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift
+index 9a8bcc7..951c388 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift
+@@ -117,6 +117,45 @@ final class ClaudeTests: XCTestCase {
+ 
+     // MARK: Command
+ 
++    /// Effort: a known level goes to Claude Code as --effort; anything else is left out.
++    func testCommandPassesOnlyAKnownEffort() {
++        var c = ClaudeCommand(mcpURL: "https://muse.test/mcp", token: "t")
++        c.model = "claude-opus-5-5"
++        c.effort = "xhigh"
++        XCTAssertEqual(Array(c.arguments(configPath: "/x").suffix(4)), ["--model", "claude-opus-5-5", "--effort", "xhigh"])
++        c.effort = "high --dangerously-skip-permissions"
++        XCTAssertFalse(c.arguments(configPath: "/x").contains("--effort"))
++        c.effort = nil
++        XCTAssertFalse(c.arguments(configPath: "/x").contains("--effort"))
++    }
++
++    /// The chat's own level, else the last choice, else the model's default; only levels the model takes; none for a
++    /// model without effort.
++    func testEffortResolvesPerModel() {
++        let opus = ClaudeModelInfo(id: "claude-opus-5-5", name: "Claude Opus 5.5", speed: "", cost: "", good: "", efforts: ClaudeEffort.all, defaultEffort: "medium")
++        let some = ClaudeModelInfo(id: "m", name: "M", speed: "", cost: "", good: "", efforts: ["max", "low", "bogus"], defaultEffort: "low")
++        let none = ClaudeModelInfo(id: "n", name: "N", speed: "", cost: "", good: "", efforts: nil, defaultEffort: nil)
++        XCTAssertEqual(ClaudeEffort.resolve(opus, own: nil, last: nil), "medium")
++        XCTAssertEqual(ClaudeEffort.resolve(opus, own: nil, last: "max"), "max")
++        XCTAssertEqual(ClaudeEffort.resolve(opus, own: "high", last: "max"), "high")
++        XCTAssertEqual(ClaudeEffort.levels(some), ["low", "max"])
++        XCTAssertEqual(ClaudeEffort.resolve(some, own: "high", last: nil), "low")
++        XCTAssertNil(ClaudeEffort.resolve(none, own: "high", last: "high"))
++        XCTAssertTrue(ClaudeEffort.levels(none).isEmpty)
++        XCTAssertEqual(ClaudeEffort.all.map(ClaudeEffort.name), ["Low", "Medium", "High", "Extra high", "Max"])
++    }
++
++    /// The server's model list and brief carry effort; an older server's (without) still decodes.
++    func testModelListAndBriefDecodeEffort() throws {
++        let j = #"{"models":[{"id":"claude-opus-5-5","name":"Claude Opus 5.5","speed":"Steady","cost":"Standard","good":"Most","efforts":["low","medium","high","xhigh","max"],"defaultEffort":"medium"},{"id":"x","name":"X","speed":"s","cost":"c","good":"g"}],"default":null,"studioDefault":"claude-opus-5-5","defaultEffort":"high"}"#
++        let list = try JSONDecoder().decode(ClaudeModelList.self, from: Data(j.utf8))
++        XCTAssertEqual(list.defaultEffort, "high")
++        XCTAssertEqual(list.models[0].defaultEffort, "medium")
++        XCTAssertNil(list.models[1].efforts)
++        let b = try JSONDecoder().decode(ClaudeBrief.self, from: Data(#"{"prompt":"p","tools":[],"chatId":"ct_1","effort":"max"}"#.utf8))
++        XCTAssertEqual(b.effort, "max")
++    }
++
+     /// Step 6b: a chat's model goes to Claude Code as --model; anything that isn't a plain model id is left out.
+     func testCommandPassesOnlyAPlainModelId() {
+         var c = ClaudeCommand(mcpURL: "https://muse.test/mcp", token: "t")
+-- 
+2.43.0
+
