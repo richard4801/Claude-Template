@@ -616,11 +616,13 @@ final class EditSuiteSession {
     func importAudio(_ url: URL, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) async {
         guard isReady else { return }
         do {
-            let a = try await uploadAudio(url)
+            // What the file is, from its bytes (ci_f99f93616ece): a song named .mp4 is still a song.
+            guard let p = await EditMediaProbe.probe(url), p.verdict.kind == .audio else { throw ApiError("bad_media", MediaSniff.unreadable) }
+            let a = try await uploadAudio(p)
             edit { $0.addAudio(a, kind: kind, at: at, trimStart: trimStart) }
         } catch {
             notice = nil
-            lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
+            lastError = (error as? ApiError)?.message ?? MediaSniff.unreadable
         }
     }
 
@@ -630,19 +632,19 @@ final class EditSuiteSession {
         guard isReady else { return }
         var added = 0
         for url in urls {
-            let ext = url.pathExtension.lowercased()
             do {
+                // The kind comes from the file's bytes and tracks, not its name (ci_f99f93616ece): an audio-only .mp4 is a sound.
+                guard let p = await EditMediaProbe.probe(url) else { throw ApiError("bad_media", MediaSniff.unreadable) }
                 let a: E.Asset
-                switch EditSuite.UploadBin.kind(ofExtension: ext) {
-                case .video: a = try await uploadVideo(url)
-                case .picture: a = try await uploadPicture(url)
-                case .audio: a = try await uploadAudio(url)
-                case nil: throw ApiError("bad_media", ext.isEmpty ? "MUSE can't use that file. Add a video, picture or sound." : "MUSE can't use .\(ext) files. Add a video, picture or sound.")
+                switch p.verdict.kind {
+                case .video: a = try await uploadVideo(p)
+                case .picture: a = try await uploadPicture(p)
+                case .audio: a = try await uploadAudio(p)
                 }
                 if edit({ $0.addToBin(a) }) { added += 1 }
             } catch {
                 notice = nil
-                lastError = (error as? ApiError)?.message ?? "Couldn't add \(url.lastPathComponent)"
+                lastError = (error as? ApiError)?.message ?? MediaSniff.unreadable
             }
         }
         if added > 0 { binTab = .uploads }
@@ -671,41 +673,45 @@ final class EditSuiteSession {
         if edit({ $0.placeUpload(id, at: at, lane: lane, audioKind: audioKind) }), picture { view { $0.tab = .video } }
     }
 
-    private func uploadAudio(_ url: URL) async throws -> E.Asset {
-        let d = try await AVURLAsset(url: url).load(.duration).seconds
-        guard d.isFinite, d >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no sound to use") }
-        notice = "Uploading \(url.lastPathComponent)…"
-        let up = try await api.uploadEditorFile(url, contentType: Self.contentType(url), purpose: nil, progress: nil)
+    private func uploadAudio(_ p: EditMediaProbe.Probed) async throws -> E.Asset {
+        let url = p.url
+        guard let d = try? await AVURLAsset(url: url).load(.duration).seconds, d.isFinite, d >= E.minClipSourceSec else {
+            throw ApiError("bad_media", MediaSniff.unreadable)
+        }
+        notice = "Uploading \(p.name)…"
+        let up = try await api.uploadEditorFile(url, contentType: p.verdict.contentType, purpose: nil, progress: nil)
         let id = project.newId("a")
         files[id] = url
-        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        state.assetNames[id] = p.name
         notice = nil
         return E.Asset(id: id, kind: .audio, upload: up, durationSec: (d * 1000).rounded() / 1000, hasAudio: true)
     }
 
-    private func uploadPicture(_ url: URL) async throws -> E.Asset {
+    private func uploadPicture(_ p: EditMediaProbe.Probed) async throws -> E.Asset {
+        let url = p.url
         guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
         // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
-        let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: url.pathExtension.lowercased())
-        notice = "Uploading \(url.lastPathComponent)…"
+        let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: p.verdict.ext)
+        notice = "Uploading \(p.name)…"
         let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
         let id = project.newId("p")
         files[id] = file
-        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        state.assetNames[id] = p.name
         notice = nil
         return E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
     }
 
-    private func uploadVideo(_ url: URL) async throws -> E.Asset {
-        let info = try await VideoEditEngine.info(AVURLAsset(url: url))
-        guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
-        notice = "Uploading \(url.lastPathComponent)…"
-        let ext = url.pathExtension.lowercased()
-        let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
+    private func uploadVideo(_ p: EditMediaProbe.Probed) async throws -> E.Asset {
+        let url = p.url
+        guard let info = try? await VideoEditEngine.info(AVURLAsset(url: url)), info.duration >= E.minClipSourceSec else {
+            throw ApiError("bad_media", MediaSniff.unreadable)
+        }
+        notice = "Uploading \(p.name)…"
+        let up = try await api.uploadEditorFile(url, contentType: p.verdict.contentType, purpose: nil, progress: nil)
         let id = project.newId("v")
-        let sound = !(try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)).isEmpty
+        let sound = !((try? await AVURLAsset(url: url).loadTracks(withMediaType: .audio)) ?? []).isEmpty
         files[id] = url
-        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        state.assetNames[id] = p.name
         notice = nil
         return E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
                        hasAudio: sound)

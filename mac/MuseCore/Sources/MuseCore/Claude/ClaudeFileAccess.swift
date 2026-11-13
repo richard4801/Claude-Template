@@ -99,16 +99,42 @@ public enum ClaudeFilePolicy {
 
     /// The tools a file-enabled run lets Claude ask for (Web stays off).
     public static let fileTools: Set<String> = ["Read", "Glob", "Grep", "LS", "Write", "Edit", "MultiEdit", "Bash", "Upload"]
-    /// upload_local_file: what can go up (the chat's own limits).
+    /// upload_local_file: what can go up (the chat's own limits; sound as an editor audio upload, ci_de89873ab1de).
     public static let uploadImageTypes = SuiteClaudeAttachments.extensions
     public static let uploadVideoTypes: [String: String] = ["mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime"]
-    public static let uploadRefusal = "Only images (JPEG, PNG, WebP, HEIC, up to 10 MB) and videos (MP4, MOV, up to 500 MB) can be uploaded."
-    /// The upload type of a file name, or nil.
-    public static func uploadType(_ path: String) -> (mime: String, video: Bool)? {
+    public static let uploadAudioTypes: [String: String] = ["mp3": "audio/mpeg", "m4a": "audio/mp4", "aac": "audio/aac", "wav": "audio/wav"]
+    /// Sound up to 200 MB (the editor's audio upload limit).
+    public static let uploadAudioMaxBytes = 200 * 1024 * 1024
+    public static let uploadRefusal = "Only images (JPEG, PNG, WebP, HEIC, up to 10 MB), videos (MP4, MOV, up to 500 MB) and sound (MP3, M4A, AAC, WAV, up to 200 MB) can be uploaded."
+
+    public enum UploadKind: String, Sendable { case image, video, audio }
+    public struct UploadType: Equatable, Sendable {
+        public var mime: String
+        public var kind: UploadKind
+        public var video: Bool { kind == .video }
+        /// What the server's answer calls it: "image", "clip" (a video) or "audio".
+        public var resultKind: String { kind == .video ? "clip" : kind.rawValue }
+    }
+
+    /// The upload type of a file name, or nil. An .mp4 is a video by name; the Mac reads its tracks before uploading, and
+    /// one with sound only goes up as audio (`contentType(_:)`).
+    public static func uploadType(_ path: String) -> UploadType? {
         let ext = (path as NSString).pathExtension.lowercased()
-        if let m = uploadImageTypes[ext] { return (m, false) }
-        if let m = uploadVideoTypes[ext] { return (m, true) }
+        if let m = uploadImageTypes[ext] { return UploadType(mime: m, kind: .image) }
+        if let m = uploadVideoTypes[ext] { return UploadType(mime: m, kind: .video) }
+        if let m = uploadAudioTypes[ext] { return UploadType(mime: m, kind: .audio) }
         return nil
+    }
+
+    /// The upload type from what the file is (MediaSniff's verdict), for a video or sound by name: nil when it is a
+    /// picture or unreadable (the card said video or sound).
+    public static func uploadType(sniffed v: MediaSniff.Verdict?) -> UploadType? {
+        guard let v else { return nil }
+        switch v.kind {
+        case .video: return UploadType(mime: v.contentType, kind: .video)
+        case .audio: return UploadType(mime: v.contentType, kind: .audio)
+        case .picture: return nil
+        }
     }
     static let writeTools: Set<String> = ["Write", "Edit", "MultiEdit"]
 
@@ -232,13 +258,17 @@ public enum ClaudePermissionAnswer: Hashable, Sendable {
 /// What upload_local_file's Mac side sends back once the file is up.
 public struct ClaudeLocalUpload: Codable, Hashable, Sendable {
     public var uploadId: String
+    /// "image", "clip" (a video) or "audio".
     public var kind: String
     public var url: String?
     public var name: String?
-    public init(uploadId: String, kind: String, url: String? = nil, name: String? = nil) {
+    /// A sound's length (add_music needs it; ci_de89873ab1de).
+    public var durationSec: Double?
+    public init(uploadId: String, kind: String, url: String? = nil, name: String? = nil, durationSec: Double? = nil) {
         self.uploadId = uploadId
         self.kind = kind
         self.url = url
         self.name = name
+        self.durationSec = durationSec
     }
 }

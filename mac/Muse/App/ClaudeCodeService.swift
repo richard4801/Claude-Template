@@ -4,6 +4,7 @@
 // Demo mode (no HTTP API) runs a scripted Claude Code stream against FakeClaudeAPI; a member never runs it.
 
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import MuseCore
@@ -464,7 +465,8 @@ final class ClaudeCodeService: ObservableObject {
     }
 
     /// upload_local_file, after the yes: the file goes up the chat's way (an image: presign, PUT, confirm, so the server
-    /// strips its metadata; a video as a clip with its length and size), and the upload goes back to Claude.
+    /// strips its metadata; a video as a clip with its length and size; a sound as an editor audio upload, ci_de89873ab1de),
+    /// and the upload goes back to Claude. A video or sound is read first: an .mp4 with sound only goes up as audio.
     private func uploadLocal(_ a: ClaudePermissionAsk, cwd: String) async {
         guard let api else { return }
         var raw = ""
@@ -474,21 +476,39 @@ final class ClaudeCodeService: ObservableObject {
         let name = url.lastPathComponent
         func fail(_ why: String) async { try? await api.answerPermission(a.id, allow: false, message: why) }
         guard !ClaudeFilePolicy.isSecret(path) else { return await fail(ClaudeFilePolicy.credentialRefusal) }
-        guard let type = ClaudeFilePolicy.uploadType(path) else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+        guard var type = ClaudeFilePolicy.uploadType(path) else { return await fail(ClaudeFilePolicy.uploadRefusal) }
         let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.intValue
         guard let size else { return await fail("There's no file at \(path).") }
+        var file = url
+        if type.kind != .image {
+            // What it really is: an audio-only .mp4 is a sound; raw AAC named .mp4 is read through a copy named .aac.
+            let probed = await EditMediaProbe.probe(url)
+            guard let p = probed, let t = ClaudeFilePolicy.uploadType(sniffed: p.verdict) else { return await fail(MediaSniff.unreadable) }
+            type = t
+            file = p.url
+        }
         do {
-            let att: ClaudeAttachment
-            if type.video {
+            let result: ClaudeLocalUpload
+            switch type.kind {
+            case .video:
                 guard size <= 500 * 1024 * 1024 else { return await fail(ClaudeFilePolicy.uploadRefusal) }
-                guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(url) else { return await fail("That video can't be read.") }
-                att = try await up.uploadClaudeVideo(url, meta: info.meta(name: name), contentType: type.mime, progress: nil)
-            } else {
+                guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(file) else { return await fail(MediaSniff.unreadable) }
+                let att = try await up.uploadClaudeVideo(file, meta: info.meta(name: name), contentType: type.mime, progress: nil)
+                result = ClaudeLocalUpload(uploadId: att.uploadId, kind: type.resultKind, url: att.url, name: name)
+            case .audio:
+                guard size <= ClaudeFilePolicy.uploadAudioMaxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+                guard let up = api as? any ClaudeAudioUploading else { return await fail("This server can't take sound from Claude yet.") }
+                // The server fills the file's link (an editor upload has no confirm step).
+                guard let d = try? await AVURLAsset(url: file).load(.duration).seconds, d.isFinite, d > 0 else { return await fail(MediaSniff.unreadable) }
+                let id = try await up.uploadClaudeAudio(file, contentType: type.mime)
+                result = ClaudeLocalUpload(uploadId: id, kind: type.resultKind, url: nil, name: name, durationSec: (d * 1000).rounded() / 1000)
+            case .image:
                 guard size <= SuiteClaudeAttachments.maxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
                 guard let up = api as? any ClaudeImageUploading else { return await fail("This server can't take images from Claude yet.") }
-                att = try await up.uploadClaudeImage(name: name, data: try Data(contentsOf: url), mime: type.mime)
+                let att = try await up.uploadClaudeImage(name: name, data: try Data(contentsOf: url), mime: type.mime)
+                result = ClaudeLocalUpload(uploadId: att.uploadId, kind: type.resultKind, url: att.url, name: name)
             }
-            try await api.finishUpload(a.id, ClaudeLocalUpload(uploadId: att.uploadId, kind: type.video ? "clip" : "image", url: att.url, name: name))
+            try await api.finishUpload(a.id, result)
         } catch {
             await fail("Couldn't upload \(name): \((error as? ApiError)?.message ?? error.localizedDescription)")
         }

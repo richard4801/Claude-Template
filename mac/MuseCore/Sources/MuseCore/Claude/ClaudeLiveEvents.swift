@@ -26,9 +26,12 @@ public enum ClaudeLiveEvent: Hashable, Sendable {
     case uiCallEnd(id: String)
     /// A card changed in place (a plan ticked, an Undo pressed): replace the message's card.
     case card(threadId: String, messageId: String, ClaudeCardBox)
+    /// A paid helper Claude asked for on an edit session changed (`{type: "edit", op: "pending", sessionId, pending}`, sent
+    /// to the owner's devices): the Claude panel lists waiting ones whichever edit is open (ci_e546642a4026).
+    case editPending(sessionId: String, EditPending)
 }
 
-/// SSE lines → `claude` live events; everything else on the stream is ignored.
+/// SSE lines → `claude` live events (and edit sessions' paid-helper `pending` events); everything else is ignored.
 public struct ClaudeLiveEventFilter: Sendable {
     private var parser = SSEParser()
 
@@ -57,8 +60,10 @@ public struct ClaudeLiveEventFilter: Sendable {
         var call: UiCall?
         var messageId: String?
         var card: ClaudeCardBox?
+        var sessionId: String?
+        var pending: EditPending?
 
-        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call, messageId, card }
+        private enum K: String, CodingKey { case type, op, threadId, turnId, thread, message, turn, status, event, name, ui, ask, id, result, call, messageId, card, sessionId, pending }
         init(from d: Decoder) throws {
             let c = try d.container(keyedBy: K.self)
             type = try c.decode(String.self, forKey: .type)
@@ -78,12 +83,19 @@ public struct ClaudeLiveEventFilter: Sendable {
             call = try? c.decodeIfPresent(UiCall.self, forKey: .call)
             messageId = try? c.decodeIfPresent(String.self, forKey: .messageId)
             card = try? c.decodeIfPresent(ClaudeCardBox.self, forKey: .card)
+            sessionId = try? c.decodeIfPresent(String.self, forKey: .sessionId)
+            pending = try? c.decodeIfPresent(EditPending.self, forKey: .pending)
         }
     }
 
     /// One event's JSON, e.g. `{type: "claude", op: "turn", turn}`. Unknown ops and malformed bodies are nil.
     public static func parse(_ json: Data) -> ClaudeLiveEvent? {
-        guard let e = try? JSONDecoder().decode(Envelope.self, from: json), e.type == "claude" else { return nil }
+        guard let e = try? JSONDecoder().decode(Envelope.self, from: json) else { return nil }
+        if e.type == "edit" {
+            guard e.op == "pending", let sid = e.sessionId, let p = e.pending else { return nil }
+            return .editPending(sessionId: sid, p)
+        }
+        guard e.type == "claude" else { return nil }
         switch e.op {
         case "thread": return e.thread.map { .thread($0) }
         case "threadDeleted": return e.threadId.map { .threadDeleted(threadId: $0) }

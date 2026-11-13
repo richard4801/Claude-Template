@@ -31,6 +31,10 @@ final class OneClaudeState {
     var suggestion: ClaudeUI?
     /// Claude's gated actions waiting for the person (Approve / Decline); nothing happens until they press.
     var approvals: [ClaudeUI] = []
+    /// Paid helpers Claude asked for on ANY of the owner's edits (ci_e546642a4026): shown whichever edit is open, each
+    /// naming its edit, answered here by session id.
+    var editApprovals = EditApprovalList()
+    var answeringEdit: Set<String> = []
     /// Cards (ChatCards.swift): Approve cards answered here ("Approved, rendering"), answers and Undos in flight.
     var answeredCards: [String: String] = [:]
     var answering: Set<String> = []
@@ -128,6 +132,7 @@ extension AppStore {
 
     func startOneClaude() async {
         listenOneClaude()
+        await loadEditApprovals()
         await loadClaudeModels()
         await refreshOneClaudeChats()
         if oneClaude.chatId == nil || !oneClaude.chats.contains(where: { $0.id == oneClaude.chatId }) {
@@ -246,6 +251,8 @@ extension AppStore {
             for await f in feed {
                 guard let self, !Task.isCancelled else { break }
                 if case .live(.ui(let tid, let name, let ui)) = f { self.oneClaudeUI(threadId: tid, name: name, ui) }
+                if case .live(.editPending(let sid, let p)) = f { await self.editPendingChanged(sessionId: sid, p) }
+                if case .live(.connected) = f { await self.loadEditApprovals() }
                 if case .live(.threadDeleted(let tid)) = f, self.oneClaude.chats.contains(where: { $0.id == tid }) {
                     let wasOpen = self.oneClaude.chatId == tid
                     self.oneClaudeForget([tid])
@@ -405,9 +412,49 @@ extension AppStore {
         switch t { case .action(let id): id; case .suite(_, let p): p }
     }
 
+    // MARK: Paid helpers of every edit (ci_e546642a4026)
+
+    /// Everything waiting on the owner's open edits (GET /v1/edit-sessions). Owner only: members don't edit with Claude.
+    func loadEditApprovals() async {
+        guard isOwner, let list = try? await api.recentEditSessions(limit: 50) else { return }
+        oneClaude.editApprovals.replace(sessions: list)
+    }
+
+    /// A live `pending` event of any edit session: listed, updated or gone. A session the list doesn't know yet (Claude
+    /// opened a new edit) is named after the next reload.
+    func editPendingChanged(sessionId: String, _ p: EditPending) async {
+        guard isOwner else { return }
+        let known = oneClaude.editApprovals.items.contains { $0.sessionId == sessionId }
+        oneClaude.editApprovals.apply(sessionId: sessionId, takeId: nil, p)
+        if p.isWaiting, !known { await loadEditApprovals() }
+    }
+
+    /// The edit a card names: its take's title, "New project" for a blank one.
+    func editApprovalName(_ a: EditApproval) -> String {
+        let take = takes.first { $0.id == a.takeId }
+        return EditApprovalList.editName(takeId: a.takeId, title: take.flatMap { $0.title.isEmpty ? nil : $0.displayTitle })
+    }
+
+    /// Allow / Not now from the Claude panel: answered on that edit's session, without switching edits.
+    func answerEditApproval(_ a: EditApproval, approve: Bool) async {
+        guard !oneClaude.answeringEdit.contains(a.id) else { return }
+        oneClaude.answeringEdit.insert(a.id)
+        defer { oneClaude.answeringEdit.remove(a.id) }
+        do {
+            _ = try await api.answerEditPending(sessionId: a.sessionId, pendingId: a.pending.id, approve: approve)
+            oneClaude.editApprovals.remove(a.id)
+            showToast(approve ? "\(a.pending.label) started in “\(editApprovalName(a))”. Claude's change lands when it's done." : "Told Claude not now")
+        } catch let e as ApiError where e.code == "not_found" || e.code == "already_answered" || e.code == "expired" {
+            oneClaude.editApprovals.remove(a.id)
+            showToast("That was already answered")
+        } catch {
+            showToast("Couldn't answer Claude. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
+        }
+    }
+
     /// What waits for the person now (Approve cards, Open?, Remember?, file questions): the orb's "waiting".
     var claudeWaitingCount: Int {
-        oneClaude.approvals.count + oneClaude.waitingCards.count + (oneClaude.askOpen != nil ? 1 : 0) + (oneClaude.suggestion != nil ? 1 : 0)
+        oneClaude.approvals.count + oneClaude.editApprovals.count + oneClaude.waitingCards.count + (oneClaude.askOpen != nil ? 1 : 0) + (oneClaude.suggestion != nil ? 1 : 0)
             + ClaudeCodeService.shared.fileAsks.count
     }
 
