@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
-index 00fb0cb..121fce0 100644
+index e60d2af..7aeccf1 100644
 --- a/.github/workflows/mac.yml
 +++ b/.github/workflows/mac.yml
-@@ -163,6 +163,19 @@ jobs:
+@@ -192,6 +192,19 @@ jobs:
            if grep -q '^FAIL' "$f"; then exit 1; fi
            if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
  
@@ -23,7 +23,7 @@ index 00fb0cb..121fce0 100644
        # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
        # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
 diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
-index 9bf7c43..1c3cda7 100644
+index 4de7e99..40ca13c 100644
 --- a/mac/Muse/App/AppStore+OneClaude.swift
 +++ b/mac/Muse/App/AppStore+OneClaude.swift
 @@ -35,6 +35,8 @@ final class OneClaudeState {
@@ -72,7 +72,7 @@ index 9bf7c43..1c3cda7 100644
              guard p != self.oneClaude.lastSentPage || id != self.oneClaude.lastSentChat else { return }
              try? await api.setChatPage(id, page: p)
              self.oneClaude.lastSentPage = p
-@@ -392,16 +408,75 @@ extension AppStore {
+@@ -402,16 +418,75 @@ extension AppStore {
          return min(1, max(0, j.progress > 1 ? j.progress / 100 : j.progress))
      }
  
@@ -273,13 +273,13 @@ index 0000000..4efaf07
 +    }
 +}
 diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
-index ae8033f..b16b785 100644
+index 13e51d6..b0b2a9c 100644
 --- a/mac/Muse/App/SnapshotRunner.swift
 +++ b/mac/Muse/App/SnapshotRunner.swift
-@@ -181,6 +181,7 @@ enum SnapshotRunner {
-             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
+@@ -184,6 +184,7 @@ enum SnapshotRunner {
              await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
              await editResumeCheck(store, dir: dir)   // Continue a draft (owner 2026-11-12): Edit reopens the last edit where it was left
+             await editBigCheck(store, dir: dir)   // Owner bugs, build 597: a 66-shot 16:9 edit opened by Claude, idle CPU, playback, Shape round trip
 +            await claudeChipsCheck(store, dir: dir)   // Live chips (owner 2026-11-12): Edit without vs with captions, different chips
              await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
              await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
@@ -320,7 +320,7 @@ index a123493..1e9a780 100644
              }
              if let top { top }
 diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
-index 67fc7d6..614c49a 100644
+index 6cb9395..c2d335b 100644
 --- a/mac/Muse/Views/Claude/OneClaudePanel.swift
 +++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
 @@ -57,6 +57,10 @@ struct OneClaudePanel: View {
@@ -335,10 +335,10 @@ index 67fc7d6..614c49a 100644
          .onChange(of: store.claudeWaitingCount, initial: true) { _, n in service.orbWaiting(n) }
          .onChange(of: store.claudeJobProgress, initial: true) { _, p in
 diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
-index b461df8..5402871 100644
+index e6ef8fc..4827d65 100644
 --- a/mac/Muse/Views/Edit/EditSuiteView.swift
 +++ b/mac/Muse/Views/Edit/EditSuiteView.swift
-@@ -375,7 +375,12 @@ struct EditSuiteEditor: View {
+@@ -395,7 +395,12 @@ struct EditSuiteEditor: View {
          }
          // One Claude: Claude sees this edit (its take and live session).
          .onChange(of: session.liveConnected) { _, _ in reportClaudePage() }
@@ -352,7 +352,7 @@ index b461df8..5402871 100644
          // Shortcuts are off while a text box has the cursor (owner bug 2026-11-11: typing in Claude chat played,
          // split or deleted clips). The table lives in MuseCore (EditShortcuts) with its tests.
          .onKeyPress(.space) { shortcut(.space) }
-@@ -468,6 +473,14 @@ struct EditSuiteEditor: View {
+@@ -488,6 +493,14 @@ struct EditSuiteEditor: View {
          return 32 + 32 + 12 + title + 12 + 8 + 12 + ratio + 12 + 8 + 12 + quiet + 12 + 100 + 24
      }
  
