@@ -97,6 +97,7 @@ struct ChatTranscriptView: View {
     @State private var showJump = false
     @State private var lastFrame: CGRect = .zero
     @State private var followPending = false
+    @State private var scrollAgain = false
     private static let endId = "chat_end"
 
     var body: some View {
@@ -167,13 +168,16 @@ struct ChatTranscriptView: View {
         if moved {
             let p = distance < 48
             if p != pinned { pinned = p }
-        } else if grew, pinned, distance > 1, !followPending {
+        } else if grew, pinned, distance > 1, followPending {
+            scrollAgain = true
+        } else if grew, pinned, distance > 1 {
             // Only when the new text pushed the end out of view, and one scroll at a time (runs 595 and 604: a streaming
             // reply scrolled, re-measured and scrolled again on every frame; the main thread never rested).
             followPending = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 proxy.scrollTo(Self.endId, anchor: .bottom)
                 followPending = false
+                if scrollAgain { scrollAgain = false; scrollToEnd(proxy, animated: false) }
             }
         }
         let j = !pinned && distance > 120
@@ -182,8 +186,10 @@ struct ChatTranscriptView: View {
 
     /// Coalesced (run 607: a third of the main thread while a reply streamed was these scrolls, one per new row): at most
     /// one scroll pending, a tenth of a second after the first ask.
+    /// Run 610: a request dropped while one was pending left long chats short of the end (the rows were still being
+    /// laid out), so a request during a pending scroll asks for one more after it; still at most ten a second.
     private func scrollToEnd(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard !followPending else { return }
+        guard !followPending else { scrollAgain = true; return }
         followPending = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if animated {
@@ -192,6 +198,10 @@ struct ChatTranscriptView: View {
                 proxy.scrollTo(Self.endId, anchor: .bottom)
             }
             followPending = false
+            if scrollAgain {
+                scrollAgain = false
+                scrollToEnd(proxy, animated: false)
+            }
         }
     }
 
