@@ -6,6 +6,47 @@ import Vision
 
 /// Edit suite media helpers on the Mac: frames for the Looks thumbnails and the timeline, audio waveforms, face framing for
 /// re-shaping (Vision), and the .srt sidecar.
+/// Owner report ci_83f9d0dcd92f: a real edit of many distinct 1080p files started one filmstrip (24 frame decodes) and one
+/// full audio decode per file all at once, holding a core and VTDecoderXPCService for minutes after open. Strips and
+/// waveforms now go through two slots at a time, and are kept per file for the whole run (reopening an edit, a second
+/// asset on the same file, and a restart of the session cost nothing).
+actor EditMediaWork {
+    static let shared = EditMediaWork()
+    private var free = 2
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var strips: [String: [CGImage]] = [:]
+    private var waves: [String: [Float]] = [:]
+
+    private func take() async {
+        if free > 0 { free -= 1; return }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+    private func give() {
+        if waiting.isEmpty { free += 1 } else { waiting.removeFirst().resume() }
+    }
+    func cachedStrip(_ url: URL) -> [CGImage]? { strips[url.path] }
+    func cachedWave(_ url: URL) -> [Float]? { waves[url.path] }
+
+    func strip(_ url: URL, count: Int) async -> [CGImage] {
+        if let s = strips[url.path] { return s }
+        await take()
+        defer { give() }
+        if let s = strips[url.path] { return s }
+        let s = await EditSuiteMedia.strip(url, count: count)
+        strips[url.path] = s
+        return s
+    }
+    func wave(_ url: URL) async -> [Float] {
+        if let w = waves[url.path] { return w }
+        await take()
+        defer { give() }
+        if let w = waves[url.path] { return w }
+        let w = await EditSuiteMedia.waveform(url)
+        waves[url.path] = w
+        return w
+    }
+}
+
 enum EditSuiteMedia {
     /// A local copy of a source (downloaded once per key into the temporary folder; file URLs are used as they are).
     static func localCopy(_ src: URL, key: String) async throws -> URL {

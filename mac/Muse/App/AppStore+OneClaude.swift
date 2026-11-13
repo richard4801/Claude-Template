@@ -490,7 +490,8 @@ extension AppStore {
            let new = assets.filter({ !known.contains($0.key) && ($0.value == "video" || $0.value == "audio") }).min(by: { $0.key < $1.key }) {
             oneClaude.imported = ClaudeImported(kind: new.value, id: new.key, at: Date())
         }
-        oneClaude.editAssets = Set(assets.keys)
+        let ids = Set(assets.keys)
+        if oneClaude.editAssets != ids { oneClaude.editAssets = ids }
         guard facts != oneClaude.editFacts else { return }
         oneClaude.editFacts = facts
         claudeChipsChanged()

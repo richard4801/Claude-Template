@@ -533,16 +533,18 @@ final class EditSuiteSession {
             let url = files[a.id]!
             if a.kind == .video, strips[a.id] == nil {
                 strips[a.id] = []
-                Task { [weak self] in
-                    let s = await EditSuiteMedia.strip(url, count: 24)
-                    self?.strips[a.id] = s
+                Task(priority: .utility) { [weak self] in
+                    let s = await EditMediaWork.shared.strip(url, count: 24)
+                    guard let self, !self.closed else { return }
+                    self.strips[a.id] = s
                 }
             }
             if a.kind == .audio || (a.kind == .video && a.hasAudio != false), waves[a.id] == nil {
                 waves[a.id] = []
-                Task { [weak self] in
-                    let w = await EditSuiteMedia.waveform(url)
-                    self?.waves[a.id] = w
+                Task(priority: .utility) { [weak self] in
+                    let w = await EditMediaWork.shared.wave(url)
+                    guard let self, !self.closed else { return }
+                    self.waves[a.id] = w
                 }
             }
         }
