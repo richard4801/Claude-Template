@@ -106,11 +106,14 @@ struct EditSuiteTimeline: View {
             SuiteIconButton(systemName: "magnifying-glass-minus", label: "Zoom out", tint: t.roles.ink2) {
                 session.view { $0.zoom = exp(max(range.lowerBound, log($0.zoom) - step)) }
             }
-            Slider(value: Binding(get: { log(s.zoom) }, set: { v in session.view { $0.zoom = exp(v) } }), in: range)
-                .controlSize(.mini)
-                .tint(t.roles.accent)
-                .frame(width: 96)
-                .accessibilityLabel("Timeline zoom")
+            // Very narrow (the Claude panel open in a small window): the − and + buttons alone, so the toolbar fits.
+            if !narrow {
+                Slider(value: Binding(get: { log(s.zoom) }, set: { v in session.view { $0.zoom = exp(v) } }), in: range)
+                    .controlSize(.mini)
+                    .tint(t.roles.accent)
+                    .frame(width: 96)
+                    .accessibilityLabel("Timeline zoom")
+            }
             SuiteIconButton(systemName: "magnifying-glass-plus", label: "Zoom in", tint: t.roles.ink2) {
                 session.view { $0.zoom = exp(min(range.upperBound, log($0.zoom) + step)) }
             }

@@ -49,10 +49,18 @@ struct EditSuiteView: View {
     }
 
     private func open(_ id: String?) async {
+        let attach = id.flatMap { id in store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil } }
+        // Run 596 (open_page edit session: "New project" instead of Claude's session): when Edit appears with an attach
+        // waiting, both the openId task and the editAttach task call open(). The first used to clear editAttach before
+        // its await, so the second found none and opened a fresh project over Claude's. Already on that session: keep it.
+        if let s = session, let id, s.take.id == id, s.attachSessionId != nil,
+           attach == nil || attach == s.attachSessionId {
+            if attach != nil { store.suite.editAttach = nil }
+            return
+        }
         session?.close()
         session = nil
         guard let id else { return }
-        let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
         if attach != nil { store.suite.editAttach = nil }
         guard let s = store.makeEditSuiteSession(takeId: id, attachSessionId: attach) else {
             store.showToast("Only video takes can be edited")
@@ -166,6 +174,9 @@ struct EditSuiteEditor: View {
     /// the 72 pt sidebar rail).
     static let mediaFits: CGFloat = 1108
     static let inspectorFits: CGFloat = 880
+    /// With the Claude panel open: the editor's least width (the preview and the narrow timeline toolbar) and the panel's.
+    static let editorMin: CGFloat = 560
+    static let claudeMin: CGFloat = 300
 
     /// Runs an editor shortcut unless the person is typing (then the key goes to the text box).
     private func shortcut(_ key: EditShortcuts.Key, plain: Bool = true) -> KeyPress.Result {
@@ -206,9 +217,10 @@ struct EditSuiteEditor: View {
     private var editor: some View {
         GeometryReader { g in
             let full = g.size.width
-            let claudeW: CGFloat = full >= 1300 ? 360 : 320
-            // The Claude panel takes its width from the editor.
-            let w = claudeOpen ? full - claudeW - 1 : full
+            // The Claude panel takes its width from the editor, clamped so both fit the window (owner review, run 591: at
+            // 1000 × 700 the panel ran off the right edge): the editor keeps at least `editorMin`, the panel at least 300.
+            let claudeW: CGFloat = max(Self.claudeMin, min(full >= 1300 ? 360 : 320, full - 1 - Self.editorMin))
+            let w = claudeOpen ? max(0, full - claudeW - 1) : full
             VStack(spacing: 0) {
                 topBar(width: w)
                 SuiteRule()
@@ -237,6 +249,9 @@ struct EditSuiteEditor: View {
                                 .frame(height: Self.timelineHeight)
                         }
                     }
+                    // The editor gets exactly its share, so the panel beside it always ends at the window's edge.
+                    .frame(width: w)
+                    .clipped()
                     if claudeOpen {
                         SuiteRule(vertical: true)
                         EditSuiteClaudePanel(session: session, openPlaybook: {

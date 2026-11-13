@@ -1,14 +1,15 @@
 import Foundation
 
 // The take viewer (plans/swap-viewer-design.md §B, owner-approved 2026-11-12): one viewer wherever a take or image is
-// shown. This file holds what the app's views need that can be tested without AppKit: the platform previews ("skins")
-// and their safe zones, the frame maths (no letterbox), playback without a scrubber (the keys, the jumps, the readout),
-// the take actions and the order in which their labels give way, and the New Swap trimmer.
+// shown. This file holds what the app's views need that can be tested without AppKit: the frame maths (no letterbox),
+// playback without a scrubber (the keys, the jumps, the readout), the take actions and the order in which their labels
+// give way, and the New Swap trimmer. The platform layouts ("skins") and their safe zones live here too, but since the
+// owner's decision of 2026-11-12 they are shown in Edit only (Edit/EditPlatformPreview.swift), never in the viewer.
 
 // MARK: Preview skins
 
-/// How the viewer shows a take: clean, or under a generic drawing of a platform's layout. Portrait and square media get
-/// the phone layouts; landscape media gets the desktop ones.
+/// How Edit's preview shows the edit: clean, or under a generic drawing of a platform's layout. Portrait and square
+/// canvases get the phone layouts; landscape ones get the landscape players.
 public enum PreviewSkin: String, Codable, CaseIterable, Sendable {
     case clean, tiktok, reels, shorts, facebook, youtube
 
@@ -59,10 +60,13 @@ public struct SafeZone: Codable, Hashable, Sendable {
 /// upload-post) on a 1080 × 1920 frame; the server's table replaces any it sends.
 public struct PreviewLayouts: Codable, Hashable, Sendable {
     public var zones: [String: SafeZone]
+    /// Landscape players (YouTube, Facebook): what their title and controls cover on a 16:9 frame.
+    public var landscape: [String: SafeZone]?
     public var note: String?
 
-    public init(zones: [String: SafeZone], note: String? = nil) {
+    public init(zones: [String: SafeZone], landscape: [String: SafeZone]? = nil, note: String? = nil) {
         self.zones = zones
+        self.landscape = landscape
         self.note = note
     }
 
@@ -71,38 +75,28 @@ public struct PreviewLayouts: Codable, Hashable, Sendable {
         PreviewSkin.reels.rawValue: SafeZone(top: 0.10, bottom: 0.30, left: 0.03, right: 0.16),
         PreviewSkin.shorts.rawValue: SafeZone(top: 0.09, bottom: 0.30, left: 0.03, right: 0.17),
         PreviewSkin.facebook.rawValue: SafeZone(top: 0.10, bottom: 0.28, left: 0.03, right: 0.16),
+    ], landscape: [
+        PreviewSkin.youtube.rawValue: SafeZone(top: 0.12, bottom: 0.16, left: 0.03, right: 0.03),
+        PreviewSkin.facebook.rawValue: SafeZone(top: 0.08, bottom: 0.16, left: 0.03, right: 0.03),
     ], note: "Approximate. Each app moves its buttons now and then.")
 
-    /// The zone for a skin: the server's, else the default; none for Clean and the desktop layouts.
+    /// The phone zone for a skin: the server's, else the default; none for Clean and YouTube (a landscape player).
     public func zone(_ skin: PreviewSkin) -> SafeZone? {
         guard skin != .clean, skin != .youtube else { return nil }
         return zones[skin.rawValue] ?? Self.defaults.zones[skin.rawValue]
     }
 
+    /// The landscape zone for a skin (YouTube, Facebook): the server's, else the default; none for Clean.
+    public func landscapeZone(_ skin: PreviewSkin) -> SafeZone? {
+        guard skin == .youtube || skin == .facebook else { return nil }
+        return landscape?[skin.rawValue] ?? Self.defaults.landscape?[skin.rawValue]
+    }
+
     /// The server's table over the defaults (a skin it leaves out keeps its default).
     public func merged(over base: PreviewLayouts = .defaults) -> PreviewLayouts {
-        PreviewLayouts(zones: base.zones.merging(zones) { _, new in new }, note: note ?? base.note)
-    }
-}
-
-/// The viewer's remembered choices (per device, owner 2026-11-12): the skin for portrait and for landscape media, the
-/// device frame and the safe zones.
-public struct ViewerPrefs: Codable, Hashable, Sendable {
-    public var portraitSkin: PreviewSkin = .clean
-    public var landscapeSkin: PreviewSkin = .clean
-    public var deviceFrame = false
-    public var safeZones = false
-
-    public init() {}
-
-    public func skin(aspect: Double) -> PreviewSkin {
-        let s = PreviewSkin.isLandscape(aspect) ? landscapeSkin : portraitSkin
-        return PreviewSkin.options(aspect: aspect).contains(s) ? s : .clean
-    }
-
-    public mutating func setSkin(_ s: PreviewSkin, aspect: Double) {
-        guard PreviewSkin.options(aspect: aspect).contains(s) else { return }
-        if PreviewSkin.isLandscape(aspect) { landscapeSkin = s } else { portraitSkin = s }
+        PreviewLayouts(zones: base.zones.merging(zones) { _, new in new },
+                       landscape: (base.landscape ?? [:]).merging(landscape ?? [:]) { _, new in new },
+                       note: note ?? base.note)
     }
 }
 
@@ -121,27 +115,6 @@ public enum ViewerFrame {
         if width / height > aspect { return ((height * aspect).rounded(), height.rounded()) }
         return (width.rounded(), (width / aspect).rounded())
     }
-
-    /// A generic phone: a 9:19.5 screen, an even bezel and corner radius in proportion to the screen width.
-    public static let phoneScreenAspect = 9.0 / 19.5
-    public static func phoneBezel(screenWidth w: Double) -> Double { max(6, (w * 0.035).rounded()) }
-    public static func phoneRadius(screenWidth w: Double) -> Double { (w * 0.13).rounded() }
-
-    /// A generic laptop: a 16:10 screen.
-    public static let laptopScreenAspect = 16.0 / 10.0
-
-    /// The phone's screen width that fits a box (bezels included).
-    public static func phoneScreenWidth(width: Double, height: Double) -> Double {
-        guard width > 0, height > 0 else { return 0 }
-        // body = screen + 2 bezels, bezel ≈ 3.5 % of the screen width
-        let byHeight = height / (1 / phoneScreenAspect + 0.07)
-        let byWidth = width / 1.07
-        return max(0, min(byHeight, byWidth).rounded(.down))
-    }
-
-    /// Platform layouts fill the phone's screen (the apps crop a 9:16 video's sides on tall phones); Clean fits it, as a
-    /// phone's own player does.
-    public static func fillsScreen(_ skin: PreviewSkin) -> Bool { skin != .clean }
 }
 
 // MARK: Playback without a scrubber

@@ -28,6 +28,8 @@ struct NewSwapPanel: View {
     @State private var libraryOpen = false
     /// Outfit "Her outfit" while Character isn't her: whose outfits are listed.
     @State private var outfitOwner: String?
+    /// Character: the list of her characters is open (Change).
+    @State private var pickHer = false
     /// New Swap's own screen (plans/swap-viewer-design.md §A): the video and the trimmer are on the stage, so this column
     /// holds only the changes.
     var onScreen = false
@@ -51,14 +53,16 @@ struct NewSwapPanel: View {
                 if let c = store.clip { trimmer(c) }
             }
             VStack(alignment: .leading, spacing: Space.s3) {
-                toggleRow("Background", isOn: bind(\.backgroundOn), help: "A new place: describe it, or a location or photo") { backgroundField }
-                toggleRow("Outfit", isOn: bind(\.outfitOn), help: "New clothes: one of her outfits, a product photo, or words") { outfitField }
-                toggleRow("Character", isOn: bind(\.characterOn), help: "Who the person becomes: her, or a face swap from a photo") { characterField }
-                toggleRow("Look & light", isOn: bind(\.lookOn), help: "Time of day, light and colour grade") { lookField }
+                toggleRow("Background", isOn: bind(\.backgroundOn), state: d.backgroundMode == .describe ? "Describe the new place" : "A new place from a picture",
+                          help: "A new place: describe it, or a location or photo") { backgroundField }
+                toggleRow("Outfit", isOn: bind(\.outfitOn), state: "New clothes", help: "New clothes: one of her outfits, a product photo, or words") { outfitField }
+                toggleRow("Character", isOn: bind(\.characterOn), state: d.characterKind == .model ? "Her, with the figure lock" : "Face swap from a photo",
+                          help: "Who the person becomes: her, or a face swap from a photo") { characterField }
+                toggleRow("Look & light", isOn: bind(\.lookOn), state: "Time of day, light, grade", help: "Time of day, light and colour grade") { lookField }
             }
             Text(d.keptLine).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                 .fixedSize(horizontal: false, vertical: true)
-            if d.engineModel == nil, let why = store.suite.remixEstimate?.remix?.why ?? store.suite.remixModels?.auto?.why {
+            if !onScreen, d.engineModel == nil, let why = store.suite.remixEstimate?.remix?.why ?? store.suite.remixModels?.auto?.why {
                 Text("Auto: \(why)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -162,16 +166,35 @@ struct NewSwapPanel: View {
 
     // MARK: Toggles
 
-    @ViewBuilder private func toggleRow<F: View>(_ title: String, isOn: Binding<Bool>, help: String, @ViewBuilder field: () -> F) -> some View {
+    /// One change (approved mockup): its name and a state line on the left, the switch on the right; when on, its one
+    /// field under it.
+    @ViewBuilder private func toggleRow<F: View>(_ title: String, isOn: Binding<Bool>, state: String, help: String, @ViewBuilder field: () -> F) -> some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            Toggle(isOn: isOn) {
-                Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+            HStack(alignment: .center, spacing: Space.s3) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
+                    Text(isOn.wrappedValue ? state : "Kept from the clip").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+                }
+                Spacer(minLength: Space.s2)
+                Toggle(title, isOn: isOn).toggleStyle(.switch).labelsHidden().controlSize(.small)
             }
-            .toggleStyle(.switch)
-            .controlSize(.small)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
             .help(help)
-            if isOn.wrappedValue { field() }
+            if isOn.wrappedValue { field().padding(.bottom, Space.s1) }
         }
+    }
+
+    /// A text field on the field tone (the mockup's fields), 1–3 lines.
+    private func wordsField(_ placeholder: String, _ text: Binding<String>) -> some View {
+        TextField(placeholder, text: text, axis: .vertical)
+            .textFieldStyle(.plain)
+            .lineLimit(1...3)
+            .font(t.scale.body.font)
+            .foregroundStyle(t.roles.ink)
+            .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
+            .frame(minHeight: 36)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
     }
 
     @ViewBuilder private var backgroundField: some View {
@@ -180,8 +203,7 @@ struct NewSwapPanel: View {
         }
         .pickerStyle(.segmented).labelsHidden()
         if d.backgroundMode == .describe {
-            TextField("A rooftop at golden hour, city lights behind", text: bind(\.backgroundWords), axis: .vertical)
-                .textFieldStyle(.roundedBorder).lineLimit(1...3).font(t.body(12.5))
+            wordsField("A rooftop at golden hour, city lights behind", bind(\.backgroundWords))
         } else {
             HStack(spacing: Space.s2) {
                 Menu(d.backgroundImage == nil ? "Pick a picture" : (d.backgroundName ?? "New background")) {
@@ -234,34 +256,81 @@ struct NewSwapPanel: View {
             Button(d.productImage == nil ? "Upload the product photo…" : (d.productName ?? "Product photo")) { store.pickRemixPhoto(.product) }
                 .controlSize(.small)
         case .words:
-            TextField("A black linen two-piece", text: bind(\.outfitWords), axis: .vertical)
-                .textFieldStyle(.roundedBorder).lineLimit(1...3).font(t.body(12.5))
+            wordsField("A black linen two-piece", bind(\.outfitWords))
         }
     }
 
+    /// Her (the default): her chip with her face, her name, where her look comes from and Change; a link to a face swap
+    /// instead. A face swap: the photo and the consent line, and a link back to her.
     @ViewBuilder private var characterField: some View {
-        Picker("Character", selection: bind(\.characterKind)) {
-            ForEach(RemixCharacterKind.allCases, id: \.self) { Text($0.label).tag($0) }
-        }
-        .pickerStyle(.segmented).labelsHidden()
         if d.characterKind == .model {
-            Menu(d.modelId.flatMap { store.character($0)?.name } ?? "Pick her") {
-                ForEach(store.suiteCharacters) { m in Button(m.name) { store.suite.remix.modelId = m.id } }
+            let her = d.modelId.flatMap { store.character($0) }
+            HStack(spacing: Space.s3) {
+                MuseImage(ref: her?.cover)
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(her?.name ?? "Pick her").font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                    Text("Face and figure from her pictures").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+                }
+                Spacer(minLength: Space.s2)
+                Button(her == nil ? "Pick" : "Change") { pickHer = true }
+                    .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).fixedSize()
+                    .popover(isPresented: $pickHer, arrowEdge: .bottom) { herList }
             }
-            .fixedSize().controlSize(.small)
-            Text("Her face and figure come only from her images. The clip gives only the motion and facial gestures.")
-                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 6).padding(.leading, 6).padding(.trailing, Space.s3)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            Button("Face swap from a photo instead") { store.suite.remix.characterKind = .face }
+                .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.ink2).fixedSize()
+                .help("Only the face changes; their hair, body and figure stay as in the video")
         } else {
-            Button(d.faceImage == nil ? "Add a face photo…" : (d.faceName ?? "Face photo")) { store.pickRemixPhoto(.face) }
-                .controlSize(.small)
+            HStack(spacing: Space.s3) {
+                MuseImage(ref: d.faceImage)
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
+                    .opacity(d.faceImage == nil ? 0.4 : 1)
+                Text(d.faceImage == nil ? "Add a face photo" : (d.faceName ?? "Face photo")).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                Spacer(minLength: Space.s2)
+                Button(d.faceImage == nil ? "Upload…" : "Change") { store.pickRemixPhoto(.face) }
+                    .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).fixedSize()
+            }
+            .padding(.vertical, 6).padding(.leading, 6).padding(.trailing, Space.s3)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
             Text("Face swap: only the face changes. Their hair, body and figure stay as in the video. Use a photo of someone who agreed to this.")
                 .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            Button("Use her instead") { store.suite.remix.characterKind = .model }
+                .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.ink2).fixedSize()
         }
+    }
+
+    /// Her characters, to pick who she is.
+    private var herList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(store.suiteCharacters) { m in
+                    Button {
+                        store.suite.remix.modelId = m.id
+                        pickHer = false
+                    } label: {
+                        HStack(spacing: Space.s2) {
+                            MuseImage(ref: m.cover).frame(width: 28, height: 28).clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
+                            Text(m.name).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                            Spacer(minLength: 0)
+                            if m.id == d.modelId { Ph("check", 13).frame(width: 16, height: 16).foregroundStyle(t.roles.accent) }
+                        }
+                        .padding(.horizontal, Space.s3).frame(height: 36).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, Space.s2)
+        }
+        .frame(width: 260).frame(maxHeight: 320)
+        .environment(\.theme, t)
     }
 
     private var lookField: some View {
-        TextField("Night, neon signs, teal grade", text: bind(\.lookWords), axis: .vertical)
-            .textFieldStyle(.roundedBorder).lineLimit(1...3).font(t.body(12.5))
+        wordsField("Night, neon signs, teal grade", bind(\.lookWords))
     }
 }
 

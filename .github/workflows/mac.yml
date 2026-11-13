@@ -102,7 +102,23 @@ jobs:
           mkdir -p snapshots
           MUSE_SNAPSHOT_DIR="$PWD/snapshots" "$EXE" > snapshots.log 2>&1 &
           pid=$!
-          for i in $(seq 1 2700); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          # Stall watchdog (coordinator, run 595 hung 17 min at "chat camera streaming b"): when snapshots.log gets no new
+          # line for 120 s, take the proof once per stall (a 10 s stack sample, a spindump, the screen), then let it run on.
+          last=0; still=0; n=0
+          for i in $(seq 1 2700); do
+            kill -0 $pid 2>/dev/null || break; sleep 1
+            lines=$(wc -l < snapshots.log 2>/dev/null || echo 0)
+            if [ "$lines" -ne "$last" ]; then last=$lines; still=0; continue; fi
+            still=$((still + 1))
+            if [ "$still" -eq 120 ] && [ "$n" -lt 3 ]; then
+              n=$((n + 1)); echo "review mode: no new log line for 120 s at line $lines (stall $n): sampling pid $pid"
+              tail -n 5 snapshots.log > "snapshots/stall-$n-lastlines.txt" 2>/dev/null || true
+              sample $pid 10 -file "snapshots/stall-$n-sample.txt" >/dev/null 2>&1 || true
+              (sudo -n spindump $pid 10 -file "snapshots/stall-$n-spindump.txt" >/dev/null 2>&1 || true) &
+              screencapture -x "snapshots/stall-$n-screen.png" 2>/dev/null || true
+              head -n 60 "snapshots/stall-$n-sample.txt" 2>/dev/null || true
+            fi
+          done
           if kill -0 $pid 2>/dev/null; then echo "review mode still running after 2700 s: stopping it"; kill $pid 2>/dev/null || true; fi
           status=0; wait $pid || status=$?; echo "review mode exit status: $status (128+n = killed by signal n)"
           ls -la snapshots | head -100

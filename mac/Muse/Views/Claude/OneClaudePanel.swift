@@ -110,15 +110,7 @@ struct OneClaudePanel: View {
                 .accessibilityLabel("History. Chat: \(o.current?.shownTitle ?? "new chat"). Open the list of chats")
                 SuiteIconButton(systemName: "xmark", label: "Hide Claude", size: 26) { store.toggleOneClaude() }
             }
-            HStack(spacing: 6) {
-                Ph("eye", 13)
-                Text("Sees: \(store.claudePage.line)").lineLimit(1).truncationMode(.middle)
-            }
-            .font(t.scale.micro.font).foregroundStyle(r.ink2)
-            .padding(.horizontal, Space.s2).frame(height: 24)
-            .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(r.field))
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Claude sees \(store.claudePage.line)")
+            ClaudeContextStrip(page: store.claudePage.line, items: store.claudeContextItems)
         }
         .padding(.horizontal, Space.s4)
         .padding(.vertical, Space.s3)

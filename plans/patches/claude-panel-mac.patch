@@ -1,5 +1,5 @@
 diff --git a/mac/Muse/App/AppStore+OneClaude.swift b/mac/Muse/App/AppStore+OneClaude.swift
-index cd32580..9bf7c43 100644
+index cd32580..4de7e99 100644
 --- a/mac/Muse/App/AppStore+OneClaude.swift
 +++ b/mac/Muse/App/AppStore+OneClaude.swift
 @@ -31,6 +31,18 @@ final class OneClaudeState {
@@ -46,7 +46,7 @@ index cd32580..9bf7c43 100644
          default:
              break
          }
-@@ -302,11 +320,90 @@ extension AppStore {
+@@ -302,11 +320,100 @@ extension AppStore {
      func loadClaudeApprovals(_ chatId: String) async {
          guard let api = oneClaudeAPI, let list = try? await api.waitingActions() else { return }
          guard oneClaude.chatId == chatId else { return }
@@ -104,6 +104,16 @@ index cd32580..9bf7c43 100644
 +        } catch {
 +            showToast("Couldn't answer that. \((error as? ApiError)?.friendlyMessage ?? error.localizedDescription)")
 +        }
++    }
++
++    /// The live context strip (ClaudeContext): what Claude sees on this page now, from the same `screen` the composer
++    /// syncs to the server for Claude. Only the AI Suite reports a screen today; other pages show their name only.
++    var claudeContextItems: [ClaudeContextItem] {
++        guard screen == .suite else { return [] }
++        return ClaudeContext.items(screen: suiteScreen(at: nil), lookups: .init(
++            character: { [self] id in character(id).map { ($0.shortName, $0.cover) } },
++            outfit: { [self] id in outfits.first { $0.id == id }.map { ($0.name, $0.angles.first ?? nil) } },
++            clipPoster: { [self] id in clip?.id == id ? clip?.thumb : nil }))
 +    }
 +
 +    static func cardKey(_ t: ClaudeApproveTarget) -> String {
@@ -244,6 +254,20 @@ index 907e976..7552abb 100644
              Text("Claude is using MUSE")
                  .font(.system(size: 12, weight: .medium))
              Text("·").foregroundStyle(.secondary)
+diff --git a/mac/Muse/App/SuiteClaudeBridge.swift b/mac/Muse/App/SuiteClaudeBridge.swift
+index 79ffdf5..49120d8 100644
+--- a/mac/Muse/App/SuiteClaudeBridge.swift
++++ b/mac/Muse/App/SuiteClaudeBridge.swift
+@@ -599,6 +599,9 @@ extension AppStore {
+             inputs += SuiteScreen.inputs(suite.composerSlots.slots)
+             request = shotRequest
+         }
++        // The pinned model as the server labels it ("<Model> · <Provider>", the Model pill's words): Claude and the
++        // panel's context strip name it the same way.
++        if composerPinnedModel != nil { settings["modelLabel"] = .string(String(composerModelLabel.prefix(120))) }
+         return SuiteScreen.json(tool: toolName, request: request, inputs: inputs, settings: settings, at: at)
+     }
+ 
 diff --git a/mac/Muse/Views/Claude/ChatCards.swift b/mac/Muse/Views/Claude/ChatCards.swift
 new file mode 100644
 index 0000000..fcecb9c
@@ -780,21 +804,231 @@ index 0d11e73..499a49b 100644
 +            onPick: attachKinds && suiteAttach == nil ? { model.pick($0) } : nil)
      }
  }
+diff --git a/mac/Muse/Views/Claude/ClaudeContextStrip.swift b/mac/Muse/Views/Claude/ClaudeContextStrip.swift
+new file mode 100644
+index 0000000..5adaa6d
+--- /dev/null
++++ b/mac/Muse/Views/Claude/ClaudeContextStrip.swift
+@@ -0,0 +1,73 @@
++import MuseCore
++import SwiftUI
++
++/// What Claude sees, live (owner, 2026-11-12): the page's name as a small leading label, then a row of 30 pt thumbnails
++/// with tiny labels (the clip, her, the outfit, the background, references, the guide, the model), from the same screen
++/// Claude reads (ClaudeContext). Calm: no chrome; it scrolls sideways when narrow; items change with a short cross-fade.
++struct ClaudeContextStrip: View {
++    @Environment(\.theme) private var t
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++    @ObservedObject private var service: ClaudeCodeService = .shared
++    let page: String
++    let items: [ClaudeContextItem]
++
++    static let side: CGFloat = 30
++
++    var body: some View {
++        let r = t.roles
++        HStack(alignment: .top, spacing: Space.s2) {
++            VStack(alignment: .leading, spacing: 2) {
++                Text("Sees").scaled(t.scale.micro, r.ink2)
++                Text(page).scaled(t.scale.micro, r.ink).lineLimit(2).frame(maxWidth: items.isEmpty ? .infinity : 72, alignment: .leading)
++            }
++            .padding(.top, 2)
++            if !items.isEmpty {
++                ScrollView(.horizontal, showsIndicators: false) {
++                    HStack(alignment: .top, spacing: Space.s2) {
++                        ForEach(items) { item in tile(item).transition(.opacity) }
++                    }
++                    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: items.map(\.id))
++                }
++            }
++        }
++        .frame(maxWidth: .infinity, alignment: .leading)
++        .accessibilityElement(children: .combine)
++        .accessibilityLabel("Claude sees \(page)" + (items.isEmpty ? "" : ": " + items.map { "\($0.label)\($0.detail.map { " \($0)" } ?? "")" }.joined(separator: ", ")))
++    }
++
++    private func tile(_ item: ClaudeContextItem) -> some View {
++        let r = t.roles
++        let shape = RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous)
++        return VStack(spacing: 3) {
++            ZStack {
++                shape.fill(r.field)
++                if let ref = item.image {
++                    MuseImage(ref: ImageRef(url: service.resolve(ref.url)), symbol: nil)
++                } else if item.words != nil {
++                    Ph("text-aa", 13).foregroundStyle(r.ink2)
++                } else {
++                    Ph(Self.icon(item.kind), 13).foregroundStyle(r.ink2)
++                }
++                if item.isVideo && item.image != nil {
++                    Ph("play", 9).foregroundStyle(.white).shadow(color: .black.opacity(0.5), radius: 2)
++                }
++            }
++            .frame(width: Self.side, height: Self.side)
++            .clipShape(shape)
++            Text(item.label).scaled(t.scale.micro, r.ink2).lineLimit(1).fixedSize()
++        }
++        .help(item.detail.map { "\(item.label): \($0)" } ?? item.label)
++    }
++
++    static func icon(_ k: ClaudeContextItem.Kind) -> String {
++        switch k {
++        case .clip, .guide: "video-camera"
++        case .character, .face: "user"
++        case .outfit, .product: "image"
++        case .background: "image"
++        case .frame, .reference: "images"
++        case .audio: "speaker-high"
++        case .model: "aperture"
++        }
++    }
++}
+diff --git a/mac/Muse/Views/Claude/ClaudeOrb.metal b/mac/Muse/Views/Claude/ClaudeOrb.metal
+new file mode 100644
+index 0000000..e4fb4fc
+--- /dev/null
++++ b/mac/Muse/Views/Claude/ClaudeOrb.metal
+@@ -0,0 +1,125 @@
++// Claude's orb (owner, 2026-11-12: Option C2 "alive"; plans/design/claude-panel/orb-alive-*.png, orb-alive-preview.mp4):
++// a glass ball with luminous 3D smoke inside. A ray is marched through the ball (front to back, with absorption) in a
++// density field of domain-warped 3D noise advected by a slowly evolving flow; it is emissive (magenta, violet, blue,
++// cyan, a gold accent), white-hot where dense, with a soft self-shadow. The glass lives with it: a soft-body wobble of
++// the silhouette, a breathing scale, a tiny drift and a tilt of the reflections; the rim and highlight deform with it.
++// No glint, no halo. The same shader as design/direction/orb_alive.py (GLSL), line for line: keep them in step. Used
++// through SwiftUI's colorEffect (ShaderLibrary.claudeOrb); the page behind is passed as its tone (pageColor).
++#include <metal_stdlib>
++#include <SwiftUI/SwiftUI_Metal.h>
++using namespace metal;
++
++constant int STEPS = 22;
++
++struct Orb { float phase, time, bright, spin, danger, pulse, breath, light, wobble, pop; };
++
++// smoothstep that also takes falling edges (Metal leaves edge0 >= edge1 undefined; the GLSL preview relies on it).
++static float sstep(float e0, float e1, float x) { float t = clamp((x - e0) / (e1 - e0), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
++
++static float hash3(float3 p) { return fract(sin(dot(p, float3(127.1, 311.7, 74.7))) * 43758.5453); }
++static float noise3(float3 p) {
++    float3 i = floor(p), f = fract(p); float3 u = f * f * (3.0 - 2.0 * f);
++    float a = mix(mix(hash3(i), hash3(i + float3(1, 0, 0)), u.x), mix(hash3(i + float3(0, 1, 0)), hash3(i + float3(1, 1, 0)), u.x), u.y);
++    float b = mix(mix(hash3(i + float3(0, 0, 1)), hash3(i + float3(1, 0, 1)), u.x), mix(hash3(i + float3(0, 1, 1)), hash3(i + float3(1, 1, 1)), u.x), u.y);
++    return mix(a, b, u.z);
++}
++static float fbm4(float3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { v += a * noise3(p); p = p * 2.07 + float3(1.7, 9.2, 4.1); a *= 0.5; } return v; }
++static float fbm3(float3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 3; i++) { v += a * noise3(p); p = p * 2.07 + float3(1.7, 9.2, 4.1); a *= 0.5; } return v; }
++
++// The smoke's colour where it is: magenta, violet, blue, cyan regions with a gold accent (error: red, orange, amber).
++static float3 dye(float3 p, Orb o) {
++    float h = fbm3(p * 0.9 + float3(11.0, 3.0, o.phase * 0.05));
++    float g = sstep(0.62, 0.75, fbm3(p * 1.3 + float3(-4.0, 7.0, 2.0)));
++    float3 m = float3(1.0, 0.24, 0.66), v = float3(0.56, 0.33, 1.0), bl = float3(0.22, 0.48, 1.0), c = float3(0.15, 0.9, 0.95);
++    float t = clamp((h - 0.3) * 2.5, 0.0, 1.0) * 3.0;
++    float3 col = t < 1.0 ? mix(m, v, t) : t < 2.0 ? mix(v, bl, t - 1.0) : mix(bl, c, t - 2.0);
++    col = mix(col, float3(1.0, 0.72, 0.3), g * 0.8);
++    float3 err = mix(float3(1.0, 0.25, 0.1), float3(1.0, 0.62, 0.15), clamp((h - 0.35) * 3.0, 0.0, 1.0));
++    return mix(col, err, o.danger);
++}
++
++// Density: 3D noise warped by a flow that evolves with time (a fourth dimension), rising; a current when operating.
++static float density(float3 p, thread float3 &q, Orb o) {
++    float t = o.phase;
++    float3 w = float3(fbm3(p * 1.1 + float3(0.0, -t * 0.18, t * 0.07)), fbm3(p * 1.1 + float3(5.2, 1.3 - t * 0.2, -t * 0.05)), fbm3(p * 1.1 + float3(2.7, 8.1, t * 0.09)));
++    q = p + (w - 0.5) * 1.3 + float3(-o.spin * t * 0.5, -t * 0.12, 0.0);
++    float d = fbm4(q * 2.8 + float3(0.0, 0.0, t * 0.04));
++    float edge = sstep(0.86, 0.45, length(p));
++    float low = mix(1.15, 0.6, sstep(-0.6, 0.7, p.y));
++    float thick = mix(0.5, 0.42, o.danger) - 0.04 * o.bright;
++    d = sstep(thick, thick + 0.2, d) * edge * low;
++    // A streamed chunk: a bright plume rising from below and unfurling.
++    float age = 1.0 - o.pulse;
++    float3 c = float3(0.18 * sin(o.time * 1.3), -0.55 + 0.55 * age, 0.1 * cos(o.time * 1.1));
++    d += o.pulse * sstep(0.32 + 0.2 * age, 0.0, length((p - c) * float3(1.0, 0.7, 1.0)) - 0.15 * (fbm3(p * 4.0 + t) - 0.5));
++    return d;
++}
++
++[[ stitchable ]] half4 claudeOrb(float2 position, half4 color, float2 size, float scale, float phase, float time, float brightIn,
++                                 float spin, float danger, float pulse, float breath, float lightPage, float wobble, float pop, half4 page) {
++    Orb o = { phase, time, brightIn, spin, danger, pulse, breath, lightPage, wobble, pop };
++    // Metal's y runs down; the preview's runs up: flip so both draw the same picture.
++    float2 px = float2(position.x - 0.5 * size.x, 0.5 * size.y - position.y) / (0.5 * min(size.x, size.y)) * scale;
++    // The living glass: drift and lean with the flow, a breathing scale, a soft-body wobble bulging where the smoke presses.
++    float2 drift = float2(0.012 * sin(phase * 0.31) + 0.015 * spin, 0.01 * cos(phase * 0.27));
++    float ang = atan2(px.y - drift.y, px.x - drift.x);
++    float3 dir = float3(cos(ang), sin(ang), 0.0);
++    float press = fbm3(dir * 0.9 + float3(0.0, -phase * 0.12, phase * 0.05));
++    float wob = (fbm3(dir * 1.4 + float3(phase * 0.2, 3.0, -phase * 0.15)) - 0.5) * 2.0;
++    float shape = (1.0 + pop) * (1.0 + wobble * (0.6 * wob + 0.8 * (press - 0.45)));
++    float2 uv = (px - drift) / shape;
++    float r = length(uv);
++    if (r >= 1.0) { return half4(0.0); }
++    float nz = sqrt(1.0 - r * r);
++    float bright = brightIn * (1.0 + 0.5 * pulse) * (1.0 - 0.3 * breath);
++
++    // The page behind: its tone (the preview also shows a faint flipped hint; at panel sizes it is invisible).
++    bool light = lightPage > 0.5;
++    float shade = mix(light ? 0.9 : 0.03, light ? 0.97 : 0.3, sstep(0.3, -0.9, uv.y));
++    float3 glass = float3(page.rgb) * shade + (light ? float3(0.0) : float3(0.015, 0.015, 0.025));
++
++    // March the ray through the volume, front to back: emission with absorption and a soft self-shadow.
++    float z0 = nz * 0.9, z1 = -nz * 0.9, dz = (z0 - z1) / float(STEPS);
++    float3 acc = float3(0.0); float T = 1.0;
++    for (int i = 0; i < STEPS; i++) {
++        float z = z0 - (float(i) + 0.5) * dz;
++        float3 p = float3(uv, z);
++        float3 q;
++        float d = density(p, q, o);
++        if (d > 0.01) {
++            float3 qs;
++            float sh = density(p + float3(-0.12, 0.16, 0.12), qs, o);
++            float3 col = dye(q, o);
++            float hot = sstep(0.45, 0.95, d);
++            float3 e = mix(col, float3(1.0, 0.97, 0.95), hot * 0.85) * d * (1.0 + 0.5 * hot) * (1.0 - 0.45 * clamp(sh, 0.0, 1.0));
++            e *= mix(0.55, 1.0, (z - z1) / max(z0 - z1, 1e-3));
++            acc += T * e * dz * 6.5 * bright;
++            T *= exp(-d * dz * 4.5);
++            if (T < 0.03) break;
++        }
++    }
++    float dense = 1.0 - T;
++
++    // The glass: a thin soft rim (bottom-left and right brightest) with a chromatic fringe, lit by the smoke near it;
++    // a broad dim reflection on top that turns a little with the flow.
++    float f = pow(1.0 - nz, 3.0);
++    float where = 0.35 + 0.65 * max(sstep(0.4, -0.9, uv.y) * sstep(0.2, -0.8, uv.x), sstep(0.3, 0.95, uv.x));
++    float3 smokeTint = acc / max(0.15, max(acc.r, max(acc.g, acc.b)));
++    float3 rim = float3(f, pow(f, 1.15), pow(f, 1.3)) * 0.55 * where + smokeTint * f * 0.5 * clamp(dense * 2.0, 0.0, 1.0) * bright;
++    float tiltA = 0.07 * sin(phase * 0.23) + 0.09 * spin;
++    float2 su = float2(cos(tiltA) * uv.x - sin(tiltA) * uv.y, sin(tiltA) * uv.x + cos(tiltA) * uv.y);
++    float3 spec = float3(1.0) * exp(-(pow(su.x + 0.12, 2.0) / 0.22 + pow(su.y - 0.62, 2.0) / 0.035)) * 0.16;
++
++    float3 col;
++    if (light) {
++        // On a light page the smoke is dye over the clear glass (light can't brighten white): vivid, never grey.
++        float a = clamp(dense * 1.25, 0.0, 0.95);
++        float3 dyeC = clamp(acc / max(0.2, max(acc.r, max(acc.g, acc.b))), 0.0, 1.0);
++        col = mix(glass, dyeC, a) + rim * 0.55 - float3(0.05) * f + spec * 0.6;
++    } else {
++        float3 lit = 1.0 - exp(-acc * 1.15);
++        col = glass * T + lit + rim + spec;
++    }
++    float aa = sstep(1.0, 0.985, r);
++    return half4(half3(clamp(col, 0.0, 1.0) * aa), half(aa));
++}
 diff --git a/mac/Muse/Views/Claude/ClaudeOrbView.swift b/mac/Muse/Views/Claude/ClaudeOrbView.swift
 new file mode 100644
-index 0000000..fd65df2
+index 0000000..b1b16a9
 --- /dev/null
 +++ b/mac/Muse/Views/Claude/ClaudeOrbView.swift
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,127 @@
 +import AppKit
 +import MuseCore
 +import SwiftUI
 +
-+// Claude's orb (owner, 2026-11-12, second pass; plans/design/claude-panel/orb-states-*.png, orb-preview.mp4): our own
-+// design, a dark glass sphere with multicolour liquid light inside (MuseCore ClaudeOrbLiquid: four soft blobs added
-+// together, drifting on noise), an inner shadow, a thin rim and a soft halo. State and rhythm come from ClaudeOrb (real
-+// events only). Drawn with Canvas (gradients and plus-lighter blending, no blur filters) inside a TimelineView at the
-+// orb's own rate (12 fps idle or error, 30 at most), paused when nothing moves (Reduce Motion) or the window is hidden.
++// Claude's orb (owner, 2026-11-12, Option C2 "alive"; plans/design/claude-panel/orb-alive-*.png, orb-alive-preview.mp4):
++// a glass ball with luminous 3D smoke inside, the glass wobbling, breathing and turning a little with it. Drawn on the GPU
++// by ClaudeOrb.metal (SwiftUI colorEffect), with uniforms from MuseCore's ClaudeOrb (real events only) and
++// ClaudeOrbShader. A TimelineView redraws at the orb's own rate (12 fps idle or error, 30 at most) and pauses when
++// nothing moves (Reduce Motion) or the window is hidden.
 +
 +struct ClaudeOrbView: View {
 +    @Environment(\.theme) private var t
@@ -802,6 +1036,10 @@ index 0000000..fd65df2
 +    @ObservedObject private var service: ClaudeCodeService = .shared
 +    @ObservedObject private var visibility: OrbVisibility = .shared
 +    var size: CGFloat
++    /// The tone of what is behind the orb (the glass shows it, darkened); the panel's own surface by default.
++    var behind: Color?
++
++    private var page: Color { behind ?? t.roles.raised }
 +
 +    var body: some View {
 +        let orb = service.orb
@@ -809,11 +1047,19 @@ index 0000000..fd65df2
 +        let fps = visibility.visible ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
 +        TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
 +            let time = ctx.date.timeIntervalSinceReferenceDate
-+            Canvas { g, sz in
-+                draw(&g, sz, orb: orb, time: time)
-+            }
++            let look = orb.look(at: time, reduceMotion: reduceMotion)
++            let state = orb.state(at: time)
++            let u = ClaudeOrbShader.uniforms(state, look: look, time: time, pulse: orb.pulse(at: time, reduceMotion: reduceMotion), reduceMotion: reduceMotion)
++            let phase = OrbPhase.shared.phase(at: time, look: look)
++            Rectangle()
++                .fill(.white)
++                .colorEffect(ShaderLibrary.claudeOrb(.float2(Float(size), Float(size)), .float(Float(ClaudeOrbShader.scale)), .float(Float(phase)),
++                                                     .float(Float(time.truncatingRemainder(dividingBy: 3600))), .float(Float(u.bright)), .float(Float(u.current)),
++                                                     .float(Float(u.danger)), .float(Float(u.pulse)), .float(Float(u.breath)), .float(t.isDark ? 0 : 1),
++                                                     .float(Float(u.wobble)), .float(Float(u.pop)), .color(page)))
 +        }
 +        .frame(width: size, height: size)
++        .allowsHitTesting(false)
 +        .accessibilityElement()
 +        .accessibilityLabel(Self.words(orb.state(at: now)))
 +    }
@@ -827,58 +1073,10 @@ index 0000000..fd65df2
 +        case .error: "Claude ran into a problem"
 +        }
 +    }
-+
-+    private func draw(_ g: inout GraphicsContext, _ sz: CGSize, orb: ClaudeOrb, time: Double) {
-+        let look = orb.look(at: time, reduceMotion: reduceMotion)
-+        let glow = orb.glow(at: time, reduceMotion: reduceMotion)
-+        let pulse = look.flashes ? orb.pulse(at: time, reduceMotion: reduceMotion) : 0
-+        let phase = OrbPhase.shared.phase(at: time, look: look)
-+        let d = min(sz.width, sz.height)
-+        let inset = d * 0.16 // room for the halo
-+        let r = CGRect(x: inset, y: inset, width: d - 2 * inset, height: d - 2 * inset)
-+        let R = r.width / 2
-+        let c = CGPoint(x: r.midX, y: r.midY)
-+        let sphere = Path(ellipseIn: r)
-+
-+        // Halo (violet, or warm on error), breathing and flashing with the state.
-+        let halo = look.danger ? Color(red: 1, green: 0.35, blue: 0.24) : Color(red: 0.59, green: 0.43, blue: 1)
-+        g.fill(Path(ellipseIn: r.insetBy(dx: -R * 0.6, dy: -R * 0.6)),
-+               with: .radialGradient(Gradient(stops: [.init(color: halo.opacity(0.15 + 0.6 * glow), location: 0.5), .init(color: halo.opacity(0), location: 1)]),
-+                                     center: c, startRadius: 0, endRadius: R * 1.6))
-+
-+        // The dark glass, then the liquid: four soft blobs added together (overlaps brighten), clipped to the sphere.
-+        var inner = g
-+        inner.clip(to: sphere)
-+        inner.fill(sphere, with: .radialGradient(Gradient(colors: [Color(red: 0.09, green: 0.094, blue: 0.114), Color(red: 0.016, green: 0.016, blue: 0.024)]),
-+                                                 center: CGPoint(x: c.x, y: c.y + R * 0.25), startRadius: 0, endRadius: R * 1.05))
-+        inner.blendMode = .plusLighter
-+        for b in ClaudeOrbLiquid.blobs(phase: phase, time: time, look: look, pulse: pulse) {
-+            let col = Color(red: b.r, green: b.g, blue: b.b)
-+            let at = CGPoint(x: c.x + b.x * R, y: c.y + b.y * R)
-+            inner.fill(sphere, with: .radialGradient(Gradient(stops: [.init(color: col.opacity(b.alpha), location: 0),
-+                                                                     .init(color: col.opacity(b.alpha * 0.45), location: 0.45),
-+                                                                     .init(color: col.opacity(0), location: 1)]),
-+                                                     center: at, startRadius: 0, endRadius: b.radius * R))
-+        }
-+        inner.blendMode = .normal
-+        // It reads as a ball: an inner shadow at the edge and a soft highlight at the top.
-+        inner.fill(sphere, with: .radialGradient(Gradient(stops: [.init(color: .clear, location: 0.62), .init(color: .black.opacity(0.55), location: 1)]),
-+                                                 center: c, startRadius: 0, endRadius: R))
-+        let hi = CGPoint(x: c.x - R * 0.3, y: c.y - R * 0.55)
-+        inner.fill(sphere, with: .radialGradient(Gradient(colors: [.white.opacity(0.32), .clear]), center: hi, startRadius: 0, endRadius: R * 0.45))
-+
-+        // The thin bright glass rim.
-+        let w = max(0.75, R * 0.03)
-+        g.stroke(Path(ellipseIn: r.insetBy(dx: w / 2, dy: w / 2)),
-+                 with: .linearGradient(Gradient(stops: [.init(color: .white.opacity(0.55), location: 0), .init(color: .white.opacity(0.08), location: 0.5),
-+                                                        .init(color: .white.opacity(0.22), location: 1)]),
-+                                       startPoint: CGPoint(x: c.x, y: r.minY), endPoint: CGPoint(x: c.x, y: r.maxY)),
-+                 lineWidth: w)
-+    }
 +}
 +
-+/// The liquid's phase, shared by every orb and the panel's edge so they flow together. It only moves forward, at the
-+/// state's flow speed (ClaudeOrbLiquid.advance), so a state change never makes the liquid jump.
++/// The ribbons' phase, shared by every orb and the panel's edge so they turn together. It only moves forward, at the
++/// state's speed (ClaudeOrbShader.advance), so a state change never makes the ribbons jump.
 +@MainActor
 +final class OrbPhase {
 +    static let shared = OrbPhase()
@@ -886,7 +1084,7 @@ index 0000000..fd65df2
 +    private var last: Double?
 +
 +    func phase(at time: Double, look: ClaudeOrbLook) -> Double {
-+        if let l = last, time > l { value = ClaudeOrbLiquid.advance(value, by: time - l, look: look) }
++        if let l = last, time > l { value = ClaudeOrbShader.advance(value, by: time - l, look: look) }
 +        if last == nil || time > last! { last = time }
 +        return value
 +    }
@@ -934,7 +1132,7 @@ index 0000000..fd65df2
 +            let look = orb.look(at: time, reduceMotion: reduceMotion)
 +            let e = orb.edge(at: time, reduceMotion: reduceMotion)
 +            // The orb's own colours flowing round the border (the same phase as the orb, so they move together).
-+            let hexes = look.danger ? ClaudeOrbLiquid.errorPalette : ClaudeOrbLiquid.palette
++            let hexes = look.danger ? ClaudeOrbShader.errorPalette : ClaudeOrbShader.palette
 +            let colors = (hexes + [hexes[0]]).map { h in Color(red: Double((h >> 16) & 0xFF) / 255, green: Double((h >> 8) & 0xFF) / 255, blue: Double(h & 0xFF) / 255) }
 +            let turn = Angle.degrees(OrbPhase.shared.phase(at: time, look: look) * 90)
 +            let flow = AngularGradient(colors: colors, center: .center, angle: turn)
@@ -1040,7 +1238,7 @@ index 0000000..2e43088
 +    }
 +}
 diff --git a/mac/Muse/Views/Claude/OneClaudePanel.swift b/mac/Muse/Views/Claude/OneClaudePanel.swift
-index 040e72a..67fc7d6 100644
+index 040e72a..526c8b8 100644
 --- a/mac/Muse/Views/Claude/OneClaudePanel.swift
 +++ b/mac/Muse/Views/Claude/OneClaudePanel.swift
 @@ -15,6 +15,10 @@ struct OneClaudePanel: View {
@@ -1110,7 +1308,7 @@ index 040e72a..67fc7d6 100644
                  Menu {
                      Section("Chats") {
                          ForEach(o.chats) { c in
-@@ -79,40 +99,48 @@ struct OneClaudePanel: View {
+@@ -79,40 +99,40 @@ struct OneClaudePanel: View {
                      }
                      Button("Manage chats…") { showManage = true }
                  } label: {
@@ -1141,17 +1339,12 @@ index 040e72a..67fc7d6 100644
              }
 -            HStack(spacing: Space.s1) {
 -                Ph("map-pin", 13)
-+            HStack(spacing: 6) {
-+                Ph("eye", 13)
-                 Text("Sees: \(store.claudePage.line)").lineLimit(1).truncationMode(.middle)
-             }
+-                Text("Sees: \(store.claudePage.line)").lineLimit(1).truncationMode(.middle)
+-            }
 -            .font(t.scale.caption.font).foregroundStyle(r.ink2)
-+            .font(t.scale.micro.font).foregroundStyle(r.ink2)
-+            .padding(.horizontal, Space.s2).frame(height: 24)
-+            .background(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous).fill(r.field))
-+            .accessibilityElement(children: .combine)
-             .accessibilityLabel("Claude sees \(store.claudePage.line)")
+-            .accessibilityLabel("Claude sees \(store.claudePage.line)")
 -            modelMenu
++            ClaudeContextStrip(page: store.claudePage.line, items: store.claudeContextItems)
          }
          .padding(.horizontal, Space.s4)
          .padding(.vertical, Space.s3)
@@ -1178,7 +1371,7 @@ index 040e72a..67fc7d6 100644
      // MARK: The chat's Claude model (step 6b): speed and cost in plain words, per chat, with your own default
  
      @ViewBuilder private var modelMenu: some View {
-@@ -138,8 +166,7 @@ struct OneClaudePanel: View {
+@@ -138,8 +158,7 @@ struct OneClaudePanel: View {
                  // A Menu label drops custom image sizing (owner bug, build 530: a ~300 pt chip icon pushed the header into the
                  // editor), so no Phosphor image here: text and the system chevron, sized by the font, as ChatSessionsBar does.
                  HStack(spacing: Space.s1) {
@@ -1188,7 +1381,7 @@ index 040e72a..67fc7d6 100644
                      Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                  }
                  .font(t.scale.caption.font).foregroundStyle(r.ink2)
-@@ -147,8 +174,7 @@ struct OneClaudePanel: View {
+@@ -147,8 +166,7 @@ struct OneClaudePanel: View {
              }
              .menuStyle(.borderlessButton)
              .menuIndicator(.hidden)
@@ -1198,7 +1391,7 @@ index 040e72a..67fc7d6 100644
              .background { if SnapshotRunner.probing { ComposerBarFrame(key: "claude model line") } }
              .help(cur.info.map { "\($0.good). \($0.cost). Faster models use less of your Claude plan." } ?? "Pick the Claude model for this chat")
              .accessibilityLabel("Claude model: \(cur.info?.name ?? "default"). Change it")
-@@ -156,7 +182,7 @@ struct OneClaudePanel: View {
+@@ -156,7 +174,7 @@ struct OneClaudePanel: View {
              // The list isn't here yet (or the server is older): the line still shows, and tapping it tries again.
              Button { Task { await store.loadClaudeModels() } } label: {
                  HStack(spacing: Space.s1) {
@@ -1496,6 +1689,124 @@ index 0000000..47fbaf8
 +    }
 +    public mutating func stop() { open.removeAll(); steps.removeAll(); progress = nil }
 +}
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift
+new file mode 100644
+index 0000000..ed80569
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeContext.swift
+@@ -0,0 +1,112 @@
++import Foundation
++
++// The Claude panel's live context strip (owner, 2026-11-12: "the 'Claude sees' feature is basic"): under the header, a row
++// of small thumbnails, each with a tiny label, of what Claude can see on this page right now: the source clip, her, the
++// outfit, the background (a photo, or the words of a described one), references and frames, the Directed guide, the
++// picked model. Read from the SAME `screen` the composer syncs to the server for Claude (SuiteScreen.json → suite/screen.ts),
++// so the strip and Claude never disagree. Pure: the app passes lookups for names and pictures.
++
++public struct ClaudeContextItem: Hashable, Sendable, Identifiable {
++    public enum Kind: String, Sendable { case clip, character, outfit, background, frame, reference, guide, audio, model, product, face }
++    public var id: String
++    public var kind: Kind
++    /// The tiny label under the thumbnail ("Clip", "Her", "Outfit", "Ref 1").
++    public var label: String
++    /// What it is, for the tooltip and VoiceOver ("Beach walk.mp4", "Ava", "a grey hoodie").
++    public var detail: String?
++    public var image: ImageRef?
++    /// A clip of the studio (the app shows its poster).
++    public var clipId: String?
++    public var isVideo: Bool
++    /// A background described in words (no picture): the words.
++    public var words: String?
++}
++
++public enum ClaudeContext {
++    /// Names and pictures the strip needs, looked up by the app.
++    public struct Lookups {
++        public var character: (String) -> (name: String, image: ImageRef?)?
++        public var outfit: (String) -> (name: String, image: ImageRef?)?
++        public var clipPoster: (String) -> ImageRef?
++        public var modelLabel: (String) -> String?
++        public init(character: @escaping (String) -> (name: String, image: ImageRef?)? = { _ in nil },
++                    outfit: @escaping (String) -> (name: String, image: ImageRef?)? = { _ in nil },
++                    clipPoster: @escaping (String) -> ImageRef? = { _ in nil },
++                    modelLabel: @escaping (String) -> String? = { _ in nil }) {
++            self.character = character; self.outfit = outfit; self.clipPoster = clipPoster; self.modelLabel = modelLabel
++        }
++    }
++
++    /// The strip's items for a `screen` (SuiteScreen.json), in the order Claude reads them: the source, her, the outfit,
++    /// the background, frames and references, the guide, sound, then the model.
++    public static func items(screen: JSONValue, lookups: Lookups = Lookups()) -> [ClaudeContextItem] {
++        guard case .object(let s) = screen else { return [] }
++        let request = obj(s["request"]), settings = obj(s["settings"])
++        var out: [ClaudeContextItem] = []
++        var refs = 0, frames = 0
++
++        let inputs: [[String: JSONValue]] = { if case .array(let a)? = s["inputs"] { return a.compactMap(obj) }; return [] }()
++        // Sources first (clip, extend's video), then her and the outfit, then everything else on screen.
++        let sources = inputs.filter { isSource(str($0["slot"])) }
++        for i in sources {
++            let clip = str(i["clipId"])
++            out.append(ClaudeContextItem(id: "in:\(str(i["slot"]) ?? "")", kind: .clip, label: "Clip", detail: str(i["label"]),
++                                         image: clip.flatMap(lookups.clipPoster) ?? imageOf(i, video: true), clipId: clip, isVideo: true, words: nil))
++        }
++        if let m = str(request["modelId"]) {
++            let c = lookups.character(m)
++            out.append(ClaudeContextItem(id: "character:\(m)", kind: .character, label: "Her", detail: c?.name, image: c?.image, clipId: nil, isVideo: false, words: nil))
++        }
++        if let o = str(request["outfitId"]) {
++            let x = lookups.outfit(o)
++            out.append(ClaudeContextItem(id: "outfit:\(o)", kind: .outfit, label: "Outfit", detail: x?.name, image: x?.image, clipId: nil, isVideo: false, words: nil))
++        }
++        // New Swap's outfit in words.
++        if let w = str(obj(obj(request["remix"])["outfit"])["words"]) {
++            out.append(ClaudeContextItem(id: "outfit:words", kind: .outfit, label: "Outfit", detail: w, image: nil, clipId: nil, isVideo: false, words: w))
++        }
++        // The background: a picture on screen, or the words of a described one.
++        let bgWords = str(obj(obj(request["remix"])["background"])["words"])
++            ?? ((str(request["background"]) ?? str(settings["background"])) == "describe" ? (str(request["direction"]) ?? str(request["prompt"])) : nil)
++        if let w = bgWords, !inputs.contains(where: { str($0["slot"])?.hasSuffix("background") == true }) {
++            out.append(ClaudeContextItem(id: "background:words", kind: .background, label: "Background", detail: w, image: nil, clipId: nil, isVideo: false, words: w))
++        }
++        for i in inputs where !isSource(str(i["slot"])) {
++            let slot = str(i["slot"]) ?? ""
++            let kind = str(i["kind"]) ?? "image"
++            let label: String, k: ClaudeContextItem.Kind
++            if slot.hasSuffix("background") { label = "Background"; k = .background }
++            else if slot.hasSuffix(".outfit") { label = "Product"; k = .product }
++            else if slot.hasSuffix(".face") { label = "Face"; k = .face }
++            else if slot == "guide" { label = "Guide"; k = .guide }
++            else if slot == "start" { label = "Start"; k = .frame }
++            else if slot == "end" { label = "End"; k = .frame }
++            else if slot.hasPrefix("middle") { frames += 1; label = "Frame \(frames)"; k = .frame }
++            else if kind == "audio" { label = "Sound"; k = .audio }
++            else { refs += 1; label = str(i["role"]).map { cap($0) } ?? "Ref \(refs)"; k = .reference }
++            out.append(ClaudeContextItem(id: "in:\(slot)", kind: k, label: label, detail: str(i["label"]), image: imageOf(i, video: kind == "video"),
++                                         clipId: str(i["clipId"]), isVideo: kind == "video", words: nil))
++        }
++        // The picked model, by the label the server gives it (settings.modelLabel, the Model pill's words).
++        if let e = str(request["engineModel"]) ?? str(settings["modelLabel"]) {
++            let label = str(settings["modelLabel"]) ?? lookups.modelLabel(e) ?? e
++            out.append(ClaudeContextItem(id: "model:\(e)", kind: .model, label: "Model", detail: label, image: nil, clipId: nil, isVideo: false, words: nil))
++        }
++        return out
++    }
++
++    private static func isSource(_ slot: String?) -> Bool {
++        guard let s = slot else { return false }
++        return s.hasSuffix(".clip") || s == "extend.video"
++    }
++    private static func obj(_ v: JSONValue?) -> [String: JSONValue] { if case .object(let o)? = v { return o }; return [:] }
++    private static func str(_ v: JSONValue?) -> String? {
++        if case .string(let s)? = v { let t = s.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t }
++        return nil
++    }
++    private static func imageOf(_ i: [String: JSONValue], video: Bool) -> ImageRef? {
++        guard !video, let u = str(i["url"]) else { return nil }
++        return ImageRef(url: u)
++    }
++    private static func cap(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
++}
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
 index 52a35ca..11b5d06 100644
 --- a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeLiveEvents.swift
@@ -1542,14 +1853,14 @@ index 52a35ca..11b5d06 100644
      }
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift
 new file mode 100644
-index 0000000..79c923a
+index 0000000..57b466b
 --- /dev/null
 +++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrb.swift
 @@ -0,0 +1,161 @@
 +import Foundation
 +
 +// Claude's orb (owner, 2026-11-12; plans/design/claude-panel/orb-states-*.png): MUSE's own design, a small dark glass
-+// sphere with soft multicolour light flowing inside it (ClaudeOrbLiquid). It sits in the panel header, beside the reply being written,
++// glass ball with luminous 3D smoke inside (ClaudeOrbShader, ClaudeOrb.metal). It sits in the panel header, beside the reply being written,
 +// in the activity strip, and floats over the app while Claude operates MUSE with the panel closed. The panel's edge
 +// glows in step with it. ONE state machine, fed only by real events (the chat stream, ui-control calls, cards, jobs),
 +// never by a timer of its own; the views read `look` and `pulse(at:)` and draw. Pure, so Android can port it as is.
@@ -1660,12 +1971,12 @@ index 0000000..79c923a
 +    public static func look(_ s: ClaudeOrbState, reduceMotion: Bool = false, typing: Bool = false) -> ClaudeOrbLook {
 +        var l: ClaudeOrbLook
 +        switch s {
-+        // swirl: the liquid's flow speed (phase per second); band: how bright the blobs are; glow: the halo.
-+        case .idle: l = ClaudeOrbLook(swirl: 0.12, band: 0.45, glow: 0.10, breath: 6, breathDepth: 0.35, sweep: false, flashes: false, danger: false, edge: 0.12)
-+        case .thinking: l = ClaudeOrbLook(swirl: 0.65, band: 0.85, glow: 0.28, breath: 0, breathDepth: 0, sweep: false, flashes: true, danger: false, edge: 0.30)
-+        case .operating: l = ClaudeOrbLook(swirl: 0.45, band: 0.80, glow: 0.35, breath: 0, breathDepth: 0, sweep: true, flashes: true, danger: false, edge: 0.40)
-+        case .waiting: l = ClaudeOrbLook(swirl: 0.10, band: 0.95, glow: 0.45, breath: 3.2, breathDepth: 0.20, sweep: false, flashes: false, danger: false, edge: 0.45)
-+        case .error: l = ClaudeOrbLook(swirl: 0.06, band: 0.70, glow: 0.30, breath: 0, breathDepth: 0, sweep: false, flashes: false, danger: true, edge: 0.35)
++        // swirl: how fast the smoke's flow evolves (phase per second); band: its emission; glow: the halo (edge).
++        case .idle: l = ClaudeOrbLook(swirl: 1.05, band: 0.85, glow: 0.10, breath: 6, breathDepth: 0.35, sweep: false, flashes: false, danger: false, edge: 0.12)
++        case .thinking: l = ClaudeOrbLook(swirl: 2.7, band: 1.1, glow: 0.28, breath: 0, breathDepth: 0, sweep: false, flashes: true, danger: false, edge: 0.30)
++        case .operating: l = ClaudeOrbLook(swirl: 2.4, band: 1.0, glow: 0.35, breath: 0, breathDepth: 0, sweep: true, flashes: true, danger: false, edge: 0.40)
++        case .waiting: l = ClaudeOrbLook(swirl: 0.75, band: 1.15, glow: 0.45, breath: 3.2, breathDepth: 0.20, sweep: false, flashes: false, danger: false, edge: 0.45)
++        case .error: l = ClaudeOrbLook(swirl: 0.45, band: 0.9, glow: 0.30, breath: 0, breathDepth: 0, sweep: false, flashes: false, danger: true, edge: 0.35)
 +        }
 +        if reduceMotion { l.swirl = 0; l.breath = 0; l.breathDepth = 0; l.sweep = false; l.flashes = false }
 +        // While the person types, the edge stays calm: at most the idle glow, never pulsing.
@@ -1707,78 +2018,63 @@ index 0000000..79c923a
 +        return s == .idle || s == .error ? 12 : 30
 +    }
 +}
-diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbLiquid.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbLiquid.swift
+diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbShader.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbShader.swift
 new file mode 100644
-index 0000000..30119e0
+index 0000000..5698157
 --- /dev/null
-+++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbLiquid.swift
-@@ -0,0 +1,67 @@
++++ b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeOrbShader.swift
+@@ -0,0 +1,52 @@
 +import Foundation
 +
-+// The orb's liquid (owner, 2026-11-12, second pass): inside the dark glass, four soft blobs of coloured light (magenta,
-+// violet, blue, a touch of cyan-green; the same in every theme) drift, swell and melt into each other, added together so
-+// overlaps brighten. Motion is value noise over a phase that only moves forward, so it never loops or circles. Pure maths:
-+// the Mac draws these blobs with Canvas, the review preview (design/direction/orb_preview.py) runs the same numbers in
-+// JavaScript, and Android can port it as is. The state machine (ClaudeOrb) decides how fast and how bright.
++// The orb's shader inputs (owner, 2026-11-12: Option C2 "alive", luminous 3D smoke in a living glass ball; the shader is
++// mac/Muse/Views/Claude/ClaudeOrb.metal, previewed by design/direction/orb_alive.py with the same numbers). ClaudeOrb
++// decides the state; this turns a state into the shader's uniforms. Pure, so Android can port it with the shader.
 +
-+public struct ClaudeOrbBlob: Hashable, Sendable {
-+    /// Centre, relative to the sphere's centre, in sphere radii (−1…1).
-+    public var x: Double
-+    public var y: Double
-+    /// Radius in sphere radii.
-+    public var radius: Double
-+    /// 0…1, multiplied into the colour.
-+    public var alpha: Double
-+    /// sRGB 0…1.
-+    public var r: Double, g: Double, b: Double
++public struct ClaudeOrbUniforms: Hashable, Sendable {
++    /// The smoke's emission.
++    public var bright: Double
++    /// 0: drifting plumes; >0: a current streaming across (operating), and the ball leans into it.
++    public var current: Double
++    /// 0…1: the iridescent smoke → orange and red (error).
++    public var danger: Double
++    /// 0…1: the last chunk or action (a bright plume rising, a small pop of the glass).
++    public var pulse: Double
++    /// 0…1: the breath (waiting).
++    public var breath: Double
++    /// The silhouette's soft-body wobble (a fraction of the radius).
++    public var wobble: Double
++    /// The glass's breathing scale above 1 (a pop per chunk or action).
++    public var pop: Double
 +}
 +
-+public enum ClaudeOrbLiquid {
-+    /// Magenta, violet, blue, cyan-green (sRGB hex), and the error palette (red and orange).
++public enum ClaudeOrbShader {
++    /// The colours the smoke is made of (magenta, violet, blue, cyan) and the error ones: the panel's edge uses them too.
 +    public static let palette: [UInt32] = [0xFF3DA8, 0x8E5BFF, 0x3B82FF, 0x2FE0C0]
 +    public static let errorPalette: [UInt32] = [0xFF4D3D, 0xFF8A2B, 0xD9302B, 0xFFB347]
 +
-+    /// The phase moves at the state's flow speed (`look.swirl`): call each frame with the time since the last.
++    /// The ball fills 1/scale of its frame; the rest is room for the wobble and the pop.
++    public static let scale = 1.1
++
++    /// The phase moves at the state's flow speed (`look.swirl`) and never jumps (a stalled frame counts at most 0.25 s).
 +    public static func advance(_ phase: Double, by dt: Double, look: ClaudeOrbLook) -> Double {
-+        phase + max(0, min(dt, 0.25)) * max(0.02, look.swirl)
++        phase + max(0, min(dt, 0.25)) * look.swirl
 +    }
 +
-+    /// The four blobs at `phase`. `pulse` (0…1, the last chunk/action) swells them; `time` drives the operating sweep.
-+    public static func blobs(phase: Double, time: Double, look: ClaudeOrbLook, pulse: Double) -> [ClaudeOrbBlob] {
-+        let colors = look.danger ? errorPalette : palette
-+        let sweepAt = (time * 0.45).truncatingRemainder(dividingBy: 1) * 2.6 - 1.3
-+        return (0..<4).map { i in
-+            let s = Double(i) * 17.0
-+            var x = 0.6 * noise(s + 1, phase * 0.9)
-+            var y = 0.6 * noise(s + 5, phase * 0.75)
-+            if look.sweep {
-+                // Operating: the blobs stream across the glass, left to right, in a loose line.
-+                let lane = (Double(i) - 1.5) / 1.5
-+                x = mix(x, sweepAt + 0.35 * lane, 0.65)
-+                y = mix(y, 0.25 * lane, 0.4)
-+            }
-+            let swell = 0.18 * pulse
-+            let radius = 0.62 + 0.18 * noise(s + 9, phase * 0.6) + swell
-+            let alpha = min(0.9, look.band * (0.6 + 0.25 * noise(s + 13, phase * 0.5)) + 0.18 * pulse)
-+            let c = colors[i]
-+            return ClaudeOrbBlob(x: x, y: y, radius: radius, alpha: max(0, alpha),
-+                                 r: Double((c >> 16) & 0xFF) / 255, g: Double((c >> 8) & 0xFF) / 255, b: Double(c & 0xFF) / 255)
++    /// The uniforms for a state at `time`, with the pulse (`ClaudeOrb.pulse(at:)`). Reduce Motion: the shape stays still.
++    public static func uniforms(_ s: ClaudeOrbState, look: ClaudeOrbLook, time: Double, pulse: Double, reduceMotion: Bool = false) -> ClaudeOrbUniforms {
++        let breath = look.breath > 0 ? 0.5 - 0.5 * cos(2 * .pi * time / look.breath) : 0
++        var u: ClaudeOrbUniforms
++        switch s {
++        case .idle: u = ClaudeOrbUniforms(bright: 0.85, current: 0, danger: 0, pulse: 0, breath: breath, wobble: 0.02, pop: 0)
++        case .thinking: u = ClaudeOrbUniforms(bright: 1.1, current: 0, danger: 0, pulse: pulse, breath: 0, wobble: 0.05, pop: 0)
++        case .operating: u = ClaudeOrbUniforms(bright: 1.0, current: 1.6, danger: 0, pulse: pulse, breath: 0, wobble: 0.045, pop: 0)
++        case .waiting: u = ClaudeOrbUniforms(bright: 1.15, current: 0, danger: 0, pulse: 0, breath: breath, wobble: 0.025, pop: 0)
++        case .error: u = ClaudeOrbUniforms(bright: 0.9, current: 0, danger: 1, pulse: 0, breath: 0, wobble: 0.015, pop: 0)
 +        }
++        u.pop = 0.006 * sin(time * 0.7) + 0.035 * u.pulse + 0.02 * u.breath
++        if reduceMotion { u.wobble = 0; u.pop = 0; u.pulse = 0; u.breath = 0 }
++        return u
 +    }
-+
-+    /// Smooth 1-D value noise in −1…1 (hashed lattice values, smoothstep between them): drifts without repeating.
-+    public static func noise(_ seed: Double, _ x: Double) -> Double {
-+        let i = floor(x), f = x - i
-+        let u = f * f * (3 - 2 * f)
-+        return mix(lattice(seed, i), lattice(seed, i + 1), u)
-+    }
-+
-+    static func lattice(_ seed: Double, _ i: Double) -> Double {
-+        let v = sin(i * 127.1 + seed * 311.7) * 43758.5453
-+        return (v - floor(v)) * 2 - 1
-+    }
-+
-+    static func mix(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
 +}
 diff --git a/mac/MuseCore/Sources/MuseCore/Claude/ClaudeTranscript.swift b/mac/MuseCore/Sources/MuseCore/Claude/ClaudeTranscript.swift
 index dbfcf1a..85941fc 100644
@@ -1870,10 +2166,10 @@ index e457bb6..05f1617 100644
              let all = shown.joined(separator: "\n")
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
 new file mode 100644
-index 0000000..288f3f3
+index 0000000..364cf8f
 --- /dev/null
 +++ b/mac/MuseCore/Tests/MuseCoreTests/ClaudeCardsTests.swift
-@@ -0,0 +1,204 @@
+@@ -0,0 +1,227 @@
 +import XCTest
 +@testable import MuseCore
 +
@@ -2046,36 +2342,59 @@ index 0000000..288f3f3
 +    }
 +}
 +
-+final class ClaudeOrbLiquidTests: XCTestCase {
-+    func testBlobsDriftWithoutLoopingAndStayInTheGlass() {
-+        let look = ClaudeOrb.look(.thinking)
-+        var seen: [Double] = []
-+        var phase = 0.0
-+        for k in 0..<600 {
-+            phase = ClaudeOrbLiquid.advance(phase, by: 1.0 / 30, look: look)
-+            let b = ClaudeOrbLiquid.blobs(phase: phase, time: Double(k) / 30, look: look, pulse: 0)
-+            XCTAssertEqual(b.count, 4)
-+            for x in b { XCTAssertLessThanOrEqual(abs(x.x), 0.61); XCTAssertLessThanOrEqual(abs(x.y), 0.61); XCTAssertGreaterThan(x.radius, 0.4) }
-+            seen.append(b[0].x)
++final class ClaudeOrbShaderTests: XCTestCase {
++    func testStatesBecomeTheShadersSmokeAndGlass() {
++        func u(_ s: ClaudeOrbState, pulse: Double = 0, rm: Bool = false) -> ClaudeOrbUniforms {
++            ClaudeOrbShader.uniforms(s, look: ClaudeOrb.look(s), time: 1, pulse: pulse, reduceMotion: rm)
 +        }
-+        // Moves smoothly (no jumps between frames) and does not come back to the same path (no loop).
-+        for (a, b) in zip(seen, seen.dropFirst()) { XCTAssertLessThan(abs(a - b), 0.05) }
-+        XCTAssertNotEqual(Array(seen[0..<60]), Array(seen[300..<360]))
-+    }
-+
-+    func testStatesChangeTheLiquid() {
-+        let quiet = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 0)
-+        let chunk = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 1)
-+        for (a, b) in zip(quiet, chunk) { XCTAssertGreaterThan(b.radius, a.radius) } // a streamed chunk swells them
-+        let err = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.error), pulse: 0)
-+        XCTAssertTrue(err.allSatisfy { $0.r > $0.b }) // red and orange
++        XCTAssertLessThan(u(.idle).bright, u(.thinking).bright)
++        XCTAssertGreaterThan(u(.operating).current, 0) // a current streams across
++        XCTAssertEqual(u(.thinking).current, 0)
++        XCTAssertEqual(u(.error).danger, 1)
++        XCTAssertEqual(u(.thinking, pulse: 0.7).pulse, 0.7) // a chunk: a plume rises
++        XCTAssertEqual(u(.idle, pulse: 0.7).pulse, 0) // idle never flashes
++        XCTAssertGreaterThan(u(.thinking, pulse: 1).pop, u(.thinking).pop) // the glass pops per chunk
++        XCTAssertGreaterThan(u(.thinking).wobble, u(.idle).wobble)
++        for s in ClaudeOrbState.allCases { XCTAssertLessThanOrEqual(u(s).wobble, 0.05); XCTAssertLessThanOrEqual(abs(u(s, pulse: 1).pop), 0.06) } // subtle, never rubbery
++        let still = u(.thinking, pulse: 1, rm: true)
++        XCTAssertEqual(still.wobble, 0); XCTAssertEqual(still.pop, 0); XCTAssertEqual(still.pulse, 0) // Reduce Motion: the shape is still
 +        XCTAssertGreaterThan(ClaudeOrb.look(.thinking).swirl, ClaudeOrb.look(.idle).swirl)
 +        XCTAssertLessThan(ClaudeOrb.look(.error).swirl, ClaudeOrb.look(.idle).swirl) // error slows down
-+        // Operating: the blobs stream one way across the glass as time moves.
-+        let a = ClaudeOrbLiquid.blobs(phase: 1, time: 0.2, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
-+        let b = ClaudeOrbLiquid.blobs(phase: 1, time: 1.0, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
-+        XCTAssertGreaterThan(b, a)
-+        XCTAssertEqual(ClaudeOrbLiquid.advance(5, by: 1, look: ClaudeOrb.look(.idle)), 5 + 0.25 * 0.12, accuracy: 1e-9) // a stall never jumps
++    }
++
++    func testPhaseOnlyMovesForwardAndNeverJumps() {
++        let look = ClaudeOrb.look(.thinking)
++        XCTAssertEqual(ClaudeOrbShader.advance(5, by: 1, look: look), 5 + 0.25 * look.swirl, accuracy: 1e-9) // a stall
++        XCTAssertEqual(ClaudeOrbShader.advance(5, by: -1, look: look), 5)
++        XCTAssertEqual(ClaudeOrbShader.advance(5, by: 0.1, look: ClaudeOrb.look(.idle, reduceMotion: true)), 5) // Reduce Motion: still
++    }
++}
++
++final class ClaudeContextTests: XCTestCase {
++    func testTheStripReadsTheScreenClaudeGets() {
++        // The same JSON the composer syncs (SuiteScreen.json): a New Swap with a clip, a product photo and a described background.
++        let remix = ShotRequest.remix(clipId: "clip_1", draft: {
++            var d = RemixDraft(); d.backgroundOn = true; d.backgroundMode = .describe; d.backgroundWords = "a beach at dusk"; return d
++        }())
++        var r = remix; r.modelId = "m_1"; r.outfitId = "of_1"; r.engineModel = "seedance-2"
++        let screen = SuiteScreen.json(tool: "remix", request: r, inputs: [
++            SuiteScreen.Input(slot: "remix.clip", kind: "video", label: "Walk.mp4", clipId: "clip_1", seconds: 12),
++            SuiteScreen.Input(slot: "remix.outfit", kind: "image", label: "Hoodie photo", url: "/uploads/p.jpg"),
++            SuiteScreen.Input(slot: "reference 1", kind: "image", label: "Look", role: "style", url: "/uploads/r.jpg"),
++            SuiteScreen.Input(slot: "guide", kind: "video", label: "Blender guide", role: "blocking", key: "g.mp4"),
++        ], settings: ["modelLabel": .string("Seedance 2.0 · Higgsfield")], at: nil)
++        let items = ClaudeContext.items(screen: screen, lookups: .init(
++            character: { $0 == "m_1" ? ("Ava", ImageRef(url: "/uploads/face.jpg")) : nil },
++            outfit: { $0 == "of_1" ? ("Hoodie", nil) : nil },
++            clipPoster: { $0 == "clip_1" ? ImageRef(url: "/uploads/poster.jpg") : nil },
++            modelLabel: { _ in "not used: the screen names it" }))
++        XCTAssertEqual(items.map(\.label), ["Clip", "Her", "Outfit", "Background", "Product", "Style", "Guide", "Model"])
++        XCTAssertEqual(items[0].image?.url, "/uploads/poster.jpg")
++        XCTAssertEqual(items[1].detail, "Ava")
++        XCTAssertEqual(items[3].words, "a beach at dusk")
++        XCTAssertEqual(items.last?.detail, "Seedance 2.0 · Higgsfield") // the server's label, never built in the app
++        XCTAssertEqual(Set(items.map(\.id)).count, items.count) // stable, unique ids (the strip animates by id)
++        XCTAssertTrue(ClaudeContext.items(screen: .null).isEmpty)
 +    }
 +}
 diff --git a/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ClaudeTests.swift

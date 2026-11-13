@@ -167,7 +167,11 @@ describe('edit sessions API and Claude tools', () => {
     expect(meta.width).toBe(120);
     if (hasFfmpeg) expect(approx.structuredContent.note).not.toMatch(/could not be read/);
     // An app comes online and answers the frame request.
-    await owner.req('POST', `/v1/edit-sessions/${sid}/presence`, { device: 'mac-1', label: 'MacBook', platform: 'mac', canRender: true });
+    await owner.req('POST', `/v1/edit-sessions/${sid}/presence`, { device: 'mac-1', label: 'MacBook', platform: 'mac', canRender: true, preview: { view: 'tiktok', safeArea: true } });
+    // Claude sees the view the person previews in (plans/edit-platform-preview.md).
+    const seen = await tool('get_edit').run(env(), { sessionId: sid, full: false }) as any;
+    expect(seen.preview).toMatchObject({ view: 'tiktok', safeArea: true, unsafe: [] });
+    expect(seen.online[0].preview).toEqual({ view: 'tiktok', safeArea: true });
     const pending = tool('get_frame').run(env(), { sessionId: sid, t: 2 });
     const req = await until(() => events.find(e => e.type === 'edit' && e.op === 'frame_request' && e.sessionId === sid));
     const png = await sharp({ create: { width: 64, height: 114, channels: 3, background: '#ff0000' } }).png().toBuffer();

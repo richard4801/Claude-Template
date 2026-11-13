@@ -2,6 +2,7 @@
 // EditProject v2 per take, shared by the owner's apps and Claude. Every change is a JSON Patch with its inverse, so
 // every change (Claude's too) is undoable; changes reach the apps as `edit` events. Owner only.
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
+import { newSafeIssues, previewOf, type EditPreview } from './safeArea.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
@@ -25,7 +26,9 @@ type Session = typeof editSessions.$inferSelect;
 type OpRow = typeof editOps.$inferSelect;
 export const SESSION_LIMITS = { historyKept: 500, historyShown: 60, presenceSec: 45, frameWaitMs: 12_000, claudeOpsPerMin: 120 } as const;
 
-export type Presence = { device: string; label: string; platform: 'android' | 'mac' | 'other'; canRender: boolean; at: number };
+export type Presence = { device: string; label: string; platform: 'android' | 'mac' | 'other'; canRender: boolean; at: number;
+  /** Edit's preview on that app: the view (Clean, TikTok …) and the red safe-area box (plans/edit-platform-preview.md). */
+  preview?: EditPreview };
 type Waiter = { resolve: (v: { uploadId: string } | null) => void; timer: NodeJS.Timeout };
 export type AppRequest = { id: string; kind: 'save' | 'export'; name?: string; preset?: Record<string, unknown>; device: string; status: 'sent' | 'done' | 'failed'; versionId?: string; error?: string; at: number };
 export type Pending = { id: string; kind: string; label: string; estimateUsd: number; args: Record<string, unknown>; status: 'waiting' | 'approved' | 'declined' | 'running' | 'done' | 'failed'; jobId?: string; createdAt: number };
@@ -63,7 +66,7 @@ export class EditSessions {
     return { id: s.id, takeId: s.takeId, baseVersionId: s.baseVersionId ?? undefined, revision: s.revision, project: s.project as M.EditProject,
       durationSec: M.durationSec(s.project as M.EditProject), status: s.status, updatedBy: s.updatedBy, updatedAt: s.updatedAt,
       pending: (s.pending as Pending[]).filter(p => p.status === 'waiting' || p.status === 'running'),
-      online: this.online(s.id).map(p => ({ device: p.device, label: p.label, platform: p.platform, canRender: p.canRender })),
+      online: this.online(s.id).map(p => ({ device: p.device, label: p.label, platform: p.platform, canRender: p.canRender, ...(p.preview ? { preview: p.preview } : {}) })),
       requests: (this.requests.get(s.id) ?? []).slice(-10), ...(hist ? { history: hist } : {}) };
   }
   private emit(s: Session, ev: Record<string, unknown>) {
@@ -237,7 +240,9 @@ export class EditSessions {
     await (await import('../recreate/playbook.js')).guardClaudeChange(this.ctx, u, s.project as M.EditProject, project);
     const r = await this.commit(s, project, { author: 'claude', kind: 'edit', label: b.label ?? labels.join(' · '), ...(b.meta ? { meta: b.meta } : {}) }); // label: a tool's own name for the change (workstream 1)
     const notice = (r.entry?.meta as { notice?: string } | null | undefined)?.notice;
+    const safe = newSafeIssues(s.project as M.EditProject, project, this.preview(id));
     return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project),
+      ...(safe ? { safeAreaWarnings: safe } : {}),
       ...(notice && r.entry ? { notice, undoEntryId: r.entry.id, tell: 'Say this to the person in one plain line (their app shows it with Undo; undo_edit with this entryId reverts exactly it).' } : {}) };
   }
   private limit(id: string) {
@@ -277,15 +282,17 @@ export class EditSessions {
   }
 
   // ------------------------------------------------------------------ apps online: presence, frames, save/export
-  touch(u: AuthUser, id: string, b: { device?: unknown; label?: unknown; platform?: unknown; canRender?: unknown }) {
+  touch(u: AuthUser, id: string, b: { device?: unknown; label?: unknown; platform?: unknown; canRender?: unknown; preview?: unknown }) {
     this.owner(u);
     if (typeof b.device !== 'string' || !b.device) throw badRequest('device: required');
     const m = this.presence.get(id) ?? new Map<string, Presence>();
     m.set(b.device, { device: b.device.slice(0, 40), label: typeof b.label === 'string' ? b.label.slice(0, 60) : b.device, platform: b.platform === 'android' || b.platform === 'mac' ? b.platform : 'other',
-      canRender: b.canRender !== false, at: Date.now() });
+      canRender: b.canRender !== false, at: Date.now(), ...(previewOf(b.preview) ? { preview: previewOf(b.preview)! } : {}) });
     this.presence.set(id, m);
     return { ok: true, online: this.online(id).length };
   }
+  /** The preview of the app the person used last (the freshest presence that sent one). */
+  preview(id: string): EditPreview | null { return this.online(id).filter(p => p.preview).sort((a, b) => b.at - a.at)[0]?.preview ?? null; }
   leave(id: string, device: string) { this.presence.get(id)?.delete(device); }
   renderer(id: string) { return this.online(id).filter(p => p.canRender).sort((a, b) => (a.platform === 'mac' ? -1 : 0) - (b.platform === 'mac' ? -1 : 0) || b.at - a.at)[0] ?? null; }
 

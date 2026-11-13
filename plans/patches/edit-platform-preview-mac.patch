@@ -1,0 +1,1848 @@
+diff --git a/mac/Muse/App/Edit/EditSuiteLive.swift b/mac/Muse/App/Edit/EditSuiteLive.swift
+index 130937f7..e9acc864 100644
+--- a/mac/Muse/App/Edit/EditSuiteLive.swift
++++ b/mac/Muse/App/Edit/EditSuiteLive.swift
+@@ -81,7 +81,7 @@ extension EditSuiteSession {
+         let presence = Task { @MainActor [weak self] in
+             while !Task.isCancelled {
+                 guard let self else { return }
+-                try? await sync.announce(label: Self.hostLabel, platform: "mac", canRender: true)
++                try? await sync.announce(label: Self.hostLabel, platform: "mac", canRender: true, preview: self.state.preview)
+                 try? await Task.sleep(nanoseconds: Self.presenceEvery)
+             }
+         }
+diff --git a/mac/Muse/App/Edit/EditSuitePlatformPreview.swift b/mac/Muse/App/Edit/EditSuitePlatformPreview.swift
+new file mode 100644
+index 00000000..ec174eb5
+--- /dev/null
++++ b/mac/Muse/App/Edit/EditSuitePlatformPreview.swift
+@@ -0,0 +1,68 @@
++import Foundation
++import MuseCore
++
++// Edit's platform preview (owner decision 2026-11-12, plans/edit-platform-preview.md): the view picker (Clean or an
++// app's chrome), the red safe-area box, the choice remembered per project, Claude told the view with the presence ping,
++// and the warning line with "Move into the safe area".
++extension EditSuiteSession {
++    private static let previewPrefsKey = "edit.preview"
++
++    /// The project's key for the remembered choice: its source take (a blank project shares one key until it is saved).
++    var previewKey: String { sourceTakeId }
++
++    static func rememberedPreview(for key: String) -> EditPreview {
++        // Review mode starts every project in Clean, so the review shots don't depend on the runner's last choice.
++        if SnapshotRunner.probing { return EditPreview() }
++        return readPrefs().choice(for: key)
++    }
++
++    private static func readPrefs() -> EditPreviewPrefs {
++        guard let d = UserDefaults.standard.data(forKey: previewPrefsKey) else { return EditPreviewPrefs() }
++        return (try? JSONDecoder().decode(EditPreviewPrefs.self, from: d)) ?? EditPreviewPrefs()
++    }
++
++    /// The view or the switch changed: shown at once, remembered for this project (and as this Mac's last choice), and
++    /// sent to the server so Claude knows what the person sees.
++    func setPreview(_ p: EditPreview, remember: Bool = true) {
++        let next = p.resolved(width: project.canvas.width, height: project.canvas.height)
++        guard next != state.preview else { return }
++        view { $0.preview = next }
++        if remember && !SnapshotRunner.probing {
++            var prefs = Self.readPrefs()
++            prefs.set(next, for: previewKey)
++            if let d = try? JSONEncoder().encode(prefs) { UserDefaults.standard.set(d, forKey: Self.previewPrefsKey) }
++        }
++        if let sync = live {
++            Task { try? await sync.announce(label: Self.hostLabel, platform: "mac", canRender: true, preview: next) }
++        }
++    }
++
++    func loadPreviewLayouts() async { previewLayouts = await api.previewLayouts() }
++
++    /// The view this canvas shows (a TikTok choice on a 16:9 project shows Clean).
++    var shownPreview: EditPreview { state.preview.resolved(width: project.canvas.width, height: project.canvas.height) }
++    var previewIsLandscape: Bool { EditPreview.isLandscape(width: project.canvas.width, height: project.canvas.height) }
++
++    /// The red box, when the switch is on.
++    var safeZone: SafeZone? { EditSafeBox.zone(state.preview, width: project.canvas.width, height: project.canvas.height, layouts: previewLayouts) }
++
++    /// Captions and text outside the red box (none while the switch is off).
++    var safeIssues: [SafeAreaIssue] {
++        guard let z = safeZone else { return [] }
++        return EditSafeCheck.issues(project, zone: z)
++    }
++
++    /// The warning line under the preview, or nil.
++    var safeWarning: String? {
++        EditSafeCheck.line(safeIssues, covers: EditSafeBox.covers(state.preview, width: project.canvas.width, height: project.canvas.height))
++    }
++
++    /// "Move into the safe area": one undoable change that moves the captions (and their wrap width) and each text item
++    /// just inside the box.
++    func moveIntoSafeArea() {
++        guard let z = safeZone else { return }
++        nextChangeLabel = "Moved into the safe area"
++        let ok = edit { s in s.apply { p in EditSafeCheck.fixed(p, zone: z) } }
++        if !ok { nextChangeLabel = nil }
++    }
++}
+diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
+index 1f948b6b..3200dab2 100644
+--- a/mac/Muse/App/Edit/EditSuiteSession.swift
++++ b/mac/Muse/App/Edit/EditSuiteSession.swift
+@@ -143,6 +143,8 @@ final class EditSuiteSession {
+     @ObservationIgnored let drafts = EditSessionDrafts.standard
+     /// A kept draft differs from the session's latest: "Keep this device's changes / Use the latest".
+     var draftAsk: EditSessionDraft?
++    /// The platform views' safe zones (GET /v1/preview/layouts over the defaults), for the red box and its warning.
++    var previewLayouts = PreviewLayouts.defaults
+     /// The app's gallery hook for versions saved on Claude's request.
+     @ObservationIgnored var onVersionSaved: ((Take) -> Void)?
+ 
+@@ -205,6 +207,7 @@ final class EditSuiteSession {
+             project.sourceTakeId = sourceTakeId
+             state = EditSuiteState(project)
+             state.paletteIds = EditV2LookLibrary.shared.paletteIds
++            state.preview = Self.rememberedPreview(for: previewKey)
+             state.markSaved()
+             for a in project.assets {
+                 if a.take == sourceTakeId, let local { files[a.id] = local }
+@@ -213,6 +216,7 @@ final class EditSuiteSession {
+             phase = .ready
+             Task { [weak self] in await self?.refreshFeatures() }
+             Task { [weak self] in await self?.loadContent() }
++            Task { [weak self] in await self?.loadPreviewLayouts() }
+             observeTime()
+             await ensureFiles()
+             rebuild(immediately: true)
+diff --git a/mac/Muse/App/SnapshotRunner.swift b/mac/Muse/App/SnapshotRunner.swift
+index ba22985d..35f53f3e 100644
+--- a/mac/Muse/App/SnapshotRunner.swift
++++ b/mac/Muse/App/SnapshotRunner.swift
+@@ -27,6 +27,8 @@ enum SnapshotRunner {
+         var rigPanelOnScreen = false
+         /// The Edit suite hides its media panel and inspector (the `_collapsed` layout shots).
+         var editCollapsed = false
++        /// Edit's preview shows this view (the platform-preview shots; nil leaves it as it is).
++        var editPreview: EditPreview?
+         /// Recreate's cost line and its primary (window space), for the fit check (SnapshotFrame).
+         var recreateFrames: [String: CGRect] = [:]
+         /// The Edit suite opens with its Claude panel up on this tab (2 = Playbook), for the learning editor's shot.
+@@ -193,10 +195,6 @@ enum SnapshotRunner {
+ 
+     /// The render's draft (design/direction/render.py `composer_mac`): @Demo in a café, 16:9, 8 s, 35 mm film with an
+     /// anamorphic lens, window light, Golden warmth, UGC · Calm, and a #Dolly in. Options the catalog doesn't have stay Auto.
+-    /// The take viewer's per-device choices for a review shot (nil: the defaults, Clean with no frame).
+-    static func viewerPrefs(_ json: String?) {
+-        if let json { UserDefaults.standard.set(json, forKey: "viewer.prefs") } else { UserDefaults.standard.removeObject(forKey: "viewer.prefs") }
+-    }
+ 
+     static func fillDemoDraft(_ store: AppStore) {
+         let cam = store.suite.camera
+@@ -348,16 +346,13 @@ enum SnapshotRunner {
+             // …and after "go": Claude's ask waits in the panel for the owner's confirmation (never approved here).
+             ("composer_claude_ask", { store.openTool(.shot); fillDemoDraft(store); store.showSuiteClaudeForReview(ask: true) }),
+             // The swap viewer fix (plans/swap-viewer-build.md; owner, build 582): the real views for the side-by-side with
+-            // the approved mockups. A finished take on the Shot stage; the take viewer Clean, then with the TikTok layout
+-            // (YouTube for a landscape take) in the device frame; New Swap empty and with a clip.
+-            ("stage_take", { viewerPrefs(nil); store.suite.feedOpen = false; store.openTool(.shot); fillDemoDraft(store)
++            // the approved mockups. A finished take on the Shot stage; the take viewer (a clean player: the platform layouts
++            // are Edit's since 2026-11-12, see the mac_editpreview_* shots); New Swap empty and with a clip.
++            ("stage_take", { store.suite.feedOpen = false; store.openTool(.shot); fillDemoDraft(store)
+                 if let j = store.suiteTakes(photo: false).compactMap(\.jobId).first { store.rememberStage(j, tool: .shot) } }),
+-            ("viewer_clean", { viewerPrefs(nil); store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+-                store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
+-            ("viewer_tiktok", { viewerPrefs("{\"portraitSkin\":\"tiktok\",\"landscapeSkin\":\"youtube\",\"deviceFrame\":true,\"safeZones\":true}")
+-                store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
++            ("viewer_clean", { store.openTool(.shot); fillDemoDraft(store); store.suite.feedOpen = true
+                 store.suite.viewerTakeId = (store.suite.feed.compactMap { store.feedTake($0) }.first ?? store.suiteTakes(photo: false).first)?.id }),
+-            ("newswap_empty", { viewerPrefs(nil); store.suite.feedOpen = false; store.suite.viewerTakeId = nil
++            ("newswap_empty", { store.suite.feedOpen = false; store.suite.viewerTakeId = nil
+                 store.openTool(.swap); store.setSwapVariant(.remix); store.clip = nil; store.clipVideo = nil }),
+             ("newswap_filled", { store.suite.feedOpen = false; store.openTool(.swap); store.setSwapVariant(.remix)
+                 store.suite.remix.backgroundOn = true; store.suite.remix.backgroundMode = .describe
+@@ -369,9 +364,8 @@ enum SnapshotRunner {
+                 store.suite.compareIds = Array(two.map(\.id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.prefix(2)) }),
+         ]
+         await run([.c, .a, .b, .d], [(1280, 800), (1000, 700)], feedScreens)
+-        // Back to the defaults after the swap viewer shots: the classic Swap, Clean, no device frame.
++        // Back to the defaults after the swap viewer shots: the classic Swap.
+         store.setSwapVariant(.classic)
+-        viewerPrefs(nil)
+         // The last screen was the comparison: two takes were on screen (the demo has video takes).
+         let compared = store.suiteComparing.count
+         lines.append("\(compared == 2 ? "FITS" : "CUT") composer_compare \(compared) takes side by side, \(store.suite.feed.count) feed cards")
+@@ -488,6 +482,19 @@ enum SnapshotRunner {
+                 shot("\(theme.rawValue)_\(width)x\(height)_collapsed", "\(width)x\(height) \(theme.rawValue) collapsed")
+                 state.editCollapsed = false
+                 try? await Task.sleep(for: .seconds(0.5))
++                // Edit's platform preview (plans/edit-platform-preview.md): TikTok's chrome with its red box, and Clean,
++                // in the dark and light themes (`mac_editpreview_<theme>_<view>.png`).
++                if width == 1440 && (theme == .b || theme == .a) {
++                    for (view, tag) in [(PreviewSkin.tiktok, "tiktok"), (.clean, "clean")] {
++                        state.editPreview = EditPreview(view: view, safeArea: true)
++                        try? await Task.sleep(for: .seconds(1))
++                        capture(dir.appendingPathComponent("mac_editpreview_\(theme.rawValue)_\(tag).png"))
++                        let cut = truncatedLabels()
++                        lines.append(contentsOf: cut.isEmpty ? ["FITS edit preview \(tag) \(theme.rawValue) (\(fitProbes.count) labels)"]
++                                                             : cut.map { "CUT edit preview \(tag) \(theme.rawValue) \($0)" })
++                    }
++                    state.editPreview = nil
++                }
+             }
+             // The app now opens down to 960 pt (coordination item 8): Edit at 1000 × 700 for the record. INFO lines, not
+             // CUT: the Edit layout plan's sizes are the three above.
+diff --git a/mac/Muse/Views/Edit/EditPlatformChrome.swift b/mac/Muse/Views/Edit/EditPlatformChrome.swift
+new file mode 100644
+index 00000000..fa72c020
+--- /dev/null
++++ b/mac/Muse/Views/Edit/EditPlatformChrome.swift
+@@ -0,0 +1,240 @@
++import MuseCore
++import SwiftUI
++
++// Edit's platform preview (owner decision 2026-11-12, plans/edit-platform-preview.md): the generic chrome of each app drawn
++// over the edit (our own drawing: grey bars for text, Phosphor glyphs for buttons; no logos, no brand colours, no
++// platform type), and the red safe-area box. Moved here from the take viewer, which is now a clean player.
++// The chrome fills the canvas exactly: the canvas is what gets posted, so nothing is cropped.
++
++/// The chrome for a view: the phone layouts on portrait canvases, the landscape players on 16:9 ones; Clean draws nothing.
++struct EditPlatformChrome: View {
++    var view: PreviewSkin
++    var landscape: Bool
++    var width: Double
++    var height: Double
++
++    var body: some View {
++        Group {
++            if view == .clean {
++                EmptyView()
++            } else if landscape {
++                LandscapeChrome(view: view, width: width, height: height)
++            } else {
++                PhoneChrome(skin: view, width: width, height: height)
++            }
++        }
++        .allowsHitTesting(false)
++        .accessibilityHidden(true)
++    }
++}
++
++/// The red dashed box: where the app leaves the picture clear (approximate; the server's table can correct it).
++struct EditSafeBoxGuide: View {
++    var zone: SafeZone
++    var name: String
++
++    var body: some View {
++        GeometryReader { g in
++            let r = zone.safeRect
++            Path { p in p.addRect(CGRect(x: g.size.width * r.x, y: g.size.height * r.y, width: g.size.width * r.w, height: g.size.height * r.h)) }
++                .stroke(Color(hex: 0xFF5A5F).opacity(0.95), style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
++        }
++        .allowsHitTesting(false)
++        .accessibilityElement()
++        .accessibilityLabel("Red box: \(name). Keep faces and words inside it.")
++    }
++}
++
++/// A landscape player's chrome over the edit: the title row on top and the controls along the bottom (YouTube), or the
++/// bottom controls and a small name row (Facebook).
++struct LandscapeChrome: View {
++    var view: PreviewSkin
++    var width: Double
++    var height: Double
++
++    var body: some View {
++        let k = width / 640
++        ZStack(alignment: .topLeading) {
++            LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom)
++                .frame(width: width, height: height * 0.16)
++            HStack(spacing: 10 * k) {
++                Circle().fill(.white.opacity(0.75)).frame(width: 26 * k, height: 26 * k)
++                ChromeBar(w: (view == .youtube ? 180 : 120) * k, h: 10 * k)
++                Spacer()
++                if view == .youtube {
++                    Ph("clock", 15 * k).foregroundStyle(.white)
++                    Ph("share-fat", 15 * k).foregroundStyle(.white)
++                }
++            }
++            .padding(.horizontal, 16 * k).padding(.top, 14 * k)
++            VStack(spacing: 8 * k) {
++                Spacer()
++                Capsule().fill(.white.opacity(0.35)).frame(height: 3 * k)
++                    .overlay(alignment: .leading) { Capsule().fill(.white).frame(width: width * 0.28, height: 3 * k) }
++                HStack(spacing: 14 * k) {
++                    Ph("play", 15 * k)
++                    if view == .youtube { Ph("skip-forward", 15 * k) }
++                    Ph("speaker-high", 15 * k)
++                    ChromeBar(w: 70 * k, h: 7 * k, dim: true)
++                    Spacer()
++                    Ph("closed-captioning", 15 * k)
++                    Ph("dots-three-vertical", 15 * k)
++                    Ph("arrows-out-simple", 15 * k)
++                }
++                .foregroundStyle(.white)
++            }
++            .padding(.horizontal, 14 * k).padding(.bottom, 10 * k)
++            .frame(width: width, height: height)
++            .background(alignment: .bottom) {
++                LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom).frame(height: height * 0.18)
++            }
++        }
++        .frame(width: width, height: height)
++        .clipped()
++        .accessibilityLabel("\(view.label) layout")
++    }
++}
++
++// MARK: Phone layouts
++
++struct ChromeBar: View {
++    var w: Double
++    var h: Double
++    var dim = false
++    var body: some View { RoundedRectangle(cornerRadius: h / 2).fill(.white.opacity(dim ? 0.55 : 0.85)).frame(width: w, height: h) }
++}
++
++private struct ChromeGlyph: View {
++    var name: String
++    var size: Double
++    var count = true
++    var body: some View {
++        VStack(spacing: size * 0.12) {
++            Ph(name, size * 0.8).foregroundStyle(.white)
++            if count { ChromeBar(w: size * 0.7, h: max(3, size * 0.2)) }
++        }
++    }
++}
++
++/// A phone app's layout over the edit: top bar, the right-hand rail, the caption block and the bottom navigation.
++struct PhoneChrome: View {
++    var skin: PreviewSkin
++    var width: Double
++    var height: Double
++
++    var body: some View {
++        let k = width / 300
++        let nav = 56 * k
++        let icon = 26 * k
++        ZStack(alignment: .topLeading) {
++            // status bar
++            HStack { ChromeBar(w: 28 * k, h: 7 * k); Spacer(); ChromeBar(w: 40 * k, h: 7 * k) }
++                .padding(.horizontal, 18 * k).padding(.top, 8 * k)
++            top(k)
++            rail(k, icon: icon)
++                .padding(.trailing, 10 * k).padding(.bottom, nav + 16 * k)
++                .frame(width: width, height: height, alignment: .bottomTrailing)
++            caption(k)
++                .padding(.leading, 12 * k).padding(.bottom, nav + 14 * k)
++                .frame(width: width, height: height, alignment: .bottomLeading)
++            HStack {
++                ForEach(navIcons, id: \.self) { n in
++                    Spacer(minLength: 0)
++                    Ph(n, 18 * k).foregroundStyle(.white)
++                    Spacer(minLength: 0)
++                }
++            }
++            .padding(.bottom, 10 * k)
++            .frame(width: width, height: nav)
++            .background(Color.black.opacity(0.92))
++            .frame(width: width, height: height, alignment: .bottom)
++        }
++        .frame(width: width, height: height)
++        .allowsHitTesting(false)
++        .accessibilityHidden(true)
++    }
++
++    private var navIcons: [String] {
++        switch skin {
++        case .tiktok: return ["house", "users-three", "plus-square", "chat-circle", "user"]
++        case .reels: return ["house", "magnifying-glass", "plus-square", "film-strip", "user-circle"]
++        case .shorts: return ["house", "lightning", "plus-circle", "play-circle", "user-circle"]
++        default: return ["house", "video", "users-three", "bag", "bell"]
++        }
++    }
++
++    @ViewBuilder private func top(_ k: Double) -> some View {
++        switch skin {
++        case .tiktok:
++            ZStack {
++                HStack(spacing: 14 * k) { ChromeBar(w: 50 * k, h: 8 * k, dim: true); ChromeBar(w: 44 * k, h: 8 * k) }
++                HStack { Spacer(); Ph("magnifying-glass", 18 * k).foregroundStyle(.white) }
++            }
++            .padding(.horizontal, 14 * k).padding(.top, 32 * k)
++        case .reels:
++            HStack { ChromeBar(w: 54 * k, h: 10 * k); Spacer(); Ph("camera", 18 * k).foregroundStyle(.white) }
++                .padding(.horizontal, 14 * k).padding(.top, 32 * k)
++        case .shorts:
++            HStack(spacing: 16 * k) { Spacer(); Ph("magnifying-glass", 18 * k); Ph("dots-three-vertical", 18 * k) }
++                .foregroundStyle(.white).padding(.horizontal, 14 * k).padding(.top, 30 * k)
++        default:
++            HStack(spacing: 14 * k) { Ph("caret-left", 18 * k); ChromeBar(w: 48 * k, h: 10 * k); Spacer(); Ph("magnifying-glass", 18 * k); Ph("user-circle", 18 * k) }
++                .foregroundStyle(.white).padding(.horizontal, 14 * k).padding(.top, 30 * k)
++        }
++    }
++
++    @ViewBuilder private func rail(_ k: Double, icon: Double) -> some View {
++        switch skin {
++        case .tiktok:
++            VStack(spacing: 16 * k) {
++                avatar(40 * k)
++                ChromeGlyph(name: "heart", size: icon); ChromeGlyph(name: "chat-circle-dots", size: icon)
++                ChromeGlyph(name: "bookmark-simple", size: icon); ChromeGlyph(name: "share-fat", size: icon)
++                Circle().fill(Color(white: 0.2)).frame(width: 32 * k, height: 32 * k).overlay(Circle().strokeBorder(Color(white: 0.07), lineWidth: 5 * k))
++            }
++        case .reels:
++            VStack(spacing: 18 * k) {
++                ChromeGlyph(name: "heart", size: icon); ChromeGlyph(name: "chat-circle", size: icon); ChromeGlyph(name: "paper-plane-tilt", size: icon)
++                ChromeGlyph(name: "dots-three-vertical", size: icon, count: false)
++                RoundedRectangle(cornerRadius: 5 * k).fill(.white.opacity(0.6)).frame(width: 26 * k, height: 26 * k)
++            }
++        case .shorts:
++            VStack(spacing: 16 * k) {
++                ChromeGlyph(name: "thumbs-up", size: icon); ChromeGlyph(name: "thumbs-down", size: icon, count: false)
++                ChromeGlyph(name: "chat-circle-dots", size: icon); ChromeGlyph(name: "share-fat", size: icon); ChromeGlyph(name: "arrows-clockwise", size: icon)
++                RoundedRectangle(cornerRadius: 6 * k).fill(.white.opacity(0.6)).frame(width: 28 * k, height: 28 * k)
++            }
++        default:
++            VStack(spacing: 18 * k) {
++                ChromeGlyph(name: "thumbs-up", size: icon); ChromeGlyph(name: "chat-circle", size: icon); ChromeGlyph(name: "share-fat", size: icon)
++                ChromeGlyph(name: "dots-three", size: icon, count: false)
++            }
++        }
++    }
++
++    private func caption(_ k: Double) -> some View {
++        let w = width * 0.62
++        return VStack(alignment: .leading, spacing: 6 * k) {
++            switch skin {
++            case .tiktok: ChromeBar(w: w * 0.4, h: 9 * k)
++            case .reels:
++                HStack(spacing: 8 * k) { avatar(26 * k); ChromeBar(w: w * 0.34, h: 9 * k)
++                    RoundedRectangle(cornerRadius: 6 * k).strokeBorder(.white.opacity(0.8), lineWidth: 1.2 * k).frame(width: 46 * k, height: 20 * k) }
++            case .shorts:
++                HStack(spacing: 8 * k) { avatar(26 * k); ChromeBar(w: w * 0.3, h: 9 * k); Capsule().fill(.white.opacity(0.9)).frame(width: 60 * k, height: 22 * k) }
++            default:
++                HStack(spacing: 8 * k) { avatar(26 * k); ChromeBar(w: w * 0.3, h: 9 * k)
++                    RoundedRectangle(cornerRadius: 6 * k).fill(.white.opacity(0.25)).frame(width: 44 * k, height: 20 * k) }
++            }
++            ChromeBar(w: w * 0.92, h: 7 * k, dim: true)
++            ChromeBar(w: w * 0.64, h: 7 * k, dim: true)
++            HStack(spacing: 6 * k) { Ph("music-note", 11 * k).foregroundStyle(.white); ChromeBar(w: w * 0.52, h: 6 * k, dim: true) }
++        }
++        .frame(width: w, alignment: .leading)
++    }
++
++    private func avatar(_ d: Double) -> some View {
++        Circle().fill(.white.opacity(0.75)).frame(width: d, height: d).overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
++    }
++}
++
+diff --git a/mac/Muse/Views/Edit/EditSuiteCaptions.swift b/mac/Muse/Views/Edit/EditSuiteCaptions.swift
+index 24731372..a3b60bbd 100644
+--- a/mac/Muse/Views/Edit/EditSuiteCaptions.swift
++++ b/mac/Muse/Views/Edit/EditSuiteCaptions.swift
+@@ -165,7 +165,9 @@ struct EditSuiteCaptionsMode: View {
+                 let h = min(g.size.width / aspect, g.size.height)
+                 ZStack {
+                     SuitePlayerSurface(player: session.player)
+-                    if let a = session.state.safeArea { SafeAreaGuide(area: a) }
++                    if let z = session.safeZone {
++                        EditSafeBoxGuide(zone: z, name: EditSafeBox.name(session.state.preview, width: c.width, height: c.height))
++                    }
+                 }
+                 .frame(width: h * aspect, height: h)
+                 .position(x: g.size.width / 2, y: g.size.height / 2)
+diff --git a/mac/Muse/Views/Edit/EditSuitePreview.swift b/mac/Muse/Views/Edit/EditSuitePreview.swift
+index 6cd10f55..702fda6b 100644
+--- a/mac/Muse/Views/Edit/EditSuitePreview.swift
++++ b/mac/Muse/Views/Edit/EditSuitePreview.swift
+@@ -3,9 +3,11 @@ import MuseCore
+ import SwiftUI
+ import UniformTypeIdentifiers
+ 
+-/// The viewer (E1, plans/edit-layout.md): "Safe area" as one segmented control (Off · TikTok · Reels · Shorts) and Fit ·
+-/// 100 %; the live edit on the viewer tone at the canvas shape with the platform's safe-area guide; the transport below
+-/// (timecode in tabular figures, back, a 40 pt play, forward, sound, full screen).
++/// The viewer (E1, plans/edit-layout.md; platform views plans/edit-platform-preview.md): "View" (Clean · TikTok · Reels ·
++/// Shorts · Facebook, or Clean · YouTube · Facebook on 16:9) with the "Safe area" switch, and Fit · 100 %; the live edit
++/// on the viewer tone at the canvas shape with the app's generic chrome and its red safe box over it; a warning line when
++/// captions or text sit outside the box; the transport below (timecode in tabular figures, back, a 40 pt play, forward,
++/// sound, full screen).
+ struct EditSuitePreview: View {
+     @Environment(\.theme) private var t
+     @Bindable var session: EditSuiteSession
+@@ -23,14 +25,27 @@ struct EditSuitePreview: View {
+                 if mediaHidden {
+                     SuiteIconButton(systemName: "caret-double-right", label: "Show media", tint: t.roles.ink2, action: showMedia)
+                 }
+-                Text("Safe area").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fitProbe("safe area")
+-                EditSeg(options: safeAreas,
+-                        selection: session.state.safeArea, height: 28, small: true) { a in
+-                    session.view { $0.safeArea = a }
++                Text("View").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fitProbe("preview view")
++                EditSeg(options: views, selection: session.shownPreview.view, height: 28, small: true) { v in
++                    var p = session.state.preview
++                    p.view = v
++                    session.setPreview(p)
+                 }
+                 .fixedSize()
++                .help("Preview the edit under each app's buttons and captions (our own drawing of its layout)")
+                 .accessibilityElement(children: .contain)
+-                .accessibilityLabel("Safe area")
++                .accessibilityLabel("Preview view")
++                Toggle(isOn: Binding(get: { session.state.preview.safeArea }, set: { on in
++                    var p = session.state.preview
++                    p.safeArea = on
++                    session.setPreview(p)
++                })) {
++                    Text("Safe area").font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).fitProbe("safe area")
++                }
++                .toggleStyle(.switch).controlSize(.small)
++                .padding(.leading, Space.s2)
++                .help(session.previewLayouts.note.map { "The red box: where the app leaves your picture clear. \($0)" }
++                      ?? "The red box: where the app leaves your picture clear")
+                 Spacer(minLength: Space.s2)
+                 Button { actualSize.toggle() } label: {
+                     Text(actualSize ? "Actual size · 100%" : "Fit · \(fitPercent)%").font(t.scale.caption.font).monospacedDigit()
+@@ -60,7 +75,10 @@ struct EditSuitePreview: View {
+                             .font(t.scale.caption.font).foregroundStyle(.white.opacity(0.75))
+                             .multilineTextAlignment(.center).padding(Space.s3)
+                     }
+-                    if let a = session.state.safeArea { SafeAreaGuide(area: a) }
++                    EditPlatformChrome(view: session.shownPreview.view, landscape: session.previewIsLandscape, width: w, height: h)
++                    if let z = session.safeZone {
++                        EditSafeBoxGuide(zone: z, name: EditSafeBox.name(session.state.preview, width: c.width, height: c.height))
++                    }
+                     if session.pickingKeyColour { KeyColourPicker(session: session, scale: Double(c.width) / Double(max(1, w))) }
+                 }
+                 .frame(width: w, height: h)
+@@ -72,10 +90,31 @@ struct EditSuitePreview: View {
+             .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.editViewer))
+             .clipShape(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous))
+ 
++            if let warning = session.safeWarning { safeWarning(warning) }
++
+             transport
+         }
+         .padding(Space.s4)
+         .background(t.roles.canvas)
++        // Review mode: the platform-preview shots set the view (never remembered).
++        .onChange(of: SnapshotRunner.state.editPreview) { _, p in if let p { session.setPreview(p, remember: false) } }
++    }
++
++    /// "Captions sit under TikTok's caption and buttons (0:01–0:09)." and the one fix.
++    private func safeWarning(_ text: String) -> some View {
++        HStack(spacing: Space.s2) {
++            Ph("warning", 14).foregroundStyle(Color(hex: 0xFF5A5F))
++            Text(text).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.middle)
++            Button("Move into the safe area") { session.moveIntoSafeArea() }
++                .buttonStyle(.plain)
++                .font(t.scale.caption.font.weight(.medium))
++                .foregroundStyle(t.roles.accent)
++                .fixedSize()
++                .help("Moves the captions and text just inside the red box (one change; Undo puts them back)")
++            Spacer(minLength: 0)
++        }
++        .frame(minHeight: 28)
++        .accessibilityElement(children: .combine)
+     }
+ 
+     /// Parity wave 1 "extract frame": the edit's frame at the playhead (with every look, text and caption) as a PNG.
+@@ -91,9 +130,9 @@ struct EditSuitePreview: View {
+         }
+     }
+ 
+-    /// Off, then each platform's guide (the same state as the guides before: nil is off).
+-    private var safeAreas: [(EditSuite.SafeArea?, String)] {
+-        [(nil, "Off")] + EditSuite.SafeArea.allCases.map { a -> (EditSuite.SafeArea?, String) in (a, a.label) }
++    /// The views this canvas offers: the phone apps on portrait, square and 4:5; the landscape players on 16:9.
++    private var views: [(PreviewSkin, String)] {
++        EditPreview.options(width: session.project.canvas.width, height: session.project.canvas.height).map { ($0, $0.label) }
+     }
+ 
+     private var transport: some View {
+@@ -196,23 +235,6 @@ struct SuitePlayerSurface: NSViewRepresentable {
+     }
+ }
+ 
+-/// Dashed safe-area box: the part of the frame the platform's buttons and captions leave clear.
+-struct SafeAreaGuide: View {
+-    var area: EditSuite.SafeArea
+-
+-    var body: some View {
+-        GeometryReader { g in
+-            let i = area.insets
+-            let rect = CGRect(x: g.size.width * i.left, y: g.size.height * i.top,
+-                              width: g.size.width * (1 - i.left - i.right), height: g.size.height * (1 - i.top - i.bottom))
+-            Path { p in p.addRect(rect) }
+-                .stroke(Color(hex: 0xFF5A5F).opacity(0.9), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+-        }
+-        .allowsHitTesting(false)
+-        .accessibilityHidden(true)
+-    }
+-}
+-
+ /// The chroma key eyedropper over the preview (design pass, owner-approved): a crosshair, and beside it the colour under
+ /// the pointer at about 4× with its hex; a click sets the key colour, Esc cancels.
+ struct KeyColourPicker: View {
+diff --git a/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift b/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift
+index cac99c43..103fcce8 100644
+--- a/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift
++++ b/mac/Muse/Views/Suite/Composer/NewSwapScreen.swift
+@@ -140,7 +140,7 @@ struct NewSwapStage: View {
+             .frame(height: 32)
+             .padding(.top, Space.s2)
+             TakeViewer(media: ViewerMedia(id: c.id, videoURL: store.clipVideo, poster: store.clipPoster, width: c.width, height: c.height, label: c.name),
+-                       context: .source, autoplay: false, startMuted: true, previewControls: false)
++                       context: .source, autoplay: false, startMuted: true)
+                 .id(c.id)
+                 .frame(maxHeight: .infinity)
+             NewSwapTrimmer(clip: c)
+diff --git a/mac/Muse/Views/Viewer/TakeViewer.swift b/mac/Muse/Views/Viewer/TakeViewer.swift
+index b891bcb9..4d248549 100644
+--- a/mac/Muse/Views/Viewer/TakeViewer.swift
++++ b/mac/Muse/Views/Viewer/TakeViewer.swift
+@@ -6,8 +6,8 @@ import SwiftUI
+ // The take viewer (plans/swap-viewer-design.md §B, owner-approved 2026-11-12): one viewer wherever a take, a clip or an
+ // image is shown (the Suite's stage, Takes, Compare, the Library and New Swap's source).
+ // - The frame is the media's own shape: a portrait take sits in a portrait frame, never a letterbox.
+-// - Preview: Clean, or a generic drawing of TikTok, Reels, Shorts or Facebook (portrait) / YouTube or Facebook
+-//   (landscape), in an optional phone or laptop frame, with the safe zones on request. Remembered per device.
++// - A clean player: no platform layouts, device frames or safe zones (owner 2026-11-12: those are Edit's, see
++//   Views/Edit/EditPlatformChrome.swift and plans/edit-platform-preview.md).
+ // - No scrubber, no loader bar: Space plays or pauses, ← → jump 3 s (⇧ 10 s), J/K/L shuttle, , . step a frame, M mutes,
+ //   F is full screen, ↑ ↓ change take, Esc closes. A small readout ("+3 s  0:07 / 0:10") shows briefly while seeking.
+ // - The take's actions (Keep, Redo, Extend, Upscale, Split, Share, More): a rail beside portrait media, a row under
+@@ -208,38 +208,9 @@ struct ViewerPlayerLayer: NSViewRepresentable {
+     }
+ }
+ 
+-// MARK: Remembered choices
+-
+-/// The viewer's per-device choices (owner 2026-11-12): the skin per shape, the device frame and the safe zones.
+-private struct ViewerPrefsKey {
+-    static let key = "viewer.prefs"
+-
+-    static func read(_ raw: String) -> ViewerPrefs {
+-        (try? JSONDecoder().decode(ViewerPrefs.self, from: Data(raw.utf8))) ?? ViewerPrefs()
+-    }
+-
+-    static func write(_ p: ViewerPrefs) -> String {
+-        (try? String(decoding: JSONEncoder().encode(p), as: UTF8.self)) ?? ""
+-    }
+-}
+-
+-/// The server's safe-zone table, fetched once per launch (defaults until then, and offline).
+-@MainActor
+-enum ViewerLayouts {
+-    private(set) static var current = PreviewLayouts.defaults
+-    private static var loaded = false
+-
+-    static func load(_ api: any MuseAPI) async {
+-        guard !loaded else { return }
+-        loaded = true
+-        current = await api.previewLayouts()
+-    }
+-}
+-
+ // MARK: The viewer
+ 
+ struct TakeViewer: View {
+-    @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+     var media: ViewerMedia
+     var context: TakeViewerContext
+@@ -247,7 +218,7 @@ struct TakeViewer: View {
+     var take: Take? = nil
+     /// The take's job (Redo needs it).
+     var job: Job? = nil
+-    /// A small pane (the stage, Compare): the preview choice is one menu and the actions go under the media.
++    /// A small pane (the stage, Compare): the actions go under the media.
+     var compact = false
+     var autoplay = true
+     var startMuted = false
+@@ -255,27 +226,15 @@ struct TakeViewer: View {
+     var onStep: ((Int) -> Void)? = nil
+     /// Esc (nil: nothing to close).
+     var onClose: (() -> Void)? = nil
+-    /// The preview choices (Clean, the platform layouts, the frame, safe zones); off for New Swap's source clip.
+-    var previewControls = true
+     /// A player owned by the host (Compare plays two together); nil: the viewer's own.
+     var sharedPlayback: ViewerPlayback? = nil
+ 
+     @State private var ownPlayback = ViewerPlayback()
+     private var playback: ViewerPlayback { sharedPlayback ?? ownPlayback }
+-    @AppStorage(ViewerPrefsKey.key) private var prefsRaw = ""
+     @FocusState private var focused: Bool
+-    @State private var layouts = ViewerLayouts.current
+-
+-    private var prefs: ViewerPrefs { ViewerPrefsKey.read(prefsRaw) }
+-    private func update(_ f: (inout ViewerPrefs) -> Void) {
+-        var p = prefs
+-        f(&p)
+-        prefsRaw = ViewerPrefsKey.write(p)
+-    }
+ 
+     private var aspect: Double { media.aspect }
+     private var landscape: Bool { PreviewSkin.isLandscape(aspect) }
+-    private var skin: PreviewSkin { previewControls ? prefs.skin(aspect: aspect) : .clean }
+     private var actions: [TakeViewerAction] {
+         guard let take else { return [] }
+         return TakeViewerActions.list(context, isVideo: take.isVideo, canRedo: job != nil, canExtend: ExtendSource.take(take) != nil,
+@@ -284,7 +243,6 @@ struct TakeViewer: View {
+ 
+     var body: some View {
+         VStack(spacing: compact ? Space.s2 : Space.s3) {
+-            if !compact && previewControls { previewBar.frame(maxWidth: .infinity).frame(height: 32) }
+             GeometryReader { g in
+                 // Beside portrait media when there's room for it and a 240 pt picture; otherwise the row under it.
+                 let rail = !compact && !landscape && !actions.isEmpty && g.size.width >= 2 * (Self.railWidth + Space.s7) + 240
+@@ -324,7 +282,6 @@ struct TakeViewer: View {
+         }
+         .onChange(of: media.videoURL) { _, u in playback.load(u, autoplay: autoplay, muted: playback.muted) }
+         .onDisappear { playback.release() }
+-        .task { await ViewerLayouts.load(store.api); layouts = ViewerLayouts.current }
+         .accessibilityElement(children: .contain)
+         .accessibilityLabel(media.label)
+     }
+@@ -333,36 +290,19 @@ struct TakeViewer: View {
+ 
+     // MARK: Media in its frame
+ 
+-    @ViewBuilder private func mediaArea(width: CGFloat, height: CGFloat) -> some View {
+-        let w = max(0, Double(width)), h = max(0, Double(height))
+-        Group {
+-            if previewControls && prefs.deviceFrame && !landscape {
+-                let sw = ViewerFrame.phoneScreenWidth(width: w, height: h)
+-                PhoneFrame(screenWidth: sw) { screen(width: sw, height: sw / ViewerFrame.phoneScreenAspect) }
+-            } else if previewControls && prefs.deviceFrame && landscape {
+-                let lw = min(w / 1.16, (h - 24) * ViewerFrame.laptopScreenAspect / 1.04)
+-                LaptopFrame(screenWidth: max(0, lw)) { laptopScreen(width: max(0, lw), height: max(0, lw) / ViewerFrame.laptopScreenAspect) }
+-            } else {
+-                let f = ViewerFrame.fit(aspect: aspect, width: w, height: h)
+-                surface
+-                    .frame(width: f.w, height: f.h)
+-                    .overlay { if skin != .clean && !landscape { skinLayer(width: f.w, height: f.h) } }
+-                    .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
+-                    .overlay(alignment: .center) { readout }
+-            }
+-        }
+-        .frame(width: max(0, width), height: max(0, height))
+-        .contentShape(Rectangle())
+-        .onTapGesture {
+-            focused = true
+-            if media.videoURL != nil { playback.togglePlay() }
+-        }
+-        .overlay(alignment: .topTrailing) {
+-            if compact && previewControls {
+-                ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil, onMedia: true)
+-                    .padding(Space.s2)
++    /// The media at its own shape, fitted: never a letterbox, nothing drawn over it but the seek readout.
++    private func mediaArea(width: CGFloat, height: CGFloat) -> some View {
++        let f = ViewerFrame.fit(aspect: aspect, width: max(0, Double(width)), height: max(0, Double(height)))
++        return surface
++            .frame(width: f.w, height: f.h)
++            .clipShape(RoundedRectangle(cornerRadius: t.radii.container))
++            .overlay(alignment: .center) { readout }
++            .frame(width: max(0, width), height: max(0, height))
++            .contentShape(Rectangle())
++            .onTapGesture {
++                focused = true
++                if media.videoURL != nil { playback.togglePlay() }
+             }
+-        }
+     }
+ 
+     /// The media itself: the poster, the video over it, the slow-load ring in the corner.
+@@ -378,39 +318,6 @@ struct TakeViewer: View {
+         .accessibilityLabel(media.label)
+     }
+ 
+-    /// The phone's screen: a platform layout fills it (cropping a 9:16 take's sides, as those apps do on tall phones);
+-    /// Clean fits it with black above and below, as a phone's own player does.
+-    private func screen(width: Double, height: Double) -> some View {
+-        let fill = ViewerFrame.fillsScreen(skin)
+-        let f = fill ? (w: width, h: height) : ViewerFrame.fit(aspect: aspect, width: width, height: height)
+-        return ZStack {
+-            Color.black
+-            surface.frame(width: f.w, height: f.h).clipped()
+-            if skin != .clean { skinLayer(width: width, height: height) }
+-            readout
+-        }
+-        .frame(width: width, height: height)
+-    }
+-
+-    private func laptopScreen(width: Double, height: Double) -> some View {
+-        ZStack {
+-            if skin == .clean {
+-                Color.black
+-                let f = ViewerFrame.fit(aspect: aspect, width: width, height: height)
+-                surface.frame(width: f.w, height: f.h).clipped()
+-            } else {
+-                DesktopSkin(skin: skin, width: width, height: height) { w, h in surface.frame(width: w, height: h).clipped() }
+-            }
+-            readout
+-        }
+-        .frame(width: width, height: height)
+-    }
+-
+-    @ViewBuilder private func skinLayer(width: Double, height: Double) -> some View {
+-        PhoneSkin(skin: skin, width: width, height: height)
+-        if prefs.safeZones, let z = layouts.zone(skin) { SafeZoneLayer(zone: z).allowsHitTesting(false) }
+-    }
+-
+     @ViewBuilder private var readout: some View {
+         if let r = playback.readout {
+             Text(r).font(t.scale.caption.font).monospacedDigit().foregroundStyle(.white)
+@@ -422,44 +329,6 @@ struct TakeViewer: View {
+         }
+     }
+ 
+-    // MARK: Preview controls
+-
+-    /// Clean · TikTok · Reels · Shorts · Facebook (or Clean · YouTube · Facebook), the frame switch and the safe zones.
+-    /// Narrow: the switches fold into the Preview button, then the whole bar does.
+-    private var previewBar: some View {
+-        ViewThatFits(in: .horizontal) {
+-            HStack(spacing: Space.s4) { skinPicker; frameToggle; zonesToggle }.fixedSize()
+-            HStack(spacing: Space.s3) { skinPicker; ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil, switchesOnly: true) }.fixedSize()
+-            ViewerPreviewButton(skin: skin, aspect: aspect, prefsRaw: $prefsRaw, hasZones: layouts.zone(skin) != nil).fixedSize()
+-        }
+-    }
+-
+-    private var skinPicker: some View {
+-        Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
+-            ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
+-        }
+-        .pickerStyle(.segmented)
+-        .labelsHidden()
+-        .fixedSize()
+-        .help("Preview as it would look on each app (a generic drawing of its layout)")
+-    }
+-
+-    private var frameToggle: some View {
+-        Toggle(landscape ? "Laptop frame" : "Phone frame", isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
+-            .toggleStyle(.switch).controlSize(.small)
+-            .font(t.scale.label.font)
+-            .fixedSize()
+-    }
+-
+-    private var zonesToggle: some View {
+-        Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
+-            .toggleStyle(.switch).controlSize(.small)
+-            .font(t.scale.label.font)
+-            .fixedSize()
+-            .disabled(layouts.zone(skin) == nil)
+-            .help(layouts.note ?? "Where each app's own buttons and captions sit")
+-    }
+-
+     // MARK: Keys
+ 
+     private func key(_ press: KeyPress) -> KeyPress.Result {
+@@ -511,291 +380,6 @@ struct TakeViewer: View {
+     }
+ }
+ 
+-// MARK: Device frames
+-
+-/// A generic phone: a rounded body, an even bezel and a round front camera (no maker's shapes).
+-struct PhoneFrame<Screen: View>: View {
+-    var screenWidth: Double
+-    @ViewBuilder var screen: () -> Screen
+-
+-    var body: some View {
+-        let bezel = ViewerFrame.phoneBezel(screenWidth: screenWidth)
+-        let r = ViewerFrame.phoneRadius(screenWidth: screenWidth)
+-        let k = screenWidth / 300
+-        screen()
+-            .overlay(alignment: .top) {
+-                Circle().fill(.black).frame(width: 10 * k, height: 10 * k)
+-                    .overlay(Circle().strokeBorder(Color(white: 0.13), lineWidth: 1))
+-                    .padding(.top, 10 * k)
+-            }
+-            .clipShape(RoundedRectangle(cornerRadius: r, style: .continuous))
+-            .padding(bezel)
+-            .background(RoundedRectangle(cornerRadius: r + bezel, style: .continuous).fill(Color(white: 0.04)))
+-            .overlay(RoundedRectangle(cornerRadius: r + bezel, style: .continuous).strokeBorder(Color(red: 0.23, green: 0.24, blue: 0.25), lineWidth: 1))
+-            .accessibilityElement(children: .contain)
+-            .accessibilityLabel("Phone preview")
+-    }
+-}
+-
+-/// A generic laptop: a screen with a thin bezel on a wider base.
+-struct LaptopFrame<Screen: View>: View {
+-    var screenWidth: Double
+-    @ViewBuilder var screen: () -> Screen
+-
+-    var body: some View {
+-        let edge = Color(red: 0.23, green: 0.24, blue: 0.25)
+-        VStack(spacing: 0) {
+-            screen()
+-                .padding(screenWidth * 0.018)
+-                .background(UnevenRoundedRectangle(topLeadingRadius: screenWidth * 0.025, bottomLeadingRadius: 4, bottomTrailingRadius: 4,
+-                                                   topTrailingRadius: screenWidth * 0.025).fill(Color(white: 0.04)))
+-                .overlay(UnevenRoundedRectangle(topLeadingRadius: screenWidth * 0.025, bottomLeadingRadius: 4, bottomTrailingRadius: 4,
+-                                                topTrailingRadius: screenWidth * 0.025).strokeBorder(edge, lineWidth: 1))
+-            UnevenRoundedRectangle(bottomLeadingRadius: screenWidth * 0.03, bottomTrailingRadius: screenWidth * 0.03)
+-                .fill(Color(red: 0.16, green: 0.17, blue: 0.18))
+-                .overlay(UnevenRoundedRectangle(bottomLeadingRadius: screenWidth * 0.03, bottomTrailingRadius: screenWidth * 0.03).strokeBorder(edge, lineWidth: 1))
+-                .frame(width: screenWidth * 1.16, height: max(8, screenWidth * 0.022))
+-        }
+-        .accessibilityElement(children: .contain)
+-        .accessibilityLabel("Laptop preview")
+-    }
+-}
+-
+-// MARK: Platform layouts (generic drawings: grey bars for text, Phosphor glyphs for buttons; no logos or brand colours)
+-
+-private struct Bar: View {
+-    var w: Double
+-    var h: Double
+-    var dim = false
+-    var body: some View { RoundedRectangle(cornerRadius: h / 2).fill(.white.opacity(dim ? 0.55 : 0.85)).frame(width: w, height: h) }
+-}
+-
+-private struct Glyph: View {
+-    var name: String
+-    var size: Double
+-    var count = true
+-    var body: some View {
+-        VStack(spacing: size * 0.12) {
+-            Ph(name, size * 0.8).foregroundStyle(.white)
+-            if count { Bar(w: size * 0.7, h: max(3, size * 0.2)) }
+-        }
+-    }
+-}
+-
+-/// A phone app's layout over the take: top bar, the right-hand rail, the caption block and the bottom navigation.
+-struct PhoneSkin: View {
+-    var skin: PreviewSkin
+-    var width: Double
+-    var height: Double
+-
+-    var body: some View {
+-        let k = width / 300
+-        let nav = 56 * k
+-        let icon = 26 * k
+-        ZStack(alignment: .topLeading) {
+-            // status bar
+-            HStack { Bar(w: 28 * k, h: 7 * k); Spacer(); Bar(w: 40 * k, h: 7 * k) }
+-                .padding(.horizontal, 18 * k).padding(.top, 8 * k)
+-            top(k)
+-            rail(k, icon: icon)
+-                .padding(.trailing, 10 * k).padding(.bottom, nav + 16 * k)
+-                .frame(width: width, height: height, alignment: .bottomTrailing)
+-            caption(k)
+-                .padding(.leading, 12 * k).padding(.bottom, nav + 14 * k)
+-                .frame(width: width, height: height, alignment: .bottomLeading)
+-            HStack {
+-                ForEach(navIcons, id: \.self) { n in
+-                    Spacer(minLength: 0)
+-                    Ph(n, 18 * k).foregroundStyle(.white)
+-                    Spacer(minLength: 0)
+-                }
+-            }
+-            .padding(.bottom, 10 * k)
+-            .frame(width: width, height: nav)
+-            .background(Color.black.opacity(0.92))
+-            .frame(width: width, height: height, alignment: .bottom)
+-        }
+-        .frame(width: width, height: height)
+-        .allowsHitTesting(false)
+-        .accessibilityHidden(true)
+-    }
+-
+-    private var navIcons: [String] {
+-        switch skin {
+-        case .tiktok: return ["house", "users-three", "plus-square", "chat-circle", "user"]
+-        case .reels: return ["house", "magnifying-glass", "plus-square", "film-strip", "user-circle"]
+-        case .shorts: return ["house", "lightning", "plus-circle", "play-circle", "user-circle"]
+-        default: return ["house", "video", "users-three", "bag", "bell"]
+-        }
+-    }
+-
+-    @ViewBuilder private func top(_ k: Double) -> some View {
+-        switch skin {
+-        case .tiktok:
+-            ZStack {
+-                HStack(spacing: 14 * k) { Bar(w: 50 * k, h: 8 * k, dim: true); Bar(w: 44 * k, h: 8 * k) }
+-                HStack { Spacer(); Ph("magnifying-glass", 18 * k).foregroundStyle(.white) }
+-            }
+-            .padding(.horizontal, 14 * k).padding(.top, 32 * k)
+-        case .reels:
+-            HStack { Bar(w: 54 * k, h: 10 * k); Spacer(); Ph("camera", 18 * k).foregroundStyle(.white) }
+-                .padding(.horizontal, 14 * k).padding(.top, 32 * k)
+-        case .shorts:
+-            HStack(spacing: 16 * k) { Spacer(); Ph("magnifying-glass", 18 * k); Ph("dots-three-vertical", 18 * k) }
+-                .foregroundStyle(.white).padding(.horizontal, 14 * k).padding(.top, 30 * k)
+-        default:
+-            HStack(spacing: 14 * k) { Ph("caret-left", 18 * k); Bar(w: 48 * k, h: 10 * k); Spacer(); Ph("magnifying-glass", 18 * k); Ph("user-circle", 18 * k) }
+-                .foregroundStyle(.white).padding(.horizontal, 14 * k).padding(.top, 30 * k)
+-        }
+-    }
+-
+-    @ViewBuilder private func rail(_ k: Double, icon: Double) -> some View {
+-        switch skin {
+-        case .tiktok:
+-            VStack(spacing: 16 * k) {
+-                avatar(40 * k)
+-                Glyph(name: "heart", size: icon); Glyph(name: "chat-circle-dots", size: icon)
+-                Glyph(name: "bookmark-simple", size: icon); Glyph(name: "share-fat", size: icon)
+-                Circle().fill(Color(white: 0.2)).frame(width: 32 * k, height: 32 * k).overlay(Circle().strokeBorder(Color(white: 0.07), lineWidth: 5 * k))
+-            }
+-        case .reels:
+-            VStack(spacing: 18 * k) {
+-                Glyph(name: "heart", size: icon); Glyph(name: "chat-circle", size: icon); Glyph(name: "paper-plane-tilt", size: icon)
+-                Glyph(name: "dots-three-vertical", size: icon, count: false)
+-                RoundedRectangle(cornerRadius: 5 * k).fill(.white.opacity(0.6)).frame(width: 26 * k, height: 26 * k)
+-            }
+-        case .shorts:
+-            VStack(spacing: 16 * k) {
+-                Glyph(name: "thumbs-up", size: icon); Glyph(name: "thumbs-down", size: icon, count: false)
+-                Glyph(name: "chat-circle-dots", size: icon); Glyph(name: "share-fat", size: icon); Glyph(name: "arrows-clockwise", size: icon)
+-                RoundedRectangle(cornerRadius: 6 * k).fill(.white.opacity(0.6)).frame(width: 28 * k, height: 28 * k)
+-            }
+-        default:
+-            VStack(spacing: 18 * k) {
+-                Glyph(name: "thumbs-up", size: icon); Glyph(name: "chat-circle", size: icon); Glyph(name: "share-fat", size: icon)
+-                Glyph(name: "dots-three", size: icon, count: false)
+-            }
+-        }
+-    }
+-
+-    private func caption(_ k: Double) -> some View {
+-        let w = width * 0.62
+-        return VStack(alignment: .leading, spacing: 6 * k) {
+-            switch skin {
+-            case .tiktok: Bar(w: w * 0.4, h: 9 * k)
+-            case .reels:
+-                HStack(spacing: 8 * k) { avatar(26 * k); Bar(w: w * 0.34, h: 9 * k)
+-                    RoundedRectangle(cornerRadius: 6 * k).strokeBorder(.white.opacity(0.8), lineWidth: 1.2 * k).frame(width: 46 * k, height: 20 * k) }
+-            case .shorts:
+-                HStack(spacing: 8 * k) { avatar(26 * k); Bar(w: w * 0.3, h: 9 * k); Capsule().fill(.white.opacity(0.9)).frame(width: 60 * k, height: 22 * k) }
+-            default:
+-                HStack(spacing: 8 * k) { avatar(26 * k); Bar(w: w * 0.3, h: 9 * k)
+-                    RoundedRectangle(cornerRadius: 6 * k).fill(.white.opacity(0.25)).frame(width: 44 * k, height: 20 * k) }
+-            }
+-            Bar(w: w * 0.92, h: 7 * k, dim: true)
+-            Bar(w: w * 0.64, h: 7 * k, dim: true)
+-            HStack(spacing: 6 * k) { Ph("music-note", 11 * k).foregroundStyle(.white); Bar(w: w * 0.52, h: 6 * k, dim: true) }
+-        }
+-        .frame(width: w, alignment: .leading)
+-    }
+-
+-    private func avatar(_ d: Double) -> some View {
+-        Circle().fill(.white.opacity(0.75)).frame(width: d, height: d).overlay(Circle().strokeBorder(.white, lineWidth: 1.5))
+-    }
+-}
+-
+-/// A desktop app's layout on the laptop screen: YouTube's player with its list on the right, or Facebook's player with
+-/// its comments column. The take plays where the player is.
+-struct DesktopSkin<Player: View>: View {
+-    var skin: PreviewSkin
+-    var width: Double
+-    var height: Double
+-    var player: (Double, Double) -> Player
+-
+-    var body: some View {
+-        let pad = width * 0.02
+-        let top = height * 0.07
+-        ZStack(alignment: .topLeading) {
+-            Color(white: 0.06)
+-            HStack(spacing: width * 0.015) {
+-                Ph("list-bullets", 14).foregroundStyle(.white)
+-                Bar(w: width * 0.06, h: 7)
+-                Spacer()
+-                Capsule().strokeBorder(Color(white: 0.27), lineWidth: 1).frame(width: width * 0.3, height: height * 0.04)
+-                Spacer()
+-                Ph("bell", 14).foregroundStyle(.white)
+-                Circle().fill(Color(white: 0.4)).frame(width: 14, height: 14)
+-            }
+-            .padding(.horizontal, pad).frame(height: top)
+-            let vw = width * (skin == .youtube ? 0.66 : 0.70)
+-            VStack(alignment: .leading, spacing: 10) {
+-                player(vw, vw * 9 / 16).clipShape(RoundedRectangle(cornerRadius: 6))
+-                Bar(w: vw * 0.7, h: 9)
+-                HStack(spacing: 8) {
+-                    Circle().fill(Color(white: 0.4)).frame(width: 22, height: 22)
+-                    Bar(w: vw * 0.18, h: 7, dim: true)
+-                    if skin == .youtube { Capsule().fill(.white.opacity(0.9)).frame(width: 56, height: 20) }
+-                    Spacer()
+-                    Capsule().fill(Color(white: 0.2)).frame(width: 80, height: 20)
+-                    Capsule().fill(Color(white: 0.2)).frame(width: 54, height: 20)
+-                }
+-                .frame(width: vw)
+-            }
+-            .padding(.leading, pad).padding(.top, height * 0.09)
+-            VStack(alignment: .leading, spacing: 10) {
+-                ForEach(0..<6, id: \.self) { _ in
+-                    HStack(alignment: .top, spacing: 8) {
+-                        if skin == .youtube {
+-                            RoundedRectangle(cornerRadius: 5).fill(Color(white: 0.17)).frame(width: width * 0.12, height: width * 0.12 * 9 / 16)
+-                        } else {
+-                            Circle().fill(Color(white: 0.3)).frame(width: 18, height: 18)
+-                        }
+-                        VStack(alignment: .leading, spacing: 5) { Bar(w: width * 0.12, h: 5, dim: true); Bar(w: width * 0.08, h: 5, dim: true).opacity(0.6) }
+-                    }
+-                }
+-            }
+-            .frame(width: width * (skin == .youtube ? 0.27 : 0.24), alignment: .leading)
+-            .padding(.top, height * 0.09)
+-            .frame(width: width - pad, alignment: .trailing)
+-        }
+-        .frame(width: width, height: height)
+-        .clipped()
+-        .accessibilityElement(children: .contain)
+-        .accessibilityLabel("\(skin.label) layout")
+-    }
+-}
+-
+-/// The safe zones: a diagonal hatch where the app's own buttons and captions sit, and a dashed box around the safe part.
+-struct SafeZoneLayer: View {
+-    var zone: SafeZone
+-
+-    var body: some View {
+-        Canvas { ctx, size in
+-            let r = zone.safeRect
+-            let safe = CGRect(x: r.x * size.width, y: r.y * size.height, width: r.w * size.width, height: r.h * size.height)
+-            var covered = Path(CGRect(origin: .zero, size: size))
+-            covered.addRect(safe)
+-            ctx.clip(to: covered, style: FillStyle(eoFill: true))
+-            var hatch = Path()
+-            var x: CGFloat = -size.height
+-            while x < size.width {
+-                hatch.move(to: CGPoint(x: x, y: size.height))
+-                hatch.addLine(to: CGPoint(x: x + size.height, y: 0))
+-                x += 12
+-            }
+-            ctx.stroke(hatch, with: .color(.white.opacity(0.22)), lineWidth: 5)
+-        }
+-        .overlay(GeometryReader { g in
+-            let r = zone.safeRect
+-            RoundedRectangle(cornerRadius: 4)
+-                .strokeBorder(.white.opacity(0.85), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+-                .frame(width: r.w * g.size.width, height: r.h * g.size.height)
+-                .offset(x: r.x * g.size.width, y: r.y * g.size.height)
+-        })
+-        .accessibilityLabel("Safe zones: keep faces and text inside the dashed box")
+-    }
+-}
+-
+ // MARK: Actions
+ 
+ /// One take action: icon and label, or the icon alone with the label as its tooltip.
+@@ -936,75 +520,6 @@ struct ViewerMoreMenu: View {
+     }
+ }
+ 
+-/// The preview choices in a popover: Clean or a platform layout, the device frame, the safe zones. Used in small panes
+-/// (over the media's corner) and when the preview bar has no room.
+-struct ViewerPreviewButton: View {
+-    @Environment(\.theme) private var t
+-    var skin: PreviewSkin
+-    var aspect: Double
+-    @Binding var prefsRaw: String
+-    var hasZones: Bool
+-    /// Over the media: a 28 pt icon on a scrim.
+-    var onMedia = false
+-    /// Beside the segmented skins: only the two switches.
+-    var switchesOnly = false
+-    @State private var open = false
+-
+-    private var prefs: ViewerPrefs { ViewerPrefsKey.read(prefsRaw) }
+-    private func update(_ f: (inout ViewerPrefs) -> Void) {
+-        var p = prefs
+-        f(&p)
+-        prefsRaw = ViewerPrefsKey.write(p)
+-    }
+-
+-    var body: some View {
+-        Button { open.toggle() } label: {
+-            Group {
+-                if onMedia {
+-                    Ph("device-mobile", 14).frame(width: 16, height: 16).foregroundStyle(.white)
+-                        .frame(width: 28, height: 28)
+-                        .background(Circle().fill(.black.opacity(0.5)))
+-                } else {
+-                    HStack(spacing: Space.s1) {
+-                        Ph("device-mobile", 14).frame(width: 16, height: 16)
+-                        Text(switchesOnly ? "Frame" : "Preview: \(skin.label)").font(t.scale.label.font).lineLimit(1).fixedSize()
+-                        Ph("caret-down", 11).frame(width: 12, height: 12)
+-                    }
+-                    .foregroundStyle(t.roles.ink)
+-                    .padding(.horizontal, Space.s2).frame(height: 28)
+-                    .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+-                }
+-            }
+-            .contentShape(Rectangle())
+-        }
+-        .buttonStyle(.plain)
+-        .help("Preview as it would look on each app")
+-        .accessibilityLabel("Preview: \(skin.label)")
+-        .popover(isPresented: $open, arrowEdge: .bottom) {
+-            VStack(alignment: .leading, spacing: Space.s3) {
+-                if !switchesOnly {
+-                    Text("Preview as").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+-                    Picker("Preview as", selection: Binding(get: { skin }, set: { s in update { $0.setSkin(s, aspect: aspect) } })) {
+-                        ForEach(PreviewSkin.options(aspect: aspect), id: \.self) { Text($0.label).tag($0) }
+-                    }
+-                    .pickerStyle(.radioGroup)
+-                    .labelsHidden()
+-                    Divider()
+-                }
+-                Toggle(PreviewSkin.isLandscape(aspect) ? "Laptop frame" : "Phone frame",
+-                       isOn: Binding(get: { prefs.deviceFrame }, set: { v in update { $0.deviceFrame = v } }))
+-                    .toggleStyle(.switch).controlSize(.small)
+-                Toggle("Safe zones", isOn: Binding(get: { prefs.safeZones }, set: { v in update { $0.safeZones = v } }))
+-                    .toggleStyle(.switch).controlSize(.small)
+-                    .disabled(!hasZones)
+-            }
+-            .font(t.scale.label.font)
+-            .padding(Space.s4)
+-            .frame(width: 220, alignment: .leading)
+-        }
+-    }
+-}
+-
+ /// Upscale in the viewer's own button style (the shared UpscaleButton draws an SF Symbol in another style); its picker
+ /// opens in a popover as before.
+ struct ViewerUpscaleButton: View {
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditPlatformPreview.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditPlatformPreview.swift
+new file mode 100644
+index 00000000..968a1b4d
+--- /dev/null
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditPlatformPreview.swift
+@@ -0,0 +1,259 @@
++import Foundation
++
++// Edit's platform preview (owner decision 2026-11-12, plans/edit-platform-preview.md). The platform views left the take
++// viewer and came here, merged with Edit's safe-area guide:
++// - View: Clean · TikTok · Reels · Shorts · Facebook (portrait, square, 4:5) or Clean · YouTube · Facebook (16:9). A platform
++//   view draws that app's generic chrome over the edit; Clean draws nothing.
++// - Safe area: a switch that works in every view. A platform view shows that app's red box; Clean shows the box that is
++//   safe on every app; landscape views use their own boxes.
++// - Remembered per project, falling back to this device's last choice.
++// - The check that warns when captions or text sit outside the box (the app's warning line; the server runs the same
++//   check for Claude: server/api/src/editor/safeArea.ts).
++
++/// What Edit's preview shows.
++public struct EditPreview: Codable, Hashable, Sendable {
++    public var view: PreviewSkin
++    public var safeArea: Bool
++
++    public init(view: PreviewSkin = .clean, safeArea: Bool = true) {
++        self.view = view
++        self.safeArea = safeArea
++    }
++
++    /// The views for a canvas of this shape.
++    public static func options(width: Int, height: Int) -> [PreviewSkin] {
++        PreviewSkin.options(aspect: Double(width) / Double(max(1, height)))
++    }
++
++    /// The view this canvas can show: one the shape doesn't offer (TikTok on a 16:9 project) becomes Clean.
++    public func resolved(width: Int, height: Int) -> EditPreview {
++        EditPreview(view: Self.options(width: width, height: height).contains(view) ? view : .clean, safeArea: safeArea)
++    }
++
++    public static func isLandscape(width: Int, height: Int) -> Bool { PreviewSkin.isLandscape(Double(width) / Double(max(1, height))) }
++}
++
++// MARK: The red box
++
++public enum EditSafeBox {
++    /// Landscape: the classic title-safe margin in Clean.
++    public static let titleSafe = SafeZone(top: 0.05, bottom: 0.05, left: 0.05, right: 0.05)
++
++    /// The box for a view on a canvas of this shape (nil: the switch is off).
++    public static func zone(_ p: EditPreview, width: Int, height: Int, layouts: PreviewLayouts = .defaults) -> SafeZone? {
++        guard p.safeArea else { return nil }
++        let v = p.resolved(width: width, height: height).view
++        if EditPreview.isLandscape(width: width, height: height) {
++            return v == .clean ? titleSafe : layouts.landscapeZone(v)
++        }
++        return v == .clean ? everyApp(layouts) : layouts.zone(v)
++    }
++
++    /// The box that is safe on every portrait app: the largest inset of each side.
++    public static func everyApp(_ l: PreviewLayouts = .defaults) -> SafeZone {
++        let zs = [PreviewSkin.tiktok, .reels, .shorts, .facebook].compactMap { l.zone($0) }
++        return SafeZone(top: zs.map(\.top).max() ?? 0, bottom: zs.map(\.bottom).max() ?? 0,
++                        left: zs.map(\.left).max() ?? 0, right: zs.map(\.right).max() ?? 0)
++    }
++
++    /// What the box is, for its tooltip and the warning line.
++    public static func name(_ p: EditPreview, width: Int, height: Int) -> String {
++        let v = p.resolved(width: width, height: height).view
++        if v == .clean { return EditPreview.isLandscape(width: width, height: height) ? "the title-safe area" : "the area safe on every app" }
++        return "\(v.label)'s safe area"
++    }
++
++    /// What the app's own chrome covers, for the warning line ("TikTok's caption and buttons").
++    public static func covers(_ p: EditPreview, width: Int, height: Int) -> String {
++        let v = p.resolved(width: width, height: height).view
++        switch v {
++        case .clean: return EditPreview.isLandscape(width: width, height: height) ? "the edge of some screens" : "some apps' captions and buttons"
++        case .youtube: return "YouTube's title and controls"
++        default: return EditPreview.isLandscape(width: width, height: height) ? "\(v.label)'s controls" : "\(v.label)'s caption and buttons"
++        }
++    }
++}
++
++// MARK: Captions and text outside the box
++
++/// Captions or a text item outside the red box.
++public struct SafeAreaIssue: Hashable, Sendable {
++    public enum Kind: String, Sendable { case captions, text }
++    public var kind: Kind
++    /// The text item's id (nil for captions).
++    public var itemId: String?
++    public var startSec: Double
++    public var endSec: Double
++    /// Which edges cross the box: top, bottom, left, right.
++    public var edges: [String]
++}
++
++/// An approximate box for a block of text (fractions of the canvas): the same estimate the server uses.
++public struct TextBox: Hashable, Sendable {
++    public var x: Double, y: Double, w: Double, h: Double
++    public var left: Double { x - w / 2 }
++    public var right: Double { x + w / 2 }
++    public var top: Double { y - h / 2 }
++    public var bottom: Double { y + h / 2 }
++
++    /// A block of `text` at centre (x, y): its size from the font size (of the canvas height), the wrap width and the
++    /// lines. Average glyph width ≈ 0.55 em (0.62 uppercase); good enough for a warning, not for layout.
++    public static func estimate(text: String, x: Double, y: Double, sizePct: Double, maxWidthPct: Double?, lineHeight: Double?,
++                                uppercase: Bool, maxLines: Int?, canvasAspect: Double) -> TextBox {
++        let em = sizePct / max(0.1, canvasAspect)          // font size as a fraction of the canvas WIDTH
++        let glyph = em * (uppercase ? 0.62 : 0.55)
++        let wrap = maxWidthPct ?? 0.85
++        var lines = 0
++        var widest = 0.0
++        for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
++            let w = Double(raw.count) * glyph
++            let n = max(1, Int((w / max(0.01, wrap)).rounded(.up)))
++            lines += n
++            widest = max(widest, min(w, wrap))
++        }
++        if let m = maxLines { lines = min(lines, max(1, m)) }
++        let h = Double(max(1, lines)) * sizePct * (lineHeight ?? 1.15)
++        return TextBox(x: x, y: y, w: widest, h: h)
++    }
++
++    /// The edges outside the zone (a 0.5 % tolerance).
++    public func edges(outside z: SafeZone) -> [String] {
++        let r = z.safeRect, tol = 0.005
++        var e: [String] = []
++        if top < r.y - tol { e.append("top") }
++        if bottom > r.y + r.h + tol { e.append("bottom") }
++        if left < r.x - tol { e.append("left") }
++        if right > r.x + r.w + tol { e.append("right") }
++        return e
++    }
++}
++
++public enum EditSafeCheck {
++    public typealias E = EditV2
++
++    /// Captions (each caption page) and text items (at rest: their own position, without animation, pins or keyframes)
++    /// outside the zone. Captions come back as one issue covering every page that crosses the box.
++    public static func issues(_ p: E.Project, zone: SafeZone) -> [SafeAreaIssue] {
++        let aspect = Double(p.canvas.width) / Double(max(1, p.canvas.height))
++        var out: [SafeAreaIssue] = []
++        if let ct = p.captionTrack, !(p.tracks.first { $0.kind == .caption }?.hidden ?? false) {
++            let s = ct.style
++            var from: Double?, to = 0.0
++            var edges = Set<String>()
++            for page in E.captionPages(p) {
++                let text = E.captionText(page.words.map(\.text), ct.language)
++                let b = TextBox.estimate(text: text, x: 0.5, y: s.y ?? 0.72, sizePct: s.sizePct, maxWidthPct: s.maxWidthPct, lineHeight: s.lineHeight,
++                                         uppercase: s.uppercase ?? false, maxLines: s.maxLines.map { Int($0) } ?? 2, canvasAspect: aspect)
++                let e = b.edges(outside: zone)
++                guard !e.isEmpty else { continue }
++                if from == nil { from = page.startSec }
++                to = max(to, page.endSec)
++                edges.formUnion(e)
++            }
++            if let f = from { out.append(SafeAreaIssue(kind: .captions, itemId: nil, startSec: f, endSec: to, edges: order(edges))) }
++        }
++        for t in p.tracks where t.kind == .text && t.hidden != true {
++            for case .text(let it) in t.items {
++                let b = box(it, aspect: aspect)
++                let e = b.edges(outside: zone)
++                if !e.isEmpty { out.append(SafeAreaIssue(kind: .text, itemId: it.id, startSec: it.startSec, endSec: it.startSec + it.durationSec, edges: e)) }
++            }
++        }
++        return out
++    }
++
++    public static func box(_ it: E.TextItem, aspect: Double) -> TextBox {
++        let sc = it.transform?.scale ?? 1
++        return TextBox.estimate(text: it.text, x: it.transform?.x ?? 0.5, y: it.transform?.y ?? 0.5, sizePct: it.style.sizePct * sc,
++                                maxWidthPct: it.style.maxWidthPct.map { $0 * sc }, lineHeight: it.style.lineHeight,
++                                uppercase: it.style.uppercase ?? false, maxLines: nil, canvasAspect: aspect)
++    }
++
++    private static func order(_ s: Set<String>) -> [String] { ["top", "bottom", "left", "right"].filter(s.contains) }
++
++    /// The warning line: "Captions sit under TikTok's caption and buttons (0:01–0:09)." nil when everything is inside.
++    public static func line(_ issues: [SafeAreaIssue], covers: String) -> String? {
++        guard let first = issues.first else { return nil }
++        let range = { (i: SafeAreaIssue) in "\(Take.clock(i.startSec))–\(Take.clock(i.endSec))" }
++        let caps = issues.first { $0.kind == .captions }
++        let texts = issues.filter { $0.kind == .text }
++        if let c = caps, texts.isEmpty { return "Captions sit under \(covers) (\(range(c)))." }
++        if caps == nil, texts.count == 1 { return "A text sits under \(covers) (\(range(first)))." }
++        if caps == nil { return "\(texts.count) texts sit under \(covers)." }
++        return "Captions and \(texts.count == 1 ? "a text" : "\(texts.count) texts") sit under \(covers)."
++    }
++
++    /// "Move into the safe area": the caption position and wrap width, and each text item's position, moved just inside
++    /// the box (nothing else changes). Returns nil when nothing needed moving.
++    public static func fixed(_ p: E.Project, zone: SafeZone) -> E.Project? {
++        let r = zone.safeRect
++        let aspect = Double(p.canvas.width) / Double(max(1, p.canvas.height))
++        var q = p
++        var changed = false
++        let found = issues(p, zone: zone)
++        let margin = 0.01
++        if found.contains(where: { $0.kind == .captions }), let ti = q.tracks.firstIndex(where: { $0.kind == .caption && $0.caption != nil }) {
++            var ct = q.tracks[ti].caption!
++            // Wrap no wider than the box allows around the centre line, then the tallest page inside the box vertically.
++            let half = min(0.5 - r.x, r.x + r.w - 0.5) - margin
++            if half > 0.1, (ct.style.maxWidthPct ?? 0.85) > 2 * half { ct.style.maxWidthPct = (2 * half * 100).rounded(.down) / 100 }
++            var tallest = 0.0
++            for page in E.captionPages(p) {
++                let b = TextBox.estimate(text: E.captionText(page.words.map(\.text), ct.language), x: 0.5, y: 0.5, sizePct: ct.style.sizePct,
++                                         maxWidthPct: ct.style.maxWidthPct, lineHeight: ct.style.lineHeight, uppercase: ct.style.uppercase ?? false,
++                                         maxLines: ct.style.maxLines.map { Int($0) } ?? 2, canvasAspect: aspect)
++                tallest = max(tallest, b.h)
++            }
++            ct.style.y = clampCentre(ct.style.y ?? 0.72, half: tallest / 2, lo: r.y + margin, hi: r.y + r.h - margin)
++            q.tracks[ti].caption = ct
++            changed = true
++        }
++        for ti in q.tracks.indices where q.tracks[ti].kind == .text {
++            for ii in q.tracks[ti].items.indices {
++                guard case .text(var it) = q.tracks[ti].items[ii], found.contains(where: { $0.itemId == it.id }) else { continue }
++                // Wrap no wider than the box, then the block's centre inside it.
++                let room = r.w - 2 * margin
++                if box(it, aspect: aspect).w > room, room > 0.1 {
++                    it.style.maxWidthPct = (room / (it.transform?.scale ?? 1) * 100).rounded(.down) / 100
++                }
++                let b = box(it, aspect: aspect)
++                var tr = it.transform ?? E.Transform()
++                tr.x = clampCentre(b.x, half: b.w / 2, lo: r.x + margin, hi: r.x + r.w - margin)
++                tr.y = clampCentre(b.y, half: b.h / 2, lo: r.y + margin, hi: r.y + r.h - margin)
++                it.transform = tr
++                q.tracks[ti].items[ii] = .text(it)
++                changed = true
++            }
++        }
++        return changed ? q : nil
++    }
++
++    /// A centre kept so [c − half, c + half] sits inside [lo, hi] (centred when it can't fit), to 3 decimals.
++    static func clampCentre(_ c: Double, half: Double, lo: Double, hi: Double) -> Double {
++        let v = hi - lo < 2 * half ? (lo + hi) / 2 : min(max(c, lo + half), hi - half)
++        return (v * 1000).rounded() / 1000
++    }
++}
++
++// MARK: Remembered per project
++
++/// Edit's preview choice per project (keyed by the project's source take), and this device's last choice for a new one.
++public struct EditPreviewPrefs: Codable, Hashable, Sendable {
++    public var last: EditPreview?
++    public var byProject: [String: EditPreview] = [:]
++    /// Oldest first, so the map stays small.
++    public var order: [String] = []
++    public static let kept = 200
++
++    public init() {}
++
++    public func choice(for project: String) -> EditPreview { byProject[project] ?? last ?? EditPreview() }
++
++    public mutating func set(_ p: EditPreview, for project: String) {
++        last = p
++        byProject[project] = p
++        order.removeAll { $0 == project }
++        order.append(project)
++        while order.count > Self.kept { byProject[order.removeFirst()] = nil }
++    }
++}
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
+index 8ee7187b..8c1415cc 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionAPI.swift
+@@ -123,8 +123,10 @@ public struct EditPresence: Codable, Hashable, Sendable {
+     /// android | mac | other
+     public var platform: String
+     public var canRender: Bool
+-    public init(device: String, label: String, platform: String = "mac", canRender: Bool = true) {
+-        self.device = device; self.label = label; self.platform = platform; self.canRender = canRender
++    /// Edit's preview on this app (the view and the red safe-area box), so Claude knows what the person sees.
++    public var preview: EditPreview?
++    public init(device: String, label: String, platform: String = "mac", canRender: Bool = true, preview: EditPreview? = nil) {
++        self.device = device; self.label = label; self.platform = platform; self.canRender = canRender; self.preview = preview
+     }
+ }
+ 
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionSync.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionSync.swift
+index eecfed4e..8dc35171 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/EditSessionSync.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditSessionSync.swift
+@@ -255,8 +255,9 @@ public final class EditSessionSync {
+     public var claudeEntries: [EditHistoryEntry] { history.filter(\.byClaude) }
+ 
+     /// "I have the edit open" (every 30 s): Claude's frames and save/export come to this app.
+-    public func announce(label: String, platform: String = "mac", canRender: Bool = true) async throws {
+-        try await api.announceEditPresence(sessionId: sessionId, EditPresence(device: device, label: label, platform: platform, canRender: canRender))
++    public func announce(label: String, platform: String = "mac", canRender: Bool = true, preview: EditPreview? = nil) async throws {
++        try await api.announceEditPresence(sessionId: sessionId, EditPresence(device: device, label: label, platform: platform, canRender: canRender,
++                                                                              preview: preview))
+     }
+ 
+     public func leave() async {
+diff --git a/mac/MuseCore/Sources/MuseCore/Edit/EditSuiteState.swift b/mac/MuseCore/Sources/MuseCore/Edit/EditSuiteState.swift
+index 2e435b75..0843f21a 100644
+--- a/mac/MuseCore/Sources/MuseCore/Edit/EditSuiteState.swift
++++ b/mac/MuseCore/Sources/MuseCore/Edit/EditSuiteState.swift
+@@ -134,27 +134,6 @@ public enum EditSuite {
+         }
+     }
+ 
+-    /// Platform safe-area guides over the preview.
+-    public enum SafeArea: String, CaseIterable, Hashable, Sendable, Identifiable {
+-        case tiktok, reels, shorts
+-        public var id: String { rawValue }
+-        public var label: String {
+-            switch self {
+-            case .tiktok: return "TikTok"
+-            case .reels: return "Reels"
+-            case .shorts: return "Shorts"
+-            }
+-        }
+-        /// The area kept clear of the platform's buttons and captions, as canvas fractions (left, top, right, bottom insets).
+-        public var insets: (left: Double, top: Double, right: Double, bottom: Double) {
+-            switch self {
+-            case .tiktok: return (0.06, 0.12, 0.17, 0.2)
+-            case .reels: return (0.05, 0.14, 0.15, 0.22)
+-            case .shorts: return (0.05, 0.1, 0.16, 0.18)
+-            }
+-        }
+-    }
+-
+     public enum BeatMarks: String, CaseIterable, Hashable, Sendable { case every, strong }
+ 
+     /// Caption position presets (style.y).
+@@ -375,7 +354,9 @@ public struct EditSuiteState: Sendable {
+     /// Locked rows can't be selected or changed from the timeline (view state).
+     public var locked: Set<String> = []
+     public var tab: EditSuite.InspectorTab = .captions
+-    public var safeArea: EditSuite.SafeArea? = .tiktok
++    /// The preview's view (Clean or a platform's chrome) and the red safe-area box (plans/edit-platform-preview.md). The app
++    /// sets it from the remembered choice for this project.
++    public var preview = EditPreview()
+     public var export = EditSuite.ExportSettings()
+     /// The last saved project (for "saved just now" / unsaved changes).
+     public private(set) var savedProject: E.Project?
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift b/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift
+index 58139574..d5935f84 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift
+@@ -1,14 +1,15 @@
+ import Foundation
+ 
+ // The take viewer (plans/swap-viewer-design.md §B, owner-approved 2026-11-12): one viewer wherever a take or image is
+-// shown. This file holds what the app's views need that can be tested without AppKit: the platform previews ("skins")
+-// and their safe zones, the frame maths (no letterbox), playback without a scrubber (the keys, the jumps, the readout),
+-// the take actions and the order in which their labels give way, and the New Swap trimmer.
++// shown. This file holds what the app's views need that can be tested without AppKit: the frame maths (no letterbox),
++// playback without a scrubber (the keys, the jumps, the readout), the take actions and the order in which their labels
++// give way, and the New Swap trimmer. The platform layouts ("skins") and their safe zones live here too, but since the
++// owner's decision of 2026-11-12 they are shown in Edit only (Edit/EditPlatformPreview.swift), never in the viewer.
+ 
+ // MARK: Preview skins
+ 
+-/// How the viewer shows a take: clean, or under a generic drawing of a platform's layout. Portrait and square media get
+-/// the phone layouts; landscape media gets the desktop ones.
++/// How Edit's preview shows the edit: clean, or under a generic drawing of a platform's layout. Portrait and square
++/// canvases get the phone layouts; landscape ones get the landscape players.
+ public enum PreviewSkin: String, Codable, CaseIterable, Sendable {
+     case clean, tiktok, reels, shorts, facebook, youtube
+ 
+@@ -59,10 +60,13 @@ public struct SafeZone: Codable, Hashable, Sendable {
+ /// upload-post) on a 1080 × 1920 frame; the server's table replaces any it sends.
+ public struct PreviewLayouts: Codable, Hashable, Sendable {
+     public var zones: [String: SafeZone]
++    /// Landscape players (YouTube, Facebook): what their title and controls cover on a 16:9 frame.
++    public var landscape: [String: SafeZone]?
+     public var note: String?
+ 
+-    public init(zones: [String: SafeZone], note: String? = nil) {
++    public init(zones: [String: SafeZone], landscape: [String: SafeZone]? = nil, note: String? = nil) {
+         self.zones = zones
++        self.landscape = landscape
+         self.note = note
+     }
+ 
+@@ -71,38 +75,28 @@ public struct PreviewLayouts: Codable, Hashable, Sendable {
+         PreviewSkin.reels.rawValue: SafeZone(top: 0.10, bottom: 0.30, left: 0.03, right: 0.16),
+         PreviewSkin.shorts.rawValue: SafeZone(top: 0.09, bottom: 0.30, left: 0.03, right: 0.17),
+         PreviewSkin.facebook.rawValue: SafeZone(top: 0.10, bottom: 0.28, left: 0.03, right: 0.16),
++    ], landscape: [
++        PreviewSkin.youtube.rawValue: SafeZone(top: 0.12, bottom: 0.16, left: 0.03, right: 0.03),
++        PreviewSkin.facebook.rawValue: SafeZone(top: 0.08, bottom: 0.16, left: 0.03, right: 0.03),
+     ], note: "Approximate. Each app moves its buttons now and then.")
+ 
+-    /// The zone for a skin: the server's, else the default; none for Clean and the desktop layouts.
++    /// The phone zone for a skin: the server's, else the default; none for Clean and YouTube (a landscape player).
+     public func zone(_ skin: PreviewSkin) -> SafeZone? {
+         guard skin != .clean, skin != .youtube else { return nil }
+         return zones[skin.rawValue] ?? Self.defaults.zones[skin.rawValue]
+     }
+ 
+-    /// The server's table over the defaults (a skin it leaves out keeps its default).
+-    public func merged(over base: PreviewLayouts = .defaults) -> PreviewLayouts {
+-        PreviewLayouts(zones: base.zones.merging(zones) { _, new in new }, note: note ?? base.note)
++    /// The landscape zone for a skin (YouTube, Facebook): the server's, else the default; none for Clean.
++    public func landscapeZone(_ skin: PreviewSkin) -> SafeZone? {
++        guard skin == .youtube || skin == .facebook else { return nil }
++        return landscape?[skin.rawValue] ?? Self.defaults.landscape?[skin.rawValue]
+     }
+-}
+-
+-/// The viewer's remembered choices (per device, owner 2026-11-12): the skin for portrait and for landscape media, the
+-/// device frame and the safe zones.
+-public struct ViewerPrefs: Codable, Hashable, Sendable {
+-    public var portraitSkin: PreviewSkin = .clean
+-    public var landscapeSkin: PreviewSkin = .clean
+-    public var deviceFrame = false
+-    public var safeZones = false
+ 
+-    public init() {}
+-
+-    public func skin(aspect: Double) -> PreviewSkin {
+-        let s = PreviewSkin.isLandscape(aspect) ? landscapeSkin : portraitSkin
+-        return PreviewSkin.options(aspect: aspect).contains(s) ? s : .clean
+-    }
+-
+-    public mutating func setSkin(_ s: PreviewSkin, aspect: Double) {
+-        guard PreviewSkin.options(aspect: aspect).contains(s) else { return }
+-        if PreviewSkin.isLandscape(aspect) { landscapeSkin = s } else { portraitSkin = s }
++    /// The server's table over the defaults (a skin it leaves out keeps its default).
++    public func merged(over base: PreviewLayouts = .defaults) -> PreviewLayouts {
++        PreviewLayouts(zones: base.zones.merging(zones) { _, new in new },
++                       landscape: (base.landscape ?? [:]).merging(landscape ?? [:]) { _, new in new },
++                       note: note ?? base.note)
+     }
+ }
+ 
+@@ -121,27 +115,6 @@ public enum ViewerFrame {
+         if width / height > aspect { return ((height * aspect).rounded(), height.rounded()) }
+         return (width.rounded(), (width / aspect).rounded())
+     }
+-
+-    /// A generic phone: a 9:19.5 screen, an even bezel and corner radius in proportion to the screen width.
+-    public static let phoneScreenAspect = 9.0 / 19.5
+-    public static func phoneBezel(screenWidth w: Double) -> Double { max(6, (w * 0.035).rounded()) }
+-    public static func phoneRadius(screenWidth w: Double) -> Double { (w * 0.13).rounded() }
+-
+-    /// A generic laptop: a 16:10 screen.
+-    public static let laptopScreenAspect = 16.0 / 10.0
+-
+-    /// The phone's screen width that fits a box (bezels included).
+-    public static func phoneScreenWidth(width: Double, height: Double) -> Double {
+-        guard width > 0, height > 0 else { return 0 }
+-        // body = screen + 2 bezels, bezel ≈ 3.5 % of the screen width
+-        let byHeight = height / (1 / phoneScreenAspect + 0.07)
+-        let byWidth = width / 1.07
+-        return max(0, min(byHeight, byWidth).rounded(.down))
+-    }
+-
+-    /// Platform layouts fill the phone's screen (the apps crop a 9:16 video's sides on tall phones); Clean fits it, as a
+-    /// phone's own player does.
+-    public static func fillsScreen(_ skin: PreviewSkin) -> Bool { skin != .clean }
+ }
+ 
+ // MARK: Playback without a scrubber
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/Edit/EditPlatformPreviewTests.swift b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditPlatformPreviewTests.swift
+new file mode 100644
+index 00000000..781fb72e
+--- /dev/null
++++ b/mac/MuseCore/Tests/MuseCoreTests/Edit/EditPlatformPreviewTests.swift
+@@ -0,0 +1,113 @@
++import XCTest
++@testable import MuseCore
++
++/// Edit's platform preview (plans/edit-platform-preview.md): views per canvas shape, the red box in every view, captions
++/// and text outside it, "Move into the safe area", and the choice remembered per project.
++final class EditPlatformPreviewTests: XCTestCase {
++    typealias E = EditV2
++
++    private func fixture(_ name: String) throws -> E.Project {
++        let c = try XCTUnwrap(editorFixture("projects").array.first { $0["name"].string == name }, name)
++        return try c["project"].decode(E.Project.self)
++    }
++
++    private func portrait(_ p: E.Project) -> E.Project {
++        var q = p
++        q.canvas = E.Canvas(width: 1080, height: 1920, fps: p.canvas.fps)
++        return q
++    }
++
++    func testViewsFollowTheCanvasShape() {
++        XCTAssertEqual(EditPreview.options(width: 1080, height: 1920), [.clean, .tiktok, .reels, .shorts, .facebook])
++        XCTAssertEqual(EditPreview.options(width: 1080, height: 1350), [.clean, .tiktok, .reels, .shorts, .facebook])
++        XCTAssertEqual(EditPreview.options(width: 1920, height: 1080), [.clean, .youtube, .facebook])
++        // A TikTok project turned 16:9 shows Clean; the switch keeps its state.
++        let p = EditPreview(view: .tiktok, safeArea: false).resolved(width: 1920, height: 1080)
++        XCTAssertEqual(p, EditPreview(view: .clean, safeArea: false))
++    }
++
++    func testTheRedBoxWorksInEveryView() throws {
++        let tt = try XCTUnwrap(EditSafeBox.zone(EditPreview(view: .tiktok), width: 1080, height: 1920))
++        XCTAssertEqual(tt, PreviewLayouts.defaults.zone(.tiktok))
++        // Clean: the box safe on every app (the largest inset of each side).
++        let all = try XCTUnwrap(EditSafeBox.zone(EditPreview(view: .clean), width: 1080, height: 1920))
++        XCTAssertEqual(all.top, 0.11, accuracy: 1e-9)
++        XCTAssertEqual(all.bottom, 0.30, accuracy: 1e-9)
++        XCTAssertEqual(all.right, 0.17, accuracy: 1e-9)
++        // Landscape: YouTube's own box; Clean is title-safe.
++        XCTAssertEqual(EditSafeBox.zone(EditPreview(view: .youtube), width: 1920, height: 1080), PreviewLayouts.defaults.landscapeZone(.youtube))
++        XCTAssertEqual(EditSafeBox.zone(EditPreview(view: .clean), width: 1920, height: 1080), EditSafeBox.titleSafe)
++        // Off: no box, whatever the view.
++        XCTAssertNil(EditSafeBox.zone(EditPreview(view: .tiktok, safeArea: false), width: 1080, height: 1920))
++        XCTAssertEqual(EditSafeBox.covers(EditPreview(view: .tiktok), width: 1080, height: 1920), "TikTok's caption and buttons")
++    }
++
++    func testCaptionsLowOnTheFrameAreFlaggedAndMovedIntoTheBox() throws {
++        var s = EditSuiteState(portrait(try fixture("single clip")))
++        XCTAssertTrue(s.setCaptions(words: FakeMuseAPI.mockWords(duration: 10), assetId: "src"))
++        XCTAssertTrue(s.changeCaptionStyle { $0.y = 0.85 })
++        let zone = try XCTUnwrap(PreviewLayouts.defaults.zone(.tiktok))
++        let found = EditSafeCheck.issues(s.project, zone: zone)
++        let caps = try XCTUnwrap(found.first { $0.kind == .captions })
++        XCTAssertTrue(caps.edges.contains("bottom"))
++        XCTAssertLessThan(caps.startSec, caps.endSec)
++        let line = try XCTUnwrap(EditSafeCheck.line(found, covers: "TikTok's caption and buttons"))
++        XCTAssertTrue(line.hasPrefix("Captions sit under TikTok's caption and buttons ("), line)
++
++        let fixed = try XCTUnwrap(EditSafeCheck.fixed(s.project, zone: zone))
++        XCTAssertTrue(EditSafeCheck.issues(fixed, zone: zone).isEmpty)
++        XCTAssertLessThan(fixed.captionTrack?.style.y ?? 1, 0.71)
++        XCTAssertNil(E.problem(fixed), "the fix keeps the project valid")
++        // Already inside: nothing to fix.
++        XCTAssertNil(EditSafeCheck.fixed(fixed, zone: zone))
++    }
++
++    func testTextUnderTheRailIsFlaggedAndNudgedIn() throws {
++        var s = EditSuiteState(portrait(try fixture("single clip")))
++        XCTAssertTrue(s.addText("Wait for it"))
++        let id = try XCTUnwrap(s.selection)
++        XCTAssertTrue(s.apply { p in
++            var q = p
++            for ti in q.tracks.indices { for ii in q.tracks[ti].items.indices {
++                if case .text(var it) = q.tracks[ti].items[ii], it.id == id { it.transform = E.Transform(x: 0.9, y: 0.5); q.tracks[ti].items[ii] = .text(it) }
++            } }
++            return q
++        })
++        let zone = try XCTUnwrap(PreviewLayouts.defaults.zone(.tiktok))
++        let issue = try XCTUnwrap(EditSafeCheck.issues(s.project, zone: zone).first { $0.itemId == id })
++        XCTAssertEqual(issue.edges, ["right"])
++        let fixed = try XCTUnwrap(EditSafeCheck.fixed(s.project, zone: zone))
++        XCTAssertTrue(EditSafeCheck.issues(fixed, zone: zone).isEmpty)
++        // A long line wider than the box: the fix narrows its wrap width too.
++        var long = s
++        XCTAssertTrue(long.apply { p in
++            var q = p
++            for ti in q.tracks.indices { for ii in q.tracks[ti].items.indices {
++                if case .text(var it) = q.tracks[ti].items[ii], it.id == id {
++                    it.text = "Things nobody tells you about the first week"
++                    it.style.maxWidthPct = 0.85
++                    q.tracks[ti].items[ii] = .text(it)
++                }
++            } }
++            return q
++        })
++        let longFixed = try XCTUnwrap(EditSafeCheck.fixed(long.project, zone: zone))
++        XCTAssertTrue(EditSafeCheck.issues(longFixed, zone: zone).isEmpty)
++        // Clean with the box off has no issues to show (the app asks only when the box is on).
++        XCTAssertNil(EditSafeBox.zone(EditPreview(view: .clean, safeArea: false), width: 1080, height: 1920))
++    }
++
++    func testTheChoiceIsRememberedPerProjectWithTheDevicesLastForANewOne() throws {
++        var prefs = EditPreviewPrefs()
++        XCTAssertEqual(prefs.choice(for: "take_a"), EditPreview())
++        prefs.set(EditPreview(view: .tiktok), for: "take_a")
++        prefs.set(EditPreview(view: .reels, safeArea: false), for: "take_b")
++        XCTAssertEqual(prefs.choice(for: "take_a").view, .tiktok)
++        XCTAssertEqual(prefs.choice(for: "take_b"), EditPreview(view: .reels, safeArea: false))
++        XCTAssertEqual(prefs.choice(for: "take_new"), EditPreview(view: .reels, safeArea: false)) // the device's last
++        for i in 0..<(EditPreviewPrefs.kept + 5) { prefs.set(EditPreview(view: .shorts), for: "t\(i)") }
++        XCTAssertLessThanOrEqual(prefs.byProject.count, EditPreviewPrefs.kept)
++        let back = try JSONDecoder().decode(EditPreviewPrefs.self, from: JSONEncoder().encode(prefs))
++        XCTAssertEqual(back, prefs)
++    }
++}
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/TakeViewerTests.swift b/mac/MuseCore/Tests/MuseCoreTests/TakeViewerTests.swift
+index c7c95c35..b19c5c8f 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/TakeViewerTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/TakeViewerTests.swift
+@@ -1,8 +1,8 @@
+ import XCTest
+ @testable import MuseCore
+ 
+-/// The take viewer (plans/swap-viewer-design.md §B): skins per shape, safe zones (defaults and the server's table), the
+-/// frame maths (no letterbox), the keys (space, ← → 3 s and ⇧ 10 s, J/K/L), the seek readout, the phone's double-tap,
++/// The take viewer (plans/swap-viewer-design.md §B): skins per shape and safe zones (now Edit's; defaults and the server's
++/// table), the frame maths (no letterbox), the keys (space, ← → 3 s and ⇧ 10 s, J/K/L), the seek readout, the phone's double-tap,
+ /// the actions per context and the order their labels give way, and New Swap's trimmer.
+ final class TakeViewerTests: XCTestCase {
+     func testPortraitGetsThePhoneLayoutsAndLandscapeTheDesktopOnes() {
+@@ -11,19 +11,6 @@ final class TakeViewerTests: XCTestCase {
+         XCTAssertEqual(PreviewSkin.options(aspect: 16.0 / 9.0), [.clean, .youtube, .facebook])
+     }
+ 
+-    func testPrefsRememberOneSkinPerShapeAndNeverOfferOneTheShapeDoesntHave() {
+-        var p = ViewerPrefs()
+-        XCTAssertEqual(p.skin(aspect: 0.5625), .clean)
+-        p.setSkin(.tiktok, aspect: 0.5625)
+-        p.setSkin(.youtube, aspect: 1.78)
+-        XCTAssertEqual(p.skin(aspect: 0.5625), .tiktok)
+-        XCTAssertEqual(p.skin(aspect: 1.78), .youtube)
+-        p.setSkin(.youtube, aspect: 0.5625) // not a phone layout: ignored
+-        XCTAssertEqual(p.skin(aspect: 0.5625), .tiktok)
+-        let back = try? JSONDecoder().decode(ViewerPrefs.self, from: JSONEncoder().encode(p))
+-        XCTAssertEqual(back, p)
+-    }
+-
+     func testSafeZonesComeFromTheServerTableOverTheDefaults() throws {
+         let json = #"{"zones":{"tiktok":{"top":0.12,"bottom":0.3,"left":0.02,"right":0.18}},"note":"From the server"}"#
+         let server = try JSONDecoder().decode(PreviewLayouts.self, from: Data(json.utf8)).merged()
+@@ -37,6 +24,12 @@ final class TakeViewerTests: XCTestCase {
+         XCTAssertEqual(r.w, 0.80, accuracy: 1e-9)
+         XCTAssertEqual(r.h, 0.58, accuracy: 1e-9)
+         XCTAssertEqual(SafeZone(top: 2, bottom: -1, right: .nan).safeRect.h, 0.5, accuracy: 1e-9) // nonsense is clamped
++        // Landscape players: defaults until the server sends its own (an older server sends none).
++        XCTAssertEqual(server.landscapeZone(.youtube), PreviewLayouts.defaults.landscapeZone(.youtube))
++        XCTAssertNil(server.landscapeZone(.tiktok))
++        let wide = try JSONDecoder().decode(PreviewLayouts.self, from: Data(#"{"zones":{},"landscape":{"youtube":{"top":0.2,"bottom":0.2,"left":0,"right":0}}}"#.utf8)).merged()
++        XCTAssertEqual(wide.landscapeZone(.youtube)?.top, 0.2)
++        XCTAssertEqual(wide.landscapeZone(.facebook), PreviewLayouts.defaults.landscapeZone(.facebook))
+     }
+ 
+     func testThePortraitTakeSitsInAPortraitFrameNeverALetterbox() {
+@@ -49,10 +42,6 @@ final class TakeViewerTests: XCTestCase {
+         XCTAssertEqual(l.w, 800)
+         XCTAssertEqual(l.h, 450)
+         XCTAssertEqual(ViewerFrame.fit(aspect: .nan, width: 10, height: 10).w, 0)
+-        let s = ViewerFrame.phoneScreenWidth(width: 1000, height: 700)
+-        XCTAssertLessThanOrEqual(s / ViewerFrame.phoneScreenAspect + 2 * ViewerFrame.phoneBezel(screenWidth: s), 700)
+-        XCTAssertTrue(ViewerFrame.fillsScreen(.tiktok))
+-        XCTAssertFalse(ViewerFrame.fillsScreen(.clean))
+     }
+ 
+     func testKeysSpaceArrowsAndShift() {

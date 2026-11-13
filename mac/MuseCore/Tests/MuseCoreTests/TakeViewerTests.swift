@@ -1,27 +1,14 @@
 import XCTest
 @testable import MuseCore
 
-/// The take viewer (plans/swap-viewer-design.md §B): skins per shape, safe zones (defaults and the server's table), the
-/// frame maths (no letterbox), the keys (space, ← → 3 s and ⇧ 10 s, J/K/L), the seek readout, the phone's double-tap,
+/// The take viewer (plans/swap-viewer-design.md §B): skins per shape and safe zones (now Edit's; defaults and the server's
+/// table), the frame maths (no letterbox), the keys (space, ← → 3 s and ⇧ 10 s, J/K/L), the seek readout, the phone's double-tap,
 /// the actions per context and the order their labels give way, and New Swap's trimmer.
 final class TakeViewerTests: XCTestCase {
     func testPortraitGetsThePhoneLayoutsAndLandscapeTheDesktopOnes() {
         XCTAssertEqual(PreviewSkin.options(aspect: 9.0 / 16.0), [.clean, .tiktok, .reels, .shorts, .facebook])
         XCTAssertEqual(PreviewSkin.options(aspect: 1), [.clean, .tiktok, .reels, .shorts, .facebook])
         XCTAssertEqual(PreviewSkin.options(aspect: 16.0 / 9.0), [.clean, .youtube, .facebook])
-    }
-
-    func testPrefsRememberOneSkinPerShapeAndNeverOfferOneTheShapeDoesntHave() {
-        var p = ViewerPrefs()
-        XCTAssertEqual(p.skin(aspect: 0.5625), .clean)
-        p.setSkin(.tiktok, aspect: 0.5625)
-        p.setSkin(.youtube, aspect: 1.78)
-        XCTAssertEqual(p.skin(aspect: 0.5625), .tiktok)
-        XCTAssertEqual(p.skin(aspect: 1.78), .youtube)
-        p.setSkin(.youtube, aspect: 0.5625) // not a phone layout: ignored
-        XCTAssertEqual(p.skin(aspect: 0.5625), .tiktok)
-        let back = try? JSONDecoder().decode(ViewerPrefs.self, from: JSONEncoder().encode(p))
-        XCTAssertEqual(back, p)
     }
 
     func testSafeZonesComeFromTheServerTableOverTheDefaults() throws {
@@ -37,6 +24,12 @@ final class TakeViewerTests: XCTestCase {
         XCTAssertEqual(r.w, 0.80, accuracy: 1e-9)
         XCTAssertEqual(r.h, 0.58, accuracy: 1e-9)
         XCTAssertEqual(SafeZone(top: 2, bottom: -1, right: .nan).safeRect.h, 0.5, accuracy: 1e-9) // nonsense is clamped
+        // Landscape players: defaults until the server sends its own (an older server sends none).
+        XCTAssertEqual(server.landscapeZone(.youtube), PreviewLayouts.defaults.landscapeZone(.youtube))
+        XCTAssertNil(server.landscapeZone(.tiktok))
+        let wide = try JSONDecoder().decode(PreviewLayouts.self, from: Data(#"{"zones":{},"landscape":{"youtube":{"top":0.2,"bottom":0.2,"left":0,"right":0}}}"#.utf8)).merged()
+        XCTAssertEqual(wide.landscapeZone(.youtube)?.top, 0.2)
+        XCTAssertEqual(wide.landscapeZone(.facebook), PreviewLayouts.defaults.landscapeZone(.facebook))
     }
 
     func testThePortraitTakeSitsInAPortraitFrameNeverALetterbox() {
@@ -49,10 +42,6 @@ final class TakeViewerTests: XCTestCase {
         XCTAssertEqual(l.w, 800)
         XCTAssertEqual(l.h, 450)
         XCTAssertEqual(ViewerFrame.fit(aspect: .nan, width: 10, height: 10).w, 0)
-        let s = ViewerFrame.phoneScreenWidth(width: 1000, height: 700)
-        XCTAssertLessThanOrEqual(s / ViewerFrame.phoneScreenAspect + 2 * ViewerFrame.phoneBezel(screenWidth: s), 700)
-        XCTAssertTrue(ViewerFrame.fillsScreen(.tiktok))
-        XCTAssertFalse(ViewerFrame.fillsScreen(.clean))
     }
 
     func testKeysSpaceArrowsAndShift() {

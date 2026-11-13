@@ -81,7 +81,7 @@ extension EditSuiteSession {
         let presence = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                try? await sync.announce(label: Self.hostLabel, platform: "mac", canRender: true)
+                try? await sync.announce(label: Self.hostLabel, platform: "mac", canRender: true, preview: self.state.preview)
                 try? await Task.sleep(nanoseconds: Self.presenceEvery)
             }
         }

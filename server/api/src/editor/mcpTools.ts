@@ -3,6 +3,7 @@
 // save or export. Guardrails: no posting, no deleting takes, no spend without the owner, every call logged in the
 // session history and every change undoable. Owner only (the MCP server already admits only owner tokens).
 import { and, desc, eq, inArray } from 'drizzle-orm';
+import { previewView } from './safeArea.js';
 import { takes, uploads } from '../db/schema.js';
 import { ApiError, badRequest } from '../errors.js';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -205,16 +206,17 @@ const TOOLS: EditTool[] = [
   },
   {
     name: 'get_edit', title: 'Get the edit', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: 'The edit session now: revision (send it as baseRevision with changes), a summary with item ids, the full project JSON, recent history (who changed what), apps online, and paid helpers waiting for the owner.',
+    description: 'The edit session now: revision (send it as baseRevision with changes), a summary with item ids, the full project JSON, recent history (who changed what), apps online, paid helpers waiting for the owner, and preview: the view the person has on in Edit (clean, tiktok, reels, shorts, facebook; youtube or facebook on 16:9), its red safe box (fractions of the frame each app\'s buttons cover) and unsafe: captions and text sitting outside it, with their times. When unsafe is not empty and you are working on captions or text, say so in one plain line ("Your captions sit under TikTok\'s buttons from 0:01 to 0:09") and offer to move them in (caption_style with y, or the text\'s transform).',
     inputSchema: obj({ sessionId: SID, full: bool('Include the full project JSON (default true)') }, ['sessionId']),
     run: async (env, a) => {
       const svc = editSessionsOf(env.ctx), s = await svc.row(env.user, sessionId(env, a)), v = await svc.view(s);
-      return { sessionId: v.id, revision: v.revision, summary: summary(v.project), ...(a.full === false ? {} : { project: v.project }), history: v.history?.slice(0, 20), online: v.online, pending: v.pending, requests: v.requests };
+      return { sessionId: v.id, revision: v.revision, summary: summary(v.project), ...(a.full === false ? {} : { project: v.project }), history: v.history?.slice(0, 20), online: v.online, pending: v.pending, requests: v.requests,
+        preview: previewView(v.project, svc.preview(v.id)) };
     },
   },
   {
     name: 'apply_edit_ops', title: 'Change the edit', scope: 'edit:write',
-    description: `Applies changes to the edit as one undoable step. Send the revision you last read as baseRevision (a stale one is refused with the current revision: get_edit and try again). Ops (see plans/video-editor.md "Edit ops"): ${OP_NAMES.join(', ')}; layers: ${LAYER_OP_NAMES.join(', ')}. Examples: {"op":"trim","clipId":"c1","inSec":0.5,"outSec":6}, {"op":"split","at":3.2}, {"op":"delete","itemId":"c2"}, {"op":"speed","clipId":"c1","curve":"hero"}, {"op":"add_hook","template":"hook-bold","text":"Wait for it…"}, {"op":"caption_style","preset":"pop"}, {"op":"look","itemId":"all","look":"film-gold","strength":0.7}, {"op":"transition","clipId":"all","kind":"fade","durationSec":0.3}, {"op":"duck","levelDb":-12}, {"op":"ratio","ratio":"9:16"}. Times are seconds; timeline times for split/startSec, source times for trim. When the result has a notice (a mask, Invert, green-screen key or cut-out changed), tell the person that line plainly. To play part of a clip backwards (reverse, rewind before a drop) use reverse_clip, not speed.`,
+    description: `Applies changes to the edit as one undoable step. Send the revision you last read as baseRevision (a stale one is refused with the current revision: get_edit and try again). Ops (see plans/video-editor.md "Edit ops"): ${OP_NAMES.join(', ')}; layers: ${LAYER_OP_NAMES.join(', ')}. Examples: {"op":"trim","clipId":"c1","inSec":0.5,"outSec":6}, {"op":"split","at":3.2}, {"op":"delete","itemId":"c2"}, {"op":"speed","clipId":"c1","curve":"hero"}, {"op":"add_hook","template":"hook-bold","text":"Wait for it…"}, {"op":"caption_style","preset":"pop"}, {"op":"look","itemId":"all","look":"film-gold","strength":0.7}, {"op":"transition","clipId":"all","kind":"fade","durationSec":0.3}, {"op":"duck","levelDb":-12}, {"op":"ratio","ratio":"9:16"}. Times are seconds; timeline times for split/startSec, source times for trim. When the result has a notice (a mask, Invert, green-screen key or cut-out changed), tell the person that line plainly. When it has safeAreaWarnings (your change put captions or text under the buttons of the app the person previews in Edit), follow its tell. To play part of a clip backwards (reverse, rewind before a drop) use reverse_clip, not speed.`,
     inputSchema: obj({ sessionId: SID, baseRevision: num('The revision your change is based on'), ops: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object' }, description: 'Operations, applied in order' } }, ['sessionId', 'baseRevision', 'ops']),
     run: async (env, a) => editSessionsOf(env.ctx).applyClaude(env.user, sessionId(env, a), a),
   },

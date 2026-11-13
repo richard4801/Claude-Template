@@ -62,9 +62,18 @@ extension SnapshotRunner {
                 store.openRecreate()
                 try? await Task.sleep(for: .seconds(1))
                 let late = Date().timeIntervalSince(started) - 1
-                let drawn = screensInWindow()
+                var drawn = screensInWindow()
+                // The old page can still be leaving at the 1 s mark on a cold first try (run 582: [edit, home] once, then
+                // [edit]); a stale screen is one that stays. Give it up to 1 s more, then judge (and say how long it took).
+                var settle = 0.0
+                while drawn != ["\(store.screen)"] && settle < 1 {
+                    try? await Task.sleep(for: .seconds(0.1))
+                    settle += 0.1
+                    drawn = screensInWindow()
+                }
                 let ok = late < 2 && drawn == ["\(store.screen)"]
-                out.add("\(ok ? "FITS" : "CUT") \(label): main thread back after \(String(format: "%.2f", late)) s late, store.screen \(store.screen), drawn [\(drawn.joined(separator: ", "))]")
+                let settled = settle > 0 ? ", settled after +\(String(format: "%.1f", settle)) s" : ""
+                out.add("\(ok ? "FITS" : "CUT") \(label): main thread back after \(String(format: "%.2f", late)) s late, store.screen \(store.screen), drawn [\(drawn.joined(separator: ", "))]\(settled)")
                 // Let the demo reply finish before the next try (Stop isn't what this checks).
                 for _ in 0..<80 where service.relayState.running.isEmpty == false { try? await Task.sleep(for: .seconds(0.1)) }
             }

@@ -170,35 +170,58 @@ final class ClaudeOrbTests: XCTestCase {
     }
 }
 
-final class ClaudeOrbLiquidTests: XCTestCase {
-    func testBlobsDriftWithoutLoopingAndStayInTheGlass() {
-        let look = ClaudeOrb.look(.thinking)
-        var seen: [Double] = []
-        var phase = 0.0
-        for k in 0..<600 {
-            phase = ClaudeOrbLiquid.advance(phase, by: 1.0 / 30, look: look)
-            let b = ClaudeOrbLiquid.blobs(phase: phase, time: Double(k) / 30, look: look, pulse: 0)
-            XCTAssertEqual(b.count, 4)
-            for x in b { XCTAssertLessThanOrEqual(abs(x.x), 0.61); XCTAssertLessThanOrEqual(abs(x.y), 0.61); XCTAssertGreaterThan(x.radius, 0.4) }
-            seen.append(b[0].x)
+final class ClaudeOrbShaderTests: XCTestCase {
+    func testStatesBecomeTheShadersSmokeAndGlass() {
+        func u(_ s: ClaudeOrbState, pulse: Double = 0, rm: Bool = false) -> ClaudeOrbUniforms {
+            ClaudeOrbShader.uniforms(s, look: ClaudeOrb.look(s), time: 1, pulse: pulse, reduceMotion: rm)
         }
-        // Moves smoothly (no jumps between frames) and does not come back to the same path (no loop).
-        for (a, b) in zip(seen, seen.dropFirst()) { XCTAssertLessThan(abs(a - b), 0.05) }
-        XCTAssertNotEqual(Array(seen[0..<60]), Array(seen[300..<360]))
-    }
-
-    func testStatesChangeTheLiquid() {
-        let quiet = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 0)
-        let chunk = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.thinking), pulse: 1)
-        for (a, b) in zip(quiet, chunk) { XCTAssertGreaterThan(b.radius, a.radius) } // a streamed chunk swells them
-        let err = ClaudeOrbLiquid.blobs(phase: 3, time: 3, look: ClaudeOrb.look(.error), pulse: 0)
-        XCTAssertTrue(err.allSatisfy { $0.r > $0.b }) // red and orange
+        XCTAssertLessThan(u(.idle).bright, u(.thinking).bright)
+        XCTAssertGreaterThan(u(.operating).current, 0) // a current streams across
+        XCTAssertEqual(u(.thinking).current, 0)
+        XCTAssertEqual(u(.error).danger, 1)
+        XCTAssertEqual(u(.thinking, pulse: 0.7).pulse, 0.7) // a chunk: a plume rises
+        XCTAssertEqual(u(.idle, pulse: 0.7).pulse, 0) // idle never flashes
+        XCTAssertGreaterThan(u(.thinking, pulse: 1).pop, u(.thinking).pop) // the glass pops per chunk
+        XCTAssertGreaterThan(u(.thinking).wobble, u(.idle).wobble)
+        for s in ClaudeOrbState.allCases { XCTAssertLessThanOrEqual(u(s).wobble, 0.05); XCTAssertLessThanOrEqual(abs(u(s, pulse: 1).pop), 0.06) } // subtle, never rubbery
+        let still = u(.thinking, pulse: 1, rm: true)
+        XCTAssertEqual(still.wobble, 0); XCTAssertEqual(still.pop, 0); XCTAssertEqual(still.pulse, 0) // Reduce Motion: the shape is still
         XCTAssertGreaterThan(ClaudeOrb.look(.thinking).swirl, ClaudeOrb.look(.idle).swirl)
         XCTAssertLessThan(ClaudeOrb.look(.error).swirl, ClaudeOrb.look(.idle).swirl) // error slows down
-        // Operating: the blobs stream one way across the glass as time moves.
-        let a = ClaudeOrbLiquid.blobs(phase: 1, time: 0.2, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
-        let b = ClaudeOrbLiquid.blobs(phase: 1, time: 1.0, look: ClaudeOrb.look(.operating), pulse: 0).map(\.x).reduce(0, +)
-        XCTAssertGreaterThan(b, a)
-        XCTAssertEqual(ClaudeOrbLiquid.advance(5, by: 1, look: ClaudeOrb.look(.idle)), 5 + 0.25 * 0.12, accuracy: 1e-9) // a stall never jumps
+    }
+
+    func testPhaseOnlyMovesForwardAndNeverJumps() {
+        let look = ClaudeOrb.look(.thinking)
+        XCTAssertEqual(ClaudeOrbShader.advance(5, by: 1, look: look), 5 + 0.25 * look.swirl, accuracy: 1e-9) // a stall
+        XCTAssertEqual(ClaudeOrbShader.advance(5, by: -1, look: look), 5)
+        XCTAssertEqual(ClaudeOrbShader.advance(5, by: 0.1, look: ClaudeOrb.look(.idle, reduceMotion: true)), 5) // Reduce Motion: still
+    }
+}
+
+final class ClaudeContextTests: XCTestCase {
+    func testTheStripReadsTheScreenClaudeGets() {
+        // The same JSON the composer syncs (SuiteScreen.json): a New Swap with a clip, a product photo and a described background.
+        let remix = ShotRequest.remix(clipId: "clip_1", draft: {
+            var d = RemixDraft(); d.backgroundOn = true; d.backgroundMode = .describe; d.backgroundWords = "a beach at dusk"; return d
+        }())
+        var r = remix; r.modelId = "m_1"; r.outfitId = "of_1"; r.engineModel = "seedance-2"
+        let screen = SuiteScreen.json(tool: "remix", request: r, inputs: [
+            SuiteScreen.Input(slot: "remix.clip", kind: "video", label: "Walk.mp4", clipId: "clip_1", seconds: 12),
+            SuiteScreen.Input(slot: "remix.outfit", kind: "image", label: "Hoodie photo", url: "/uploads/p.jpg"),
+            SuiteScreen.Input(slot: "reference 1", kind: "image", label: "Look", role: "style", url: "/uploads/r.jpg"),
+            SuiteScreen.Input(slot: "guide", kind: "video", label: "Blender guide", role: "blocking", key: "g.mp4"),
+        ], settings: ["modelLabel": .string("Seedance 2.0 · Higgsfield")], at: nil)
+        let items = ClaudeContext.items(screen: screen, lookups: .init(
+            character: { $0 == "m_1" ? ("Ava", ImageRef(url: "/uploads/face.jpg")) : nil },
+            outfit: { $0 == "of_1" ? ("Hoodie", nil) : nil },
+            clipPoster: { $0 == "clip_1" ? ImageRef(url: "/uploads/poster.jpg") : nil },
+            modelLabel: { _ in "not used: the screen names it" }))
+        XCTAssertEqual(items.map(\.label), ["Clip", "Her", "Outfit", "Background", "Product", "Style", "Guide", "Model"])
+        XCTAssertEqual(items[0].image?.url, "/uploads/poster.jpg")
+        XCTAssertEqual(items[1].detail, "Ava")
+        XCTAssertEqual(items[3].words, "a beach at dusk")
+        XCTAssertEqual(items.last?.detail, "Seedance 2.0 · Higgsfield") // the server's label, never built in the app
+        XCTAssertEqual(Set(items.map(\.id)).count, items.count) // stable, unique ids (the strip animates by id)
+        XCTAssertTrue(ClaudeContext.items(screen: .null).isEmpty)
     }
 }
