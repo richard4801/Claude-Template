@@ -24,7 +24,10 @@ enum EditMediaProbe {
         }()
         let format = MediaSniff.format(head)
         var hasVideo: Bool?, hasAudio: Bool?
-        if case .isoMedia = format {
+        // A container, or bytes that say nothing (then only real tracks make it usable, never the name).
+        var readTracks = format == .unknown
+        if case .isoMedia = format { readTracks = true }
+        if readTracks {
             let asset = AVURLAsset(url: url)
             let v = try? await asset.loadTracks(withMediaType: .video)
             let a = try? await asset.loadTracks(withMediaType: .audio)

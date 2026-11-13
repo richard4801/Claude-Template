@@ -52,7 +52,14 @@ final class EditAudioApprovalsTests: XCTestCase {
     func testUnreadableFilesSayWhyInOnePlainLine() {
         XCTAssertNil(S.verdict(.unknown, fileExtension: "pdf"))
         XCTAssertNil(S.verdict(.unknown, fileExtension: "mp3"), "an .mp3 with no MPEG audio inside")
-        XCTAssertEqual(S.verdict(.unknown, fileExtension: "mov"), S.Verdict(.video, "video/quicktime", "mov"))
+        XCTAssertNil(S.verdict(.unknown, fileExtension: "mov"), "a name alone never makes a file usable (run 617: text named .mp4)")
+        XCTAssertNil(S.verdict(.unknown, fileExtension: "mp4", hasVideo: false, hasAudio: false))
+        XCTAssertEqual(S.verdict(.unknown, fileExtension: "mov", hasVideo: true, hasAudio: true), S.Verdict(.video, "video/quicktime", "mov"))
+        XCTAssertEqual(S.verdict(.unknown, fileExtension: "mp4", hasVideo: false, hasAudio: true), S.Verdict(.audio, "audio/mp4", "m4a"))
+        XCTAssertNil(S.verdict(S.format(Data("not a video".utf8)), fileExtension: "mp4"), "the review's notes.mp4")
+        // An older QuickTime file without ftyp is a container its tracks decide.
+        XCTAssertEqual(S.format(bytes([0, 0, 0, 8] + ascii("wide"))), .isoMedia(brand: "qt  "))
+        XCTAssertEqual(S.format(bytes([0, 0, 0, 8] + ascii("mdat"))), .isoMedia(brand: "qt  "))
         XCTAssertEqual(S.unreadable, "This file has no video or sound MUSE can read.")
         XCTAssertFalse(S.unreadable.contains("·"))
     }
