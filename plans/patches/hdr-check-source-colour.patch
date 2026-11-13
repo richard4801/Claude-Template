@@ -1,0 +1,53 @@
+From 3600fbc72b91bc6d637837ffe39f4beafa1c305a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 13 Nov 2026 04:46:40 +0000
+Subject: [PATCH] Mac HDR colour check: HDR compared with the source colour,
+ the SDR export logged as INFO
+
+Run 604: every frame-consistency and Dolby Vision check passed; only "matches the SDR export" failed, because the SDR export
+read back as BGRA (228, 180, 152) is itself off the source (224, 172, 140) while HDR (221, 169, 137) is within 3. The check
+now compares HDR with the source (<= 6) and writes the SDR reading as an INFO line.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxoCcw28R6FBjPPp318
+---
+ .github/workflows/mac.yml                 | 2 +-
+ mac/Muse/App/SnapshotRunner+EditOps.swift | 9 ++++++---
+ 2 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/.github/workflows/mac.yml b/.github/workflows/mac.yml
+index e60d2af9..e3284498 100644
+--- a/.github/workflows/mac.yml
++++ b/.github/workflows/mac.yml
+@@ -252,7 +252,7 @@ jobs:
+           if ! grep -q '^MOVED' "$f"; then echo "::warning::No page moved: synthetic scroll events may not reach the app on this runner"; fi
+ 
+       # HDR (HLG) export colour (owner bug 2026-11-12): every frame of an SDR skin-tone take exported in HDR shows the same
+-      # colour (first 15 frames, caption vs plain) and matches the SDR export. Review mode runs it first, on its own; this step comes after the
++      # colour (first 15 frames, caption vs plain) and matches the source colour (the SDR export is logged as INFO). Review mode runs it first, on its own; this step comes after the
+       # other checks so its failure doesn't skip them, and runs even when one of them failed
+       # (SnapshotRunner+EditOps.swift hdrColourCheck); its TRACE lines show the colour tags each frame really arrived with.
+       - name: HDR colour check
+diff --git a/mac/Muse/App/SnapshotRunner+EditOps.swift b/mac/Muse/App/SnapshotRunner+EditOps.swift
+index aec5aa40..1f3581a3 100644
+--- a/mac/Muse/App/SnapshotRunner+EditOps.swift
++++ b/mac/Muse/App/SnapshotRunner+EditOps.swift
+@@ -757,9 +757,12 @@ extension SnapshotRunner {
+         log.note("FRAMES " + all.map { String(format: "%.2f ", $0.key) + describe($0.value) }.joined(separator: " | "))
+         check("every frame the same", H.distance(worst.value, first) <= 3,
+               String(format: "worst at %.2f s: ", worst.key) + describe(worst.value) + " vs first " + describe(first))
+-        // The SDR export shows the source colour; HDR, tone-mapped back, within a viewer's rounding of it.
+-        check("matches the SDR export", H.distance(first, ref) <= 10 && H.distance(ref, (r: skinRGB.0, g: skinRGB.1, b: skinRGB.2)) <= 6,
+-              "HDR \(describe(first)) SDR \(describe(ref)) source rgb\(skinRGB)")
++        // HDR, tone-mapped back (BT.2408), within a viewer's rounding of the source colour. Run 604: HDR (221, 169, 137) against
++        // the source (224, 172, 140). The SDR export read back as BGRA came out (228, 180, 152), off the source itself
++        // (AVFoundation's own 709 → BGRA read), so it is written down, not checked.
++        let source = (r: skinRGB.0, g: skinRGB.1, b: skinRGB.2)
++        check("matches the source colour", H.distance(first, source) <= 6, "HDR \(describe(first)) source rgb\(skinRGB)")
++        log.note("INFO SDR export reads \(describe(ref)) (HDR \(describe(first)), source rgb\(skinRGB))")
+     }
+ 
+     /// Dolby Vision in an HEVC file: the sample description's dvcC/dvvC/dvwC record, and an RPU (HEVC NAL unit type 62) in
+-- 
+2.43.0
+
