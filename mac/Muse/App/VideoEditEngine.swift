@@ -94,8 +94,11 @@ enum VideoEditEngine {
         let gen = AVAssetImageGenerator(asset: asset)
         gen.appliesPreferredTrackTransform = true
         gen.maximumSize = CGSize(width: height * 2, height: height * 2)
-        gen.requestedTimeToleranceBefore = CMTime(seconds: 0.2, preferredTimescale: 600)
-        gen.requestedTimeToleranceAfter = CMTime(seconds: 0.2, preferredTimescale: 600)
+        // Any frame within half a slot will do for a strip: the decoder stops at a nearby keyframe instead of decoding up
+        // to an exact time (owner ci_83f9d0dcd92f: long-GOP 1080p files made each strip dozens of decodes).
+        let slack = CMTime(seconds: max(0.2, duration / Double(count) / 2), preferredTimescale: 600)
+        gen.requestedTimeToleranceBefore = slack
+        gen.requestedTimeToleranceAfter = slack
         var out: [(Double, CGImage)] = []
         for i in 0..<count {
             let t = duration * (Double(i) + 0.5) / Double(count)

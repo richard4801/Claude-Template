@@ -112,6 +112,19 @@ extension SnapshotRunner {
              + String(format: "%.1f s, ready after %.1f s", EditV2.durationSec(s.project), Date().timeIntervalSince(opened)))
         capture(dir.appendingPathComponent("mac_edit_real.png"))
 
+        // 4a. The one-off work after open: a filmstrip and a waveform per file (two at a time). Timed, and what it costs.
+        let mediaStart = Date()
+        var burst: [Double] = []
+        while await EditMediaWork.shared.pending > 0, Date().timeIntervalSince(mediaStart) < 120 {
+            burst.append(await cpuPercent(over: 2))
+        }
+        let mediaLeft = await EditMediaWork.shared.pending
+        let mediaTime = Date().timeIntervalSince(mediaStart)
+        line(mediaLeft == 0 && mediaTime <= 60, "filmstrips and waveforms after open",
+             String(format: "%d files done %.0f s after the edit was ready (fails above 60 s), CPU meanwhile %.0f %% of one core on average; ",
+                    realClipCount, mediaTime, burst.isEmpty ? 0 : burst.reduce(0, +) / Double(burst.count))
+             + "\(mediaLeft) still running; " + systemLoad())
+
         // 4. Idle after a 15 s settle. The owner's build sat at ~80 % here.
         try? await Task.sleep(for: .seconds(15))
         let rebuilds0 = s.rebuildCount

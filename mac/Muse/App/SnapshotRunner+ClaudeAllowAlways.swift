@@ -134,7 +134,8 @@ extension SnapshotRunner {
               "folders \(service.fileSettings.allowedFolders), rules \(service.fileSettings.rules.map(\.id))")
         let win = mainWindow?.contentView
         let texts = win.map(Self.accessibilityTexts) ?? []
-        check("settings_shows_always_allowed", texts.contains { $0.contains("Always allowed") }, "no Always allowed heading on screen")
+        check("settings_shows_always_allowed", texts.contains { $0.contains("Always allowed") },
+              "no Always allowed heading in \(texts.count) texts; with Claude/Ask/About: \(texts.filter { $0.contains("Claude") || $0.contains("Ask") || $0.contains("About") }.prefix(8))")
         check("settings_shows_rule", texts.contains("ffmpeg commands"), "rows \(texts.filter { $0.contains("ommands") })")
         check("settings_shows_switch", texts.contains("Ask before anything"))
         capture(dir.appendingPathComponent("mac_a_claude_allow_settings.png"))
@@ -162,7 +163,7 @@ extension SnapshotRunner {
         var count = 0
         func walk(_ o: NSAccessibilityProtocol, depth: Int) {
             count += 1
-            guard depth < 60, count < 20_000 else { return }
+            guard depth < 160, count < 40_000 else { return }
             for v in [o.accessibilityLabel(), o.accessibilityTitle(), o.accessibilityValue() as? String] { if let v, !v.isEmpty { out.append(v) } }
             if let a = o.accessibilityValue() as? NSAttributedString, !a.string.isEmpty { out.append(a.string) }
             for c in o.accessibilityChildren() ?? [] { if let a = c as? NSAccessibilityProtocol { walk(a, depth: depth + 1) } }

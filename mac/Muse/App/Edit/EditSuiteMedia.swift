@@ -16,6 +16,8 @@ actor EditMediaWork {
     private var waiting: [CheckedContinuation<Void, Never>] = []
     private var strips: [String: [CGImage]] = [:]
     private var waves: [String: [Float]] = [:]
+    /// Strips and waveforms asked for and not finished (the real-media review check waits for 0).
+    private(set) var pending = 0
 
     private func take() async {
         if free > 0 { free -= 1; return }
@@ -29,6 +31,8 @@ actor EditMediaWork {
 
     func strip(_ url: URL, count: Int) async -> [CGImage] {
         if let s = strips[url.path] { return s }
+        pending += 1
+        defer { pending -= 1 }
         await take()
         defer { give() }
         if let s = strips[url.path] { return s }
@@ -38,6 +42,8 @@ actor EditMediaWork {
     }
     func wave(_ url: URL) async -> [Float] {
         if let w = waves[url.path] { return w }
+        pending += 1
+        defer { pending -= 1 }
         await take()
         defer { give() }
         if let w = waves[url.path] { return w }
