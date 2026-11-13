@@ -186,6 +186,7 @@ enum SnapshotRunner {
             await editBigCheck(store, dir: dir)   // Owner bugs, build 597: a 66-shot 16:9 edit opened by Claude, idle CPU, playback, Shape round trip
             await claudeChipsCheck(store, dir: dir)   // Live chips (owner 2026-11-12): Edit without vs with captions, different chips
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
+            await editSafeWarningShots(store, dir: dir)   // Edit's safe-area warning line on camera (SnapshotRunner+EditSafeWarning.swift)
             await recreateShots(store, dir: dir)   // Recreate this edit: Recipe and Compare in four themes, the swatches
             await learnShots(store, dir: dir)   // The learning editor: Playbook, its rule editor, Recipes, the Claude panel tab
             await chatShots(store, dir: dir)   // Claude chat on every surface, four themes, and the composer's fit (SnapshotRunner+Chat.swift)
