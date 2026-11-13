@@ -259,6 +259,8 @@ final class SuiteState {
     var editNewRequest: UUID?
     /// Recent edits on the Edit home (the last worked on first), loaded when it shows.
     var recentEdits: [EditRecentItem] = []
+    /// Counts loads of `recentEdits`; a load shows its list only if no newer one started meanwhile.
+    var recentEditsGeneration = 0
     /// A recent edit to open (the home's list, or a check).
     var editResume: EditRecentItem?
     /// Asks the open editor to close back to the Edit home (a check; the editor's own Back does the same).

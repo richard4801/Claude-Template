@@ -41,6 +41,8 @@ struct EditSuiteView: View {
             }
         }
         .task(id: openId) { await open(openId) }
+        // Back on the home (Edit opened, or an editor closed): the choice and Recent edits are read again.
+        .task(id: session == nil && openId == nil) { if session == nil && openId == nil { await store.loadRecentEdits() } }
         // A recent edit picked elsewhere (a check, One Claude): opened as it was left.
         .onChange(of: store.suite.editNewRequest) { _, r in if r != nil { store.suite.editNewRequest = nil; openTake(EditV2.blankSourceId) } }
         .task(id: store.suite.editResume?.id) {

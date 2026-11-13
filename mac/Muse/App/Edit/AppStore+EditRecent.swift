@@ -7,13 +7,17 @@ extension AppStore {
     /// Recent edits, the last worked on first; also kept in `suite.recentEdits` for the Edit home.
     @discardableResult
     func loadRecentEdits() async -> [EditRecentItem] {
+        // Run 610: an older load finishing after a newer one put a stale list (and a stale Continue draft) on the home. Only
+        // the latest load started may show its list.
+        suite.recentEditsGeneration &+= 1
+        let generation = suite.recentEditsGeneration
         var sessions: [EditSession] = []
         if isOwner { sessions = (try? await api.recentEditSessions(limit: 20)) ?? [] }
         let items = EditRecent.items(sessions: sessions, local: EditRecentStore.standard.load()) { [weak self] id in
             guard let t = self?.takes.first(where: { $0.id == id }) else { return nil }
             return t.title.isEmpty ? nil : t.displayTitle
         }
-        suite.recentEdits = items
+        if suite.recentEditsGeneration == generation { suite.recentEdits = items }
         return items
     }
 

@@ -22,9 +22,12 @@ extension SnapshotRunner {
         func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
             note(ok ? "DONE \(name)" : "FAIL \(name)\(detail().isEmpty ? "" : ": \(detail())")")
         }
+        /// Sessions this check opened an editor on (their views are this check's own, not late saves).
+        var openedHere: Set<String> = []
         /// Waits for the Edit page's editor to be ready on `takeId` (nil: any).
         func editorReady(_ takeId: String?, seconds: Double = 25) async -> EditSuiteSession? {
             let end = Date().addingTimeInterval(seconds)
+            defer { if let id = store.suite.editCurrent?.draftSessionId { openedHere.insert(id) } }
             while Date() < end {
                 // Ready and put back where it was left (restoreView ran).
                 if let s = store.suite.editCurrent, s.isReady, s.viewTracking, takeId == nil || s.take.id == takeId { return s }
@@ -93,7 +96,9 @@ extension SnapshotRunner {
         try? await Task.sleep(for: .seconds(3))
         check("no_auto_open", store.suite.editCurrent == nil, "an editor opened by itself on \(store.suite.editCurrent?.take.id ?? "?")")
         let draft = store.suite.recentEdits.first
+        let fresh = draft?.takeId == "rz_resume" ? [] : await store.loadRecentEdits()   // only to tell a stale home from a wrong order
         check("choice_continue_draft", draft?.takeId == "rz_resume" && draft?.title == "Beach walk",
+              "fresh load's first is \(fresh.first.map { "\($0.takeId) at \(Int64($0.lastEditedAt))" } ?? "-"); " +
               "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing"); " +
               "ours (rz_resume) view \(ourAt.map { String(Int64($0)) } ?? "-"); order: " + store.suite.recentEdits.prefix(4).map { "\($0.takeId) at \(Int64($0.lastEditedAt)) view \($0.view?.at.map { String(Int64($0)) } ?? "-")" }.joined(separator: ", "))
         capture(dir.appendingPathComponent("mac_a_edit_choice.png"))
@@ -162,7 +167,7 @@ extension SnapshotRunner {
         store.takes.removeAll { $0.id.hasPrefix("rz_") }
         // A closed editor must not keep saving its view: an earlier check's session stamped after this check started is one.
         var late: [String] = []
-        for old in leftovers {
+        for old in leftovers where !openedHere.contains(old.id) {
             if let v = (try? await fake.editSession(id: old.id))?.view?.at, v > started, v != old.view?.at { late.append("\(old.takeId) at \(Int64(v))") }
         }
         check("no_late_views", late.isEmpty, "views saved after their editor closed: \(late.joined(separator: ", ")) (check started \(Int64(started)))")
