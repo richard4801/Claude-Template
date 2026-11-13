@@ -249,7 +249,7 @@ index 00000000..179866aa
 +    /// The panel alone in an off-screen window, drawn from its view (the window can sit anywhere on the runner's screen).
 +    private static func drawBin(_ s: EditSuiteSession, store: AppStore, theme: ThemeID, to url: URL) async {
 +        let t = Theme.get(theme)
-+        let size = NSSize(width: EditSuiteView.mediaWidth, height: 760)
++        let size = NSSize(width: EditSuiteEditor.mediaWidth, height: 760)
 +        let root = EditSuiteBin(session: s, hide: {})
 +            .frame(width: size.width, height: size.height)
 +            .environment(store)
@@ -530,7 +530,7 @@ index fba6836b..163c253c 100644
 +            } else {
 +                LazyVGrid(columns: grid, alignment: .leading, spacing: Space.s3) {
 +                    ForEach(list) { tk in
-+                        MediaTile(name: tk.title.isEmpty ? "Take" : tk.displayTitle, mark: "film-strip", length: EditSuite.UploadBin.length(tk.durationSec),
++                        BinTile(name: tk.title.isEmpty ? "Take" : tk.displayTitle, mark: "film-strip", length: EditSuite.UploadBin.length(tk.durationSec),
 +                                  used: session.project.assets.contains { $0.take == tk.id }, drag: BinDrag.take(tk.id),
 +                                  plusHelp: "Add at the playhead") {
 +                            session.placeTake(tk)
@@ -637,7 +637,7 @@ index fba6836b..163c253c 100644
 +    private func uploadTile(_ u: EditSuite.Upload) -> some View {
 +        let mark = u.kind == .video ? "film-strip" : u.kind == .picture ? "image" : "waveform"
 +        let file = session.files[u.id]
-+        return MediaTile(name: u.name, mark: mark, length: EditSuite.UploadBin.length(u.durationSec), drag: BinDrag.upload(u.id),
++        return BinTile(name: u.name, mark: mark, length: EditSuite.UploadBin.length(u.durationSec), drag: BinDrag.upload(u.id),
 +                         plusHelp: "Add at the playhead") {
 +            session.placeUpload(u.id)
 +        } thumb: {
@@ -950,7 +950,7 @@ index fba6836b..163c253c 100644
 +
 +/// A media tile: the picture (or waveform) with its type mark and length on a scrim, the name under it (the full name
 +/// on hover), "+" while the pointer is over it, and dragging onto the timeline places it.
-+private struct MediaTile<Thumb: View>: View {
++private struct BinTile<Thumb: View>: View {
 +    @Environment(\.theme) private var t
 +    var name: String
 +    var mark: String

@@ -28,10 +28,10 @@ index 6deefabb..98c7e09e 100644
          }
      }
 diff --git a/mac/Muse/App/Edit/EditSuiteSession.swift b/mac/Muse/App/Edit/EditSuiteSession.swift
-index 07c6d7a3..563ee523 100644
+index 05d33ef4..318b12aa 100644
 --- a/mac/Muse/App/Edit/EditSuiteSession.swift
 +++ b/mac/Muse/App/Edit/EditSuiteSession.swift
-@@ -601,6 +601,21 @@ final class EditSuiteSession {
+@@ -605,6 +605,21 @@ final class EditSuiteSession {
          if added > 0 { binTab = .uploads }
      }
  
@@ -104,10 +104,10 @@ index b8eb7b47..cddfa489 100644
  
      static let demoImportLink = "https://www.tiktok.com/@muse.demo/video/7300000000000000000"
 diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
-index 43930075..cd05450a 100644
+index 300aac7f..7d320904 100644
 --- a/mac/Muse/Views/Edit/EditSuiteView.swift
 +++ b/mac/Muse/Views/Edit/EditSuiteView.swift
-@@ -45,12 +45,13 @@ struct EditSuiteView: View {
+@@ -45,7 +45,7 @@ struct EditSuiteView: View {
              if openId == a.takeId { await open(a.takeId) } else { openId = a.takeId }
          }
          .onChange(of: takeId) { _, new in openId = new }
@@ -116,13 +116,15 @@ index 43930075..cd05450a 100644
      }
  
      private func open(_ id: String?) async {
+@@ -60,6 +60,7 @@ struct EditSuiteView: View {
+         }
          session?.close()
          session = nil
 +        store.linkImport.deliverToEdit = nil
          guard let id else { return }
-         let attach = store.suite.editAttach.flatMap { $0.takeId == id ? $0.sessionId : nil }
          if attach != nil { store.suite.editAttach = nil }
-@@ -60,6 +61,7 @@ struct EditSuiteView: View {
+         guard let s = store.makeEditSuiteSession(takeId: id, attachSessionId: attach) else {
+@@ -68,6 +69,7 @@ struct EditSuiteView: View {
              return
          }
          session = s
@@ -130,7 +132,7 @@ index 43930075..cd05450a 100644
          await s.load()
          // The viewer's Split: the playhead where the take was when Split was pressed.
          if let at = store.suite.editAt {
-@@ -71,6 +73,7 @@ struct EditSuiteView: View {
+@@ -79,6 +81,7 @@ struct EditSuiteView: View {
      private func close() {
          session?.close()
          session = nil
