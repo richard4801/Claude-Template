@@ -540,6 +540,14 @@ final class EditSuiteSession {
         edit { $0.addVideo(a, overlay: overlay) }
     }
 
+    /// A take from the bin's "+" or dragged onto the timeline: placed like an upload (into the sequence at the playhead,
+    /// or where it was dropped).
+    func placeTake(_ t: Take, at: Double? = nil, lane: E.TrackKind? = nil) {
+        guard let a = takeAsset(t) else { return }
+        if let at { seek(at) }
+        edit { $0.place(a, at: at, lane: lane) }
+    }
+
     /// A take as an asset of this edit (named after it).
     private func takeAsset(_ t: Take) -> E.Asset? {
         guard let d = t.durationSec, d > 0 else { lastError = "That take has no video yet"; return nil }
@@ -560,20 +568,12 @@ final class EditSuiteSession {
         if edit({ $0.replaceClip(with: a) }) { notice = "Clip replaced · its edits stay" }
     }
 
-    /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row.
+    /// Music / voice-over / sound effect from a file on this Mac: uploaded (editor upload), then added to its row (Record
+    /// voice-over and Music → Add).
     func importAudio(_ url: URL, kind: E.TrackKind, at: Double? = nil, trimStart: Double = 0) async {
         guard isReady else { return }
         do {
-            let asset = AVURLAsset(url: url)
-            let d = try await asset.load(.duration).seconds
-            guard d.isFinite, d >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no sound to use") }
-            notice = "Uploading \(url.lastPathComponent)…"
-            let up = try await api.uploadEditorFile(url, contentType: Self.contentType(url), purpose: nil, progress: nil)
-            let id = project.newId("a")
-            let a = E.Asset(id: id, kind: .audio, upload: up, durationSec: (d * 1000).rounded() / 1000, hasAudio: true)
-            files[id] = url
-            state.assetNames[id] = url.deletingPathExtension().lastPathComponent
-            notice = nil
+            let a = try await uploadAudio(url)
             edit { $0.addAudio(a, kind: kind, at: at, trimStart: trimStart) }
         } catch {
             notice = nil
@@ -581,45 +581,76 @@ final class EditSuiteSession {
         }
     }
 
-    /// A video or picture from this Mac (Uploads / Stickers): uploaded as an editor upload, then added like a take (a video at
-    /// the end of the main track, or as an overlay at the playhead) or as a picture at the playhead (Mac Edit audit: the
-    /// Uploads tab could only take sounds, and pictures had no way in).
-    func importMedia(_ url: URL, overlay: Bool = false) async {
+    /// Files from this Mac (Uploads → Add → From this Mac, or dropped on the media panel): each goes into Uploads as what
+    /// its file is (video, picture or sound); nothing is placed until "+" or a drag onto the timeline.
+    func addFiles(_ urls: [URL]) async {
         guard isReady else { return }
-        let ext = url.pathExtension.lowercased()
-        do {
-            if Self.pictureTypes[ext] != nil {
-                guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
-                // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
-                let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: ext)
-                notice = "Uploading \(url.lastPathComponent)…"
-                let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
-                let id = project.newId("p")
-                let a = E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
-                files[id] = file
-                state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        var added = 0
+        for url in urls {
+            let ext = url.pathExtension.lowercased()
+            do {
+                let a: E.Asset
+                switch EditSuite.UploadBin.kind(ofExtension: ext) {
+                case .video: a = try await uploadVideo(url)
+                case .picture: a = try await uploadPicture(url)
+                case .audio: a = try await uploadAudio(url)
+                case nil: throw ApiError("bad_media", ext.isEmpty ? "MUSE can't use that file. Add a video, picture or sound." : "MUSE can't use .\(ext) files. Add a video, picture or sound.")
+                }
+                if edit({ $0.addToBin(a) }) { added += 1 }
+            } catch {
                 notice = nil
-                // Selected, with the Video tab (Transform, blend, keyframes) open so it can be placed straight away.
-                if edit({ $0.addImage(a) }) { view { $0.tab = .video } }
-                return
+                lastError = (error as? ApiError)?.message ?? "Couldn't add \(url.lastPathComponent)"
             }
-            let info = try await VideoEditEngine.info(AVURLAsset(url: url))
-            guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
-            notice = "Uploading \(url.lastPathComponent)…"
-            let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
-            let id = project.newId("v")
-            let audioTracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)
-            let sound = !audioTracks.isEmpty
-            let a = E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
-                            hasAudio: sound)
-            files[id] = url
-            state.assetNames[id] = url.deletingPathExtension().lastPathComponent
-            notice = nil
-            edit { $0.addVideo(a, overlay: overlay) }
-        } catch {
-            notice = nil
-            lastError = (error as? ApiError)?.message ?? "Couldn't add that file"
         }
+        if added > 0 { binTab = .uploads }
+    }
+
+    /// An upload from the bin onto the timeline: at the playhead ("+"), or where it was dropped (`at`, on row `lane`).
+    func placeUpload(_ id: String, at: Double? = nil, lane: E.TrackKind? = nil, audioKind: E.TrackKind? = nil) {
+        if let at { seek(at) }
+        let picture = project.asset(id)?.kind == .image
+        // A picture is selected with the Video tab (Transform, blend, keyframes) open, so it can be placed straight away.
+        if edit({ $0.placeUpload(id, at: at, lane: lane, audioKind: audioKind) }), picture { view { $0.tab = .video } }
+    }
+
+    private func uploadAudio(_ url: URL) async throws -> E.Asset {
+        let d = try await AVURLAsset(url: url).load(.duration).seconds
+        guard d.isFinite, d >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no sound to use") }
+        notice = "Uploading \(url.lastPathComponent)…"
+        let up = try await api.uploadEditorFile(url, contentType: Self.contentType(url), purpose: nil, progress: nil)
+        let id = project.newId("a")
+        files[id] = url
+        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        notice = nil
+        return E.Asset(id: id, kind: .audio, upload: up, durationSec: (d * 1000).rounded() / 1000, hasAudio: true)
+    }
+
+    private func uploadPicture(_ url: URL) async throws -> E.Asset {
+        guard let img = NSImage(contentsOf: url), img.representations.first != nil else { throw ApiError("bad_media", "That picture can't be opened") }
+        // Design pass (owner-approved): very large photos go up at 2048 px on the long side (PNGs keep transparency).
+        let (file, type, pw, ph) = try Self.pictureForUpload(url, ext: url.pathExtension.lowercased())
+        notice = "Uploading \(url.lastPathComponent)…"
+        let up = try await api.uploadEditorFile(file, contentType: type, purpose: nil, progress: nil)
+        let id = project.newId("p")
+        files[id] = file
+        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        notice = nil
+        return E.Asset(id: id, kind: .image, upload: up, width: pw, height: ph)
+    }
+
+    private func uploadVideo(_ url: URL) async throws -> E.Asset {
+        let info = try await VideoEditEngine.info(AVURLAsset(url: url))
+        guard info.duration >= E.minClipSourceSec else { throw ApiError("bad_media", "That file has no video to use") }
+        notice = "Uploading \(url.lastPathComponent)…"
+        let ext = url.pathExtension.lowercased()
+        let up = try await api.uploadEditorFile(url, contentType: ext == "mov" ? "video/quicktime" : "video/mp4", purpose: nil, progress: nil)
+        let id = project.newId("v")
+        let sound = !(try await AVURLAsset(url: url).loadTracks(withMediaType: .audio)).isEmpty
+        files[id] = url
+        state.assetNames[id] = url.deletingPathExtension().lastPathComponent
+        notice = nil
+        return E.Asset(id: id, kind: .video, upload: up, durationSec: (info.duration * 1000).rounded(.down) / 1000, width: info.width, height: info.height,
+                       hasAudio: sound)
     }
 
     /// Picture types an editor upload takes (server `/v1/editor/uploads/presign`).
@@ -648,7 +679,10 @@ final class EditSuiteSession {
     static let pictureTypes: [String: String] = ["png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "heic": "image/heic", "webp": "image/webp"]
 
     /// Pictures in this edit (the Stickers tab lists them to add again).
-    var pictureAssets: [E.Asset] { project.assets.filter { $0.kind == .image } }
+    var pictureAssets: [E.Asset] { project.assets.filter { $0.kind == .image && $0.library == nil } }
+
+    /// Uploads → the bin's tiles, newest first.
+    var uploads: [EditSuite.Upload] { EditSuite.UploadBin.items(project, names: state.assetNames) }
 
     // MARK: Record VO (Edit suite, workstream 3)
 

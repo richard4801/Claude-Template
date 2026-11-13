@@ -176,6 +176,7 @@ struct EditSuiteTimeline: View {
 /// The time-scaled part of the timeline (inside the horizontal scroll view).
 struct TimelineCanvas: View {
     @Environment(\.theme) private var t
+    @Environment(AppStore.self) private var store
     @Bindable var session: EditSuiteSession
     var lanes: [Lane]
     @State private var drag: DragState?
@@ -284,6 +285,37 @@ struct TimelineCanvas: View {
         }
         .frame(width: width, alignment: .leading)
         .overlay(alignment: .topLeading) { playhead }
+        // A tile from Takes or Uploads dropped here (owner, 2026-11-12): placed at that time, on that row.
+        .dropDestination(for: String.self) { items, loc in
+            guard let raw = items.first, let d = BinDrag.parse(raw) else { return false }
+            let at = Double(max(0, loc.x) / max(z, 0.0001))
+            let lane = Self.laneKind(atY: loc.y, lanes: lanes)
+            if d.take {
+                guard let tk = store.takes.first(where: { $0.id == d.id }) else { return false }
+                session.placeTake(tk, at: at, lane: lane)
+            } else {
+                session.placeUpload(d.id, at: at, lane: lane)
+            }
+            return true
+        }
+    }
+
+    /// The row under `y` (canvas coordinates): its track kind; the ruler, the Captions lane and below the rows give nil,
+    /// and the main video's Sound lane counts as the main row.
+    static func laneKind(atY y: CGFloat, lanes: [Lane]) -> EditV2.TrackKind? {
+        var top = rulerHeight + 1
+        for l in lanes {
+            let h = laneHeight(l)
+            if y >= top, y < top + h {
+                switch l {
+                case .track(let r): return r.kind
+                case .sound: return .main
+                case .noCaptions: return nil
+                }
+            }
+            top += h + 1
+        }
+        return nil
     }
 
     // MARK: Ruler and playhead
