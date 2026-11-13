@@ -23,10 +23,10 @@ index 37c3efc6..bb0f91dc 100644
        # through the real editor session and its project, preview frame and (for the export) the rendered file's length,
        # size, picture and sound are checked (SnapshotRunner+EditOps.swift). Fails on any FAIL line or a missing ALL DONE.
 diff --git a/mac/Muse/App/AppStore+Suite.swift b/mac/Muse/App/AppStore+Suite.swift
-index 78ea15e6..cbaa43ad 100644
+index 78ea15e6..9058c9f1 100644
 --- a/mac/Muse/App/AppStore+Suite.swift
 +++ b/mac/Muse/App/AppStore+Suite.swift
-@@ -255,6 +255,16 @@ final class SuiteState {
+@@ -255,6 +255,18 @@ final class SuiteState {
      /// One Claude: Claude opened an edit session (open_page edit es_…): Edit opens the editor on exactly that session.
      var editAttach: EditAttach?
      struct EditAttach: Equatable { let id = UUID(); var takeId: String; var sessionId: String }
@@ -34,6 +34,8 @@ index 78ea15e6..cbaa43ad 100644
 +    var editNewRequest: UUID?
 +    /// Recent edits on the Edit home (the last worked on first), loaded when it shows.
 +    var recentEdits: [EditRecentItem] = []
++    /// Counts loads of `recentEdits`; a load shows its list only if no newer one started meanwhile.
++    var recentEditsGeneration = 0
 +    /// A recent edit to open (the home's list, or a check).
 +    var editResume: EditRecentItem?
 +    /// Asks the open editor to close back to the Edit home (a check; the editor's own Back does the same).
@@ -43,7 +45,7 @@ index 78ea15e6..cbaa43ad 100644
      /// Swap with an add-on renders on the classic pipeline: the result pane follows the studio stage's job.
      var swapUsesStage = false
  
-@@ -284,6 +294,8 @@ final class SuiteState {
+@@ -284,6 +296,8 @@ final class SuiteState {
          picker = nil
          browserOpen = false
          mode = .hub
@@ -54,10 +56,10 @@ index 78ea15e6..cbaa43ad 100644
      var camera: CameraCatalog { catalog?.camera ?? CameraCatalog() }
 diff --git a/mac/Muse/App/Edit/AppStore+EditRecent.swift b/mac/Muse/App/Edit/AppStore+EditRecent.swift
 new file mode 100644
-index 00000000..c78ca0ae
+index 00000000..678b3321
 --- /dev/null
 +++ b/mac/Muse/App/Edit/AppStore+EditRecent.swift
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,63 @@
 +import Foundation
 +import MuseCore
 +
@@ -67,13 +69,17 @@ index 00000000..c78ca0ae
 +    /// Recent edits, the last worked on first; also kept in `suite.recentEdits` for the Edit home.
 +    @discardableResult
 +    func loadRecentEdits() async -> [EditRecentItem] {
++        // Run 610: an older load finishing after a newer one put a stale list (and a stale Continue draft) on the home. Only
++        // the latest load started may show its list.
++        suite.recentEditsGeneration &+= 1
++        let generation = suite.recentEditsGeneration
 +        var sessions: [EditSession] = []
 +        if isOwner { sessions = (try? await api.recentEditSessions(limit: 20)) ?? [] }
 +        let items = EditRecent.items(sessions: sessions, local: EditRecentStore.standard.load()) { [weak self] id in
 +            guard let t = self?.takes.first(where: { $0.id == id }) else { return nil }
 +            return t.title.isEmpty ? nil : t.displayTitle
 +        }
-+        suite.recentEdits = items
++        if suite.recentEditsGeneration == generation { suite.recentEdits = items }
 +        return items
 +    }
 +
@@ -390,10 +396,10 @@ index 318b12aa..a9ccefef 100644
      func step(_ dir: Int) {
 diff --git a/mac/Muse/App/SnapshotRunner+EditResume.swift b/mac/Muse/App/SnapshotRunner+EditResume.swift
 new file mode 100644
-index 00000000..54a0fb9d
+index 00000000..c0f50025
 --- /dev/null
 +++ b/mac/Muse/App/SnapshotRunner+EditResume.swift
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,176 @@
 +import AppKit
 +import MuseCore
 +
@@ -418,9 +424,12 @@ index 00000000..54a0fb9d
 +        func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
 +            note(ok ? "DONE \(name)" : "FAIL \(name)\(detail().isEmpty ? "" : ": \(detail())")")
 +        }
++        /// Sessions this check opened an editor on (their views are this check's own, not late saves).
++        var openedHere: Set<String> = []
 +        /// Waits for the Edit page's editor to be ready on `takeId` (nil: any).
 +        func editorReady(_ takeId: String?, seconds: Double = 25) async -> EditSuiteSession? {
 +            let end = Date().addingTimeInterval(seconds)
++            defer { if let id = store.suite.editCurrent?.draftSessionId { openedHere.insert(id) } }
 +            while Date() < end {
 +                // Ready and put back where it was left (restoreView ran).
 +                if let s = store.suite.editCurrent, s.isReady, s.viewTracking, takeId == nil || s.take.id == takeId { return s }
@@ -489,7 +498,9 @@ index 00000000..54a0fb9d
 +        try? await Task.sleep(for: .seconds(3))
 +        check("no_auto_open", store.suite.editCurrent == nil, "an editor opened by itself on \(store.suite.editCurrent?.take.id ?? "?")")
 +        let draft = store.suite.recentEdits.first
++        let fresh = draft?.takeId == "rz_resume" ? [] : await store.loadRecentEdits()   // only to tell a stale home from a wrong order
 +        check("choice_continue_draft", draft?.takeId == "rz_resume" && draft?.title == "Beach walk",
++              "fresh load's first is \(fresh.first.map { "\($0.takeId) at \(Int64($0.lastEditedAt))" } ?? "-"); " +
 +              "Continue draft is \(draft.map { "\($0.title) (\($0.takeId))" } ?? "missing"); " +
 +              "ours (rz_resume) view \(ourAt.map { String(Int64($0)) } ?? "-"); order: " + store.suite.recentEdits.prefix(4).map { "\($0.takeId) at \(Int64($0.lastEditedAt)) view \($0.view?.at.map { String(Int64($0)) } ?? "-")" }.joined(separator: ", "))
 +        capture(dir.appendingPathComponent("mac_a_edit_choice.png"))
@@ -558,7 +569,7 @@ index 00000000..54a0fb9d
 +        store.takes.removeAll { $0.id.hasPrefix("rz_") }
 +        // A closed editor must not keep saving its view: an earlier check's session stamped after this check started is one.
 +        var late: [String] = []
-+        for old in leftovers {
++        for old in leftovers where !openedHere.contains(old.id) {
 +            if let v = (try? await fake.editSession(id: old.id))?.view?.at, v > started, v != old.view?.at { late.append("\(old.takeId) at \(Int64(v))") }
 +        }
 +        check("no_late_views", late.isEmpty, "views saved after their editor closed: \(late.joined(separator: ", ")) (check started \(Int64(started)))")
@@ -625,7 +636,7 @@ index 7be8a4d9..44ebf1c7 100644
      /// timeline (the owner's "oval", 2026-11-11). Click: select the clip and open "Mask & green screen".
      private func maskBadge(_ badge: MaskBadge, itemId: String, locked: Bool) -> some View {
 diff --git a/mac/Muse/Views/Edit/EditSuiteView.swift b/mac/Muse/Views/Edit/EditSuiteView.swift
-index 7d320904..e6ef8fc3 100644
+index 7d320904..c444fcc0 100644
 --- a/mac/Muse/Views/Edit/EditSuiteView.swift
 +++ b/mac/Muse/Views/Edit/EditSuiteView.swift
 @@ -10,6 +10,8 @@ struct EditSuiteView: View {
@@ -646,7 +657,7 @@ index 7d320904..e6ef8fc3 100644
                  }
                  .frame(maxWidth: .infinity, maxHeight: .infinity)
              } else if store.recreate.open {
-@@ -35,17 +37,44 @@ struct EditSuiteView: View {
+@@ -35,17 +37,46 @@ struct EditSuiteView: View {
                  case .recipes: LearnRecipesView()
                  }
              } else {
@@ -655,6 +666,8 @@ index 7d320904..e6ef8fc3 100644
              }
          }
          .task(id: openId) { await open(openId) }
++        // Back on the home (Edit opened, or an editor closed): the choice and Recent edits are read again.
++        .task(id: session == nil && openId == nil) { if session == nil && openId == nil { await store.loadRecentEdits() } }
 +        // A recent edit picked elsewhere (a check, One Claude): opened as it was left.
 +        .onChange(of: store.suite.editNewRequest) { _, r in if r != nil { store.suite.editNewRequest = nil; openTake(EditV2.blankSourceId) } }
 +        .task(id: store.suite.editResume?.id) {
@@ -694,7 +707,7 @@ index 7d320904..e6ef8fc3 100644
      }
  
      private func open(_ id: String?) async {
-@@ -60,17 +89,31 @@ struct EditSuiteView: View {
+@@ -60,17 +91,31 @@ struct EditSuiteView: View {
          }
          session?.close()
          session = nil
@@ -731,7 +744,7 @@ index 7d320904..e6ef8fc3 100644
          // The viewer's Split: the playhead where the take was when Split was pressed.
          if let at = store.suite.editAt {
              store.suite.editAt = nil
-@@ -81,18 +124,23 @@ struct EditSuiteView: View {
+@@ -81,18 +126,23 @@ struct EditSuiteView: View {
      private func close() {
          session?.close()
          session = nil
@@ -756,7 +769,7 @@ index 7d320904..e6ef8fc3 100644
  
      var body: some View {
          let takes = store.editSuiteTakes
-@@ -107,13 +155,19 @@ struct EditSuiteHome: View {
+@@ -107,13 +157,19 @@ struct EditSuiteHome: View {
                      SuiteToolButton(title: "Recipes", icon: "stack", plain: true) { store.openLearn(.recipes) }
                  }
                  SuiteToolButton(title: "Recreate an edit", icon: "arrows-clockwise") { store.openRecreate() }
@@ -780,7 +793,7 @@ index 7d320904..e6ef8fc3 100644
              if !edits.isEmpty {
                  SectionHeader("Edited versions")
                  grid(edits)
-@@ -123,6 +177,55 @@ struct EditSuiteHome: View {
+@@ -123,6 +179,55 @@ struct EditSuiteHome: View {
                  grid(renders)
              }
          }
@@ -836,7 +849,7 @@ index 7d320904..e6ef8fc3 100644
      }
  
      private func grid(_ list: [Take]) -> some View {
-@@ -443,3 +546,39 @@ struct EditSuiteEditor: View {
+@@ -443,3 +548,39 @@ struct EditSuiteEditor: View {
          }
      }
  }
