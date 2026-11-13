@@ -125,6 +125,8 @@ struct ChatTranscriptView: View {
                 .onPreferenceChange(ChatContentFrameKey.self) { f in follow(f, viewport: outer.size.height, proxy: proxy) }
                 .onAppear { proxy.scrollTo(Self.endId, anchor: .bottom) }
                 .onChange(of: rows.count) { _, _ in if pinned { scrollToEnd(proxy, animated: false) } }
+                // Run 612: the window shrank or the composer grew; a chat at its end stays there.
+                .onChange(of: outer.size) { _, _ in if pinned { scrollToEnd(proxy, animated: false) } }
                 .onChange(of: state.busy) { _, busy in if busy { pinned = true; scrollToEnd(proxy, animated: true) } }
                 .overlay(alignment: .bottom) {
                     if showJump {
@@ -162,8 +164,9 @@ struct ChatTranscriptView: View {
     private func follow(_ f: CGRect, viewport: CGFloat, proxy: ScrollViewProxy) {
         let distance = f.maxY - viewport
         let moved = abs(f.minY - lastFrame.minY) > 0.5
-        // Only real growth (new text): the lazy stack re-estimating rows makes the height wobble both ways.
-        let grew = f.height > lastFrame.height + 0.5
+        // Real growth (new text), or a new width (the rows re-wrapped: a resize): the lazy stack re-estimating rows makes the
+        // height wobble both ways at one width, which alone must not scroll (runs 595/604).
+        let grew = f.height > lastFrame.height + 0.5 || abs(f.width - lastFrame.width) > 0.5
         lastFrame = f
         if moved {
             let p = distance < 48
