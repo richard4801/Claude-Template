@@ -466,7 +466,7 @@ object EditLimits {
     const val MAX_TRACKS = 16
     const val MAX_ITEMS_PER_TRACK = 300
     const val MAX_ITEMS = 600
-    const val MAX_ASSETS = 60
+    const val MAX_ASSETS = 400
     const val MAX_WORDS = 3000
     const val MAX_KEYFRAMES = 100
     const val MIN_CLIP_SOURCE_SEC = 0.1
