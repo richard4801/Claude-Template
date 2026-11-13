@@ -57,7 +57,7 @@ class ChatSessionActions(
  * composer mode, Recreate, Edit and Camera one per reference, editor session or camera.
  */
 @Composable
-fun ChatSessionsRow(ui: ClaudeChatUi, actions: ChatSessionActions, horizontal: Dp) {
+fun ChatSessionsRow(ui: ClaudeChatUi, actions: ChatSessionActions, horizontal: Dp, trailing: @Composable () -> Unit = {}) {
     val m = muse
     val current = ui.thread ?: return
     val name = ClaudeSessions.displayTitle(ui.threads.firstOrNull { it.id == current.id } ?: current)
@@ -80,6 +80,7 @@ fun ChatSessionsRow(ui: ClaudeChatUi, actions: ChatSessionActions, horizontal: D
                 MenuItem("trash", "Delete chat", danger = true) { deleting = true },
             ))
         }
+        trailing()
         Box(Modifier.size(48.dp).press(enabled = !empty && !ui.busy) { actions.newChat() }
             .semantics { role = Role.Button; contentDescription = "New chat" }, contentAlignment = Alignment.Center) {
             Ic("plus", 20.dp, if (empty || ui.busy) m.roles.ink2.copy(alpha = .4f) else m.roles.ink2)

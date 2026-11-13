@@ -100,12 +100,15 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import studio.muse.app.data.ApiException
+import studio.muse.app.data.ClaudeEffort
 import studio.muse.app.data.ImageRef
 import studio.muse.app.ui.LocalContainer
 import studio.muse.app.ui.components.ImageViewer
 import studio.muse.app.ui.components.RefImage
 import studio.muse.app.ui.components.T
 import studio.muse.app.ui.components.ViewerImage
+import studio.muse.app.ui.components.MenuItem
+import studio.muse.app.ui.components.MuseMenu
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.screens.Caption
 import studio.muse.app.ui.screens.PrimaryButton
@@ -143,6 +146,9 @@ class ClaudeChatActions(
     /** Cards: Approve / Decline, Undo a row, open a clip's moment. */
     val answerCard: (String, studio.muse.core.claude.ApproveTarget, Boolean) -> Unit = { _, _, _ -> },
     val undoCard: (String, Int, String) -> Unit = { _, _, _ -> },
+    /** The chat's Claude model (null: the person's default) and effort level (null: the last choice / the model's default). */
+    val pickModel: (String?) -> Unit = {},
+    val pickEffort: (String?) -> Unit = {},
 )
 
 /** A store for one thread, fed by the app's live `claude` events, loaded once. */
@@ -207,6 +213,8 @@ fun ClaudeChat(store: ClaudeChatStore, title: String, modifier: Modifier = Modif
         sessions = ChatSessionActions(newChat = { store.newChat() }, open = { store.open(it) }, rename = { t, n -> store.rename(t, n) }, delete = { store.delete(it) }),
         answerCard = store::answerCard,
         undoCard = store::undoCard,
+        pickModel = { store.pickModel(it) },
+        pickEffort = { store.pickEffort(it) },
     ), modifier)
 }
 
@@ -281,8 +289,12 @@ fun ClaudeChatContent(ui: ClaudeChatUi, title: String, actions: ClaudeChatAction
     // Short (a phone on its side with the keyboard up): the header drops to its one status line.
     val compact = maxHeight < 360.dp
     Column(Modifier.fillMaxSize()) {
-        ChatHeader(ui, title, horizontal, compact)
-        if (ui.sessions && ui.thread != null && !compact) ChatSessionsRow(ui, actions.sessions, horizontal)
+        // The model and effort chips sit in a row that is there anyway (the title's, else the chat list's, else the status
+        // line), so an embedded chat (Camera, Edit) doesn't lose a line of transcript to them.
+        val listRow = ui.sessions && ui.thread != null && !compact
+        val chipsAt = when { title.isNotBlank() && !compact -> ChipsAt.TITLE; listRow -> ChipsAt.LIST; else -> ChipsAt.STATUS }
+        ChatHeader(ui, title, horizontal, compact, actions, chipsAt)
+        if (listRow) ChatSessionsRow(ui, actions.sessions, horizontal) { ModelEffortChips(ui, actions) }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 !ui.loaded -> ChatSkeleton(Modifier.padding(horizontal = horizontal, vertical = MuseSpace.s3))
@@ -387,8 +399,11 @@ private fun ChatSkeleton(modifier: Modifier = Modifier) {
     }
 }
 
+private enum class ChipsAt { TITLE, LIST, STATUS }
+
 @Composable
-private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp, compact: Boolean = false) {
+private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp, compact: Boolean = false, actions: ClaudeChatActions = ClaudeChatActions(),
+    chipsAt: ChipsAt = ChipsAt.TITLE) {
     val m = muse
     // No plan status yet (opening, or the thread couldn't load): don't claim "answered by your Mac" with a green dot.
     val s = if (ui.status == null && (!ui.loaded || ui.error != null)) StatusLineText(if (ui.loaded) "Not connected" else "Connecting…", Tone.OFF) else ClaudeText.status(ui)
@@ -397,12 +412,56 @@ private fun ChatHeader(ui: ClaudeChatUi, title: String, horizontal: Dp, compact:
         if (title.isNotBlank() && !compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
             // Claude's orb as the avatar (the same state machine as the Mac's: it moves only with real events).
             ClaudeOrbView(ClaudePanelOrb.current ?: rememberChatOrb(ui), 28.dp)
-            T(title, m.scale.title, m.roles.ink, Modifier.semantics { heading() }, maxLines = 1)
+            T(title, m.scale.title, m.roles.ink, Modifier.weight(1f).semantics { heading() }, maxLines = 1)
+            if (chipsAt == ChipsAt.TITLE) ModelEffortChips(ui, actions)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2), modifier = Modifier.heightIn(min = 24.dp)) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(toneColor(s.tone)))
-            T(s.text, m.scale.caption, if (s.tone == Tone.OFF) m.roles.ink else m.roles.ink2, maxLines = 2)
+            T(s.text, m.scale.caption, if (s.tone == Tone.OFF) m.roles.ink else m.roles.ink2, maxLines = 2, modifier = Modifier.weight(1f, fill = false))
+            if (chipsAt == ChipsAt.STATUS && !compact) { Spacer(Modifier.weight(1f)); ModelEffortChips(ui, actions) }
         }
+    }
+}
+
+/**
+ * The chat's model, then its effort, as on the Mac: each a quiet chip opening a menu. Effort lists only the levels the
+ * model takes, the model's own default marked; it hides for a model with no effort setting. Nothing shows before the
+ * server has answered with its models (or on an older server).
+ */
+@Composable
+internal fun ModelEffortChips(ui: ClaudeChatUi, actions: ClaudeChatActions) {
+    val list = ui.models?.takeIf { it.models.isNotEmpty() } ?: return
+    if (ui.thread == null) return
+    val m = muse
+    val c = ui.choice
+    var models by remember { mutableStateOf(false) }
+    var efforts by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            HeaderChip(ClaudeEffort.shortModel(c.model?.name ?: "Claude"), "Claude model: ${c.model?.name ?: "default"}. Change it") { models = true }
+            MuseMenu(models, { models = false }, list.models.map { x ->
+                MenuItem(if (x.id == c.model?.id) "check" else "", "${x.name}: ${x.speed.lowercase()}, ${x.cost.lowercase()}") { actions.pickModel(x.id) }
+            } + listOfNotNull(if (c.ownModel) MenuItem("", "Use your default") { actions.pickModel(null) } else null))
+        }
+        val e = c.effort
+        if (e != null && c.levels.isNotEmpty()) Box {
+            HeaderChip(ClaudeEffort.name(e), "Effort: ${ClaudeEffort.name(e)}. Higher thinks longer and uses more of your Claude plan. Change it") { efforts = true }
+            MuseMenu(efforts, { efforts = false }, c.levels.map { level ->
+                MenuItem(if (level == e) "check" else "", ClaudeEffort.name(level) + if (level == c.model?.defaultEffort) " (default)" else "") { actions.pickEffort(level) }
+            })
+        }
+    }
+}
+
+/** A text chip with a caret: 48 dp tall for touch, caption-sized text. */
+@Composable
+private fun HeaderChip(text: String, description: String, onClick: () -> Unit) {
+    val m = muse
+    Row(Modifier.heightIn(min = 48.dp).press(onClick = onClick).padding(horizontal = MuseSpace.s1)
+        .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = description },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        T(text, m.scale.caption, m.roles.ink2, maxLines = 1)
+        Ic("caret-down", 12.dp, m.roles.ink2)
     }
 }
 

@@ -46,6 +46,7 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
 
     fun load() = scope.launch {
         runCatching { api().status() }.onSuccess { s -> _ui.update { it.copy(status = s) } }
+        scope.launch { runCatching { api().claudeModels() }.onSuccess { l -> _ui.update { it.copy(models = l) } } }
         val kind = _ui.value.contextKind
         val id = _ui.value.contextId
         // WS18: Recreate, Edit and Camera come back to the chat open last on this device (else the newest on the server).
@@ -55,6 +56,25 @@ class ClaudeChatStore(private val api: () -> ClaudeApi, private val scope: Corou
         runCatching { api().thread(kind, id) }
             .onSuccess { t -> _ui.update { u -> ChatReducer.loaded(u, t) }; ClaudeSessions.keyOf(t)?.let { ClaudeSessions.remember(it, t.id) }; reload(); refreshThreads() }
             .onFailure { e -> _ui.update { it.copy(loaded = true, error = e.message ?: "Couldn't open the chat") } }
+    }
+
+    // ------------------------------------------------------------ model and effort (per chat)
+
+    /** The open chat's model (null: back to the person's default). Its next message uses it. */
+    fun pickModel(id: String?) = scope.launch {
+        val t = _ui.value.thread ?: return@launch
+        runCatching { api().setChatModel(t.id, id) }
+            .onSuccess { _ui.update { u -> u.copy(thread = u.thread?.takeIf { it.id == t.id }?.copy(model = id) ?: u.thread) } }
+            .onFailure { e -> _ui.update { it.copy(notice = "Couldn't change the model. " + (e.message ?: "")) } }
+    }
+
+    /** The open chat's effort level; a pick is also the person's last choice, so new chats start from it. */
+    fun pickEffort(level: String?) = scope.launch {
+        val t = _ui.value.thread ?: return@launch
+        runCatching { api().setChatEffort(t.id, level) }
+            .onSuccess { _ui.update { u -> u.copy(thread = u.thread?.takeIf { it.id == t.id }?.copy(effort = level) ?: u.thread,
+                models = if (level != null) u.models?.copy(defaultEffort = level) else u.models) } }
+            .onFailure { e -> _ui.update { it.copy(notice = "Couldn't change the effort. " + (e.message ?: "")) } }
     }
 
     // ------------------------------------------------------------ sessions (WS18)

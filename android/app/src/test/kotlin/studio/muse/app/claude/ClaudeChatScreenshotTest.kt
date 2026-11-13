@@ -66,7 +66,7 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
     companion object {
         private val CASES = listOf(
             "streaming" to 390, "streaming" to 360, "idle" to 390, "offline" to 390, "offline" to 360, "offline_api" to 390,
-            "sheet" to 390, "sheet" to 360, "panel" to 1024, "connections" to 390, "connections" to 360,
+            "sheet" to 390, "sheet" to 360, "panel" to 1024, "connections" to 390, "connections" to 360, "model_effort" to 390, "model_effort" to 360,
         )
 
         @JvmStatic
@@ -102,6 +102,8 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
             "streaming", "sheet", "panel" -> streaming
             "offline" -> offline
             "offline_api" -> offline.copy(status = offline.status!!.copy(apiFallback = ApiFallbackStatus(true, true)), refusal = ClaudeFallback(status.openInClaudeUrl, true))
+            // The chat's model, then its effort (High picked; the menu lists the levels the model takes).
+            "model_effort" -> idleUi.copy(thread = idleUi.thread!!.copy(effort = "high"), models = runBlocking { api.claudeModels() })
             else -> idleUi
         }
         val conn = runBlocking { fake.camera.connections() }
@@ -124,6 +126,7 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
                             Box(Modifier.weight(1f).fillMaxHeight().background(m.t.surface2), contentAlignment = Alignment.Center) { T("Edit suite preview", m.type.tiny, m.t.muted) }
                             ClaudeChatContent(ui, "Claude", ClaudeChatActions(), Modifier.width(380.dp).fillMaxHeight())
                         }
+                        "model_effort" -> ClaudeChatContent(ui, "Claude", ClaudeChatActions(), Modifier.fillMaxSize())
                         else -> ClaudeChatContent(ui, "Direct with Claude", ClaudeChatActions(), Modifier.fillMaxSize())
                     }
                 }
@@ -138,6 +141,7 @@ class ClaudeChatScreenshotTest(private val theme: String, private val screen: St
             "idle" -> { has("On your Claude plan, answered by your Mac"); has("Shot draft · $1.92") }
             "offline" -> { has("Open in Claude"); has("Turn on the API fallback") }
             "offline_api" -> has("Use the studio API key")
+            "model_effort" -> { has("Opus 5.5"); has("Effort: High"); has("Claude model: Claude Opus 5.5") }
             "connections" -> { has("Claude on your plan"); has("Add MUSE to Claude"); has("billed per use") }
         }
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/claude_${theme}_${screen}_$width.png")
