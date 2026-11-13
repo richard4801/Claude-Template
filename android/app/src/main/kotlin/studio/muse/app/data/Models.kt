@@ -1348,7 +1348,13 @@ data class EditAppRequest(
 )
 
 @Serializable
-data class EditPresence(val device: String, val label: String = "", val platform: String = "other", val canRender: Boolean = true)
+data class EditPresence(val device: String, val label: String = "", val platform: String = "other", val canRender: Boolean = true,
+    /** Edit's preview on this device (plans/edit-platform-preview.md), so Claude knows what the person sees. */
+    val preview: EditPresencePreview? = null)
+
+/** The view ("clean", "tiktok" …) and the Safe area switch. */
+@Serializable
+data class EditPresencePreview(val view: String, val safeArea: Boolean = true)
 
 @Serializable
 data class EditSessionDto(
@@ -1356,7 +1362,15 @@ data class EditSessionDto(
     val durationSec: Double = 0.0, val status: String = "open", val updatedBy: String = "", val updatedAt: Long = 0,
     val pending: List<EditPending> = emptyList(), val online: List<EditPresence> = emptyList(), val requests: List<EditAppRequest> = emptyList(),
     val history: List<EditHistoryEntry> = emptyList(),
+    /** Continue a draft: where an editor was last left on this session (server 0035; Mac and Android share it). Absent on older servers. */
+    val view: JsonObject? = null,
+    /** GET /v1/edit-sessions?recent=1: the later of the last change and `view.at` (ms). */
+    val lastTouchedAt: Long? = null,
 )
+
+/** POST /v1/edit-sessions/{id}/view */
+@Serializable
+data class EditViewRequest(val view: JsonObject)
 
 @Serializable
 data class OpenEditSessionRequest(val takeId: String, val project: JsonObject? = null, val baseVersionId: String? = null, val device: String? = null, val fresh: Boolean? = null)

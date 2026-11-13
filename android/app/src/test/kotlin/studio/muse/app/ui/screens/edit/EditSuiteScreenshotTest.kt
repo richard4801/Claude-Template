@@ -75,7 +75,10 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
                 // S rows: GIF and sound-only export; the overlay panel with "Add a video from a link".
                 "export_gif", "export_sound", "overlay_link",
                 // M rows: a top-and-bottom split screen with the overlay panel open.
-                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts", "x_reframe", "x_slowmo", "x_translate", "x_effects").map { arrayOf<Any>(t, it) }
+                "m_split", "m_curves", "m_kits", "m_caption_lang", "d_pick", "m_adjust_layer", "m_own_font", "m_hsl", "m_reverse", "c_stickers", "c_sfx", "c_fonts", "x_reframe", "x_slowmo", "x_translate", "x_effects",
+                // Edit home with New and two drafts to continue; the editor in TikTok view with the safe area
+                // (plans/edit-platform-preview.md, edit-continue-draft).
+                "home_drafts", "tiktok").map { arrayOf<Any>(t, it) }
         }
 
         /** The design's project: four takes (3.0 / 4.2 / 5.2 / 5.6 s), captions, a hook, music with beats, a voice-over. */
@@ -145,6 +148,7 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
         )
         var host = SuiteHost(waves = waves())
         when (state) {
+            "tiktok" -> ui = ui.copy(preview = studio.muse.core.edit.EditPreview(studio.muse.core.edit.PreviewView.TIKTOK, safeArea = true))
             "captions" -> ui = ui.copy(panel = Panel.CAPTIONS, ai = mapOf("silences" to AiTask("silences", price = "Free")))
             "audio" -> {
                 p = SuiteOps.duck(p, true)!!
@@ -369,7 +373,14 @@ class EditSuiteScreenshotTest(private val theme: String, private val state: Stri
         }
         compose.setContent {
             MuseTheme(ThemeId.fromKey(theme)) {
-                if (state == "home") EditHomeContent(
+                if (state == "home_drafts") EditHomeContent(
+                    listOf(TakeChoice("t1", "Morning café", "HD", ImageRef.asset("g_tq"), 18.4, false, true)), onBack = {}, onOpen = {},
+                    recent = listOf(
+                        RecentRow(studio.muse.core.edit.EditRecentItem("r1", "t1", "s1", "Morning café", 0L, null), ImageRef.asset("g_front"), "12 minutes ago"),
+                        RecentRow(studio.muse.core.edit.EditRecentItem("r2", "t2", null, "Bathroom trend", 0L, null), ImageRef.asset("c_front"), "yesterday"),
+                    ), onNew = {},
+                )
+                else if (state == "home") EditHomeContent(
                     listOf(
                         TakeChoice("e1", "Morning café", "Edited", ImageRef.asset("g_front"), 18.0, true, true),
                         TakeChoice("t1", "Morning café", "HD", ImageRef.asset("g_tq"), 18.4, false, true),

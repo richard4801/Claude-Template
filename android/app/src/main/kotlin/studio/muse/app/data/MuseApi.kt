@@ -221,7 +221,13 @@ interface MuseApi {
     /** Undoes one history entry (anyone's) as a new change. */
     suspend fun undoEditEntry(id: String, req: EditUndoRequest): EditChangeResult = throw ApiException("unsupported", "Editing with Claude needs the studio server")
     suspend fun editPresence(id: String, presence: EditPresence) {}
+    /** GET /v1/preview/layouts: Edit's platform views' safe zones (null: the defaults, e.g. offline or a demo). */
+    suspend fun previewLayouts(): kotlinx.serialization.json.JsonObject? = null
     suspend fun leaveEditSession(id: String, device: String) {}
+    /** Continue a draft: open sessions, the last worked on first (GET /v1/edit-sessions?recent=1). Default: none (members, older servers). */
+    suspend fun recentEditSessions(limit: Int = 20): List<EditSessionDto> = emptyList()
+    /** Continue a draft: where the editor was left (POST …/{id}/view; no revision, no history). Default: not kept. */
+    suspend fun saveEditView(id: String, view: kotlinx.serialization.json.JsonObject) {}
     /** A PNG of a frame Claude asked for, uploaded with the image presign (`POST /v1/uploads/presign {kind:"image"}` + PUT): the upload id. */
     suspend fun uploadEditFrame(png: ByteArray): String = throw ApiException("unsupported", "Uploading frames needs the studio server")
     suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) {}
@@ -353,6 +359,8 @@ interface MuseApi {
     /** A shared draft: the composer's current [draft], or a job's ([fromJobId]). */
     suspend fun createSuiteAssist(draft: SuiteDraft?, fromJobId: String? = null): SuiteAssist = throw ApiException("not_found", "This studio server doesn't have Claude in the Suite yet")
     suspend fun suiteAssist(id: String): SuiteAssist = throw ApiException("not_found", "Assist not found")
+    /** Live chips (owner 2026-11-12): the chips for what is on screen now (GET v1/claude/suggestions). An older server: not_found. */
+    suspend fun claudeSuggestions(q: studio.muse.core.claude.ClaudeSuggestQuery): List<studio.muse.core.claude.ClaudeChip> = throw ApiException("not_found", "This server has no live chips yet")
     /** The owner's own composer edits, so Claude sees them. `stale` (409): Claude changed it since; re-read it. */
     suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?): SuiteAssist = throw ApiException("not_found", "Assist not found")
     /** The owner's answer to Claude's Generate. `price_changed` (409): the price rose above the approved one; nothing ran. */

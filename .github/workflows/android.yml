@@ -41,6 +41,13 @@ jobs:
       - name: Core and app unit tests
         run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest
 
+      # Roborazzi writes images only when recording. Record a few Edit screens (home with drafts, TikTok view) for review;
+      # they're uploaded as android-edit-screenshots below.
+      - name: Record Edit screenshots
+        run: >-
+          ./gradlew --no-daemon :app:testDebugUnitTest -Proborazzi.test.record=true
+          --tests '*EditSuiteScreenshotTest*home*' --tests '*EditSuiteScreenshotTest*tiktok*'
+
       # Release key from repository secrets when they exist (decoded to a temp file, never printed); otherwise the
       # build falls back to the debug key (android/app/build.gradle.kts).
       - name: Release key
@@ -102,3 +109,12 @@ jobs:
             android/core/build/reports/tests
             android/app/build/reports/tests
           if-no-files-found: ignore
+
+      # Edit's screenshots (Robolectric + Roborazzi), so a reviewer can look at them without a phone.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-edit-screenshots
+          path: android/app/build/outputs/roborazzi/edit_*.png
+          if-no-files-found: ignore
+          retention-days: 14

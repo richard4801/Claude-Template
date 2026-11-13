@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -21,6 +22,7 @@ import studio.muse.app.data.EditHistoryEntry
 import studio.muse.app.data.EditPatchRequest
 import studio.muse.app.data.EditPending
 import studio.muse.app.data.EditPresence
+import studio.muse.app.data.EditPresencePreview
 import studio.muse.app.data.EditRequestAnswer
 import studio.muse.app.data.EditSessionDto
 import studio.muse.app.data.EditUndoRequest
@@ -99,9 +101,10 @@ class EditSessionSync(
      * or no connection ([offline]). When this device already has edits the session doesn't, the owner is asked first
      * ([SessionUi.conflict]): nothing is dropped silently.
      */
-    suspend fun start(takeId: String, initial: JsonObject? = null, baseVersionId: String? = null): Boolean {
+    suspend fun start(takeId: String, initial: JsonObject? = null, baseVersionId: String? = null, attach: String? = null): Boolean {
         offline = false
-        val s = try { api().openEditSession(OpenEditSessionRequest(takeId, initial, baseVersionId, device)) }
+        // [attach]: join that session (a blank project continued, whose take id "blank" would open a new one).
+        val s = try { if (attach != null) api().editSession(attach) else api().openEditSession(OpenEditSessionRequest(takeId, initial, baseVersionId, device)) }
             catch (_: ApiException) { return false } catch (_: java.io.IOException) { offline = true; return false }
         val server = parse(s.project) ?: return false
         mutex.withLock {
@@ -119,12 +122,15 @@ class EditSessionSync(
         jobs += scope.launch { events.collect { ev -> if (ev.type == "edit" && ev.sessionId == s.id) onEvent(ev) } }
         jobs += scope.launch { controller.ui.map { it.project }.distinctUntilChanged().debounce(debounceMs).collect { flush() } }
         jobs += scope.launch { while (isActive) { presence(); delay(presenceMs) } }
+        // Edit's view changed: Claude hears it at once, not at the next 30 s ping.
+        jobs += scope.launch { controller.ui.map { it.preview }.distinctUntilChanged().drop(1).collect { presence() } }
         return true
     }
 
     /** [start], tried again every [retryMs] while there is no connection (the editor keeps working locally meanwhile). */
-    suspend fun connect(takeId: String, initial: JsonObject? = null, baseVersionId: String? = null, retryMs: Long = 15_000): Boolean {
-        if (drafts != null && draftTake == null) {
+    suspend fun connect(takeId: String, initial: JsonObject? = null, baseVersionId: String? = null, retryMs: Long = 15_000, attach: String? = null): Boolean {
+        // A blank project is new every time: no kept drafts (they are per take).
+        if (drafts != null && draftTake == null && takeId != studio.muse.core.edit.BLANK_SOURCE) {
             draftTake = takeId
             // Unsent edits from last time come back first (then the session decides whether to ask).
             drafts.read(takeId)?.let { (b, p) ->
@@ -134,7 +140,7 @@ class EditSessionSync(
             jobs += scope.launch { controller.ui.map { it.project }.distinctUntilChanged().collect { saveDraft() } }
         }
         while (true) {
-            if (start(takeId, initial, baseVersionId)) return true
+            if (start(takeId, initial, baseVersionId, attach)) return true
             if (!offline) return false
             delay(retryMs)
         }
@@ -162,10 +168,12 @@ class EditSessionSync(
 
     private suspend fun presence() {
         val id = sessionId ?: return
-        runCatching { api().editPresence(id, EditPresence(device, deviceLabel, "android", canRender = true)) }
+        val pv = controller.ui.value.preview
+        runCatching { api().editPresence(id, EditPresence(device, deviceLabel, "android", canRender = true,
+            preview = EditPresencePreview(pv.view.id, pv.safeArea))) }
     }
 
-    private fun parse(el: JsonElement): EditProject? = runCatching { EditJson.parse(el) }.getOrNull()?.takeIf { problemOf(it, paletteIds = paletteIds) == null }
+    private fun parse(el: JsonElement): EditProject? = runCatching { EditJson.parse(el) }.getOrNull()?.takeIf { problemOf(it, paletteIds = paletteIds, draft = true) == null }
     private fun valid(el: JsonElement) = parse(el) != null
     private fun local(): JsonObject? = controller.project?.let(EditJson::encode)
 

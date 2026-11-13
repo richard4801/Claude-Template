@@ -426,6 +426,13 @@ enum class CanvasFill(override val wire: String) : Wire { COLOR("color"), BLUR("
 
 data class Canvas(val width: Int, val height: Int, val fps: Double, val background: String? = null, val fill: CanvasFill? = null)
 
+/** The marker `sourceTakeId` of a blank project (server model.ts BLANK_SOURCE, Mac EditV2.blankSourceId). */
+const val BLANK_SOURCE = "blank"
+
+/** A blank project: nothing on the timeline yet, a 9:16 1080 × 1920 canvas at 30 fps (the ratio picker changes it). */
+fun blankProject(canvas: Canvas = Canvas(1080, 1920, 30.0, "#000000")): EditProject =
+    EditProject(2, BLANK_SOURCE, canvas, emptyList(), listOf(Track("main", TrackKind.MAIN)))
+
 data class EditProject(
     val version: Int = 2,
     val sourceTakeId: String,
@@ -434,6 +441,12 @@ data class EditProject(
     val tracks: List<Track>,
     val mute: Boolean? = null,
 ) {
+    /**
+     * "New" in Edit (owner 2026-11-11 Mac, 2026-11-12 Android): a project with no source take; [sourceTakeId] is [BLANK_SOURCE]
+     * until the first save (POST /v1/edits makes it a new Library video). Empty until a clip is added (0 s; saving waits).
+     */
+    val isBlank: Boolean get() = sourceTakeId == BLANK_SOURCE
+
     /** The main track (exactly one in a valid project; the first). */
     val main: Track get() = tracks.first { it.kind == TrackKind.MAIN }
     val mainClips: List<VideoClip> get() = main.items.map { it as VideoClip }

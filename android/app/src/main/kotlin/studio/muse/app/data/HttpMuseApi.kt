@@ -159,6 +159,8 @@ interface MuseService {
     @GET("v1/editor/jobs/{id}") suspend fun editorJob(@Path("id") id: String): EditorJob
     @DELETE("v1/editor/jobs/{id}") suspend fun cancelEditorJob(@Path("id") id: String): retrofit2.Response<Unit>
     @POST("v1/takes/{id}/versions") suspend fun createVersionV2(@Path("id") id: String, @Body r: TakeVersionV2Request): Take
+    /** A blank project's first save: a new Library video with no source take. */
+    @POST("v1/edits") suspend fun createEdit(@Body r: TakeVersionV2Request): Take
     @POST("v1/editor/uploads/presign") suspend fun editorPresign(@Body r: EditorPresignRequest): PresignResponse
     @GET("v1/editor/uploads/{id}") suspend fun editorUpload(@Path("id") id: String): EditorUploadDto
     @GET("v1/editor/content") suspend fun editorContent(): okhttp3.ResponseBody
@@ -168,6 +170,9 @@ interface MuseService {
     @POST("v1/edit-sessions/{id}/patch") suspend fun pushEditPatch(@Path("id") id: String, @Body r: EditPatchRequest): EditChangeResult
     @POST("v1/edit-sessions/{id}/undo") suspend fun undoEditEntry(@Path("id") id: String, @Body r: EditUndoRequest): EditChangeResult
     @POST("v1/edit-sessions/{id}/presence") suspend fun editPresence(@Path("id") id: String, @Body r: EditPresence): JsonObject
+    @GET("v1/preview/layouts") suspend fun previewLayouts(): JsonObject
+    @GET("v1/edit-sessions") suspend fun recentEditSessions(@retrofit2.http.Query("recent") recent: Int, @retrofit2.http.Query("limit") limit: Int): List<EditSessionDto>
+    @POST("v1/edit-sessions/{id}/view") suspend fun saveEditView(@Path("id") id: String, @Body r: EditViewRequest): JsonObject
     @DELETE("v1/edit-sessions/{id}/presence/{device}") suspend fun leaveEditSession(@Path("id") id: String, @Path("device") device: String): retrofit2.Response<Unit>
     @POST("v1/edit-sessions/{id}/frames/{rid}") suspend fun answerEditFrame(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditFrameAnswer): JsonObject
     @POST("v1/edit-sessions/{id}/requests/{rid}") suspend fun answerEditRequest(@Path("id") id: String, @Path("rid") rid: String, @Body r: EditRequestAnswer): JsonObject
@@ -228,6 +233,7 @@ interface MuseService {
     @POST("v1/recreate/references/{id}/briefs/write") suspend fun writeReferenceBriefs(@Path("id") id: String, @Body r: JsonObject): JsonObject
     @POST("v1/suite/assist") suspend fun createSuiteAssist(@Body r: JsonObject): SuiteAssist
     @GET("v1/suite/assist/{id}") suspend fun suiteAssist(@Path("id") id: String): SuiteAssist
+    @GET("v1/claude/suggestions") suspend fun claudeSuggestions(@QueryMap q: Map<String, String>): JsonObject
     @PATCH("v1/suite/assist/{id}") suspend fun patchSuiteAssist(@Path("id") id: String, @Body r: JsonObject): SuiteAssist
     @POST("v1/suite/assist/{id}/pending/{pid}") suspend fun answerSuitePending(@Path("id") id: String, @Path("pid") pid: String, @Body r: JsonObject): SuitePending
     @GET("v1/recreate/settings") suspend fun recreateSettings(): RecreateLinkSettings
@@ -512,6 +518,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         putToStorage(p, FileProgressBody(video.file, "video/mp4".toMediaType()) { onProgress(it * .97f) })
         val thumbId = video.thumbJpeg?.let { putPresigned("image", "image/jpeg", it) {} }
         val req = TakeVersionV2Request(p.uploadId, thumbId, project, video.durationSec, video.width, video.height, video.fps, name = versionName(name), aiLabel = true.takeIf { aiLabel })
+        // A blank project's first save (no source take): POST /v1/edits makes it a new Library video.
+        if (takeId == studio.muse.core.edit.BLANK_SOURCE) return call { createEdit(req) }.abs().also { onProgress(1f) }
         return call { createVersionV2(takeId, req) }.abs().also { onProgress(1f) }
     }
     // WS7: import from link: the phone's file as a clip upload (the import confirms it).
@@ -572,6 +580,8 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
         createSuiteAssist(buildJsonObject { draft?.let { put("draft", it.json) }; fromJobId?.let { put("fromJobId", JsonPrimitive(it)) } })
     }
     override suspend fun suiteAssist(id: String) = call { suiteAssist(id) }
+    override suspend fun claudeSuggestions(q: studio.muse.core.claude.ClaudeSuggestQuery) =
+        studio.muse.core.claude.ClaudeSuggest.parse(call { claudeSuggestions(q.params()) })
     override suspend fun patchSuiteAssist(id: String, draft: SuiteDraft, baseRevision: Int?) = call {
         patchSuiteAssist(id, buildJsonObject { put("draft", draft.json); baseRevision?.let { put("baseRevision", JsonPrimitive(it)) } })
     }
@@ -673,7 +683,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun pushEditPatch(id: String, req: EditPatchRequest) = call { pushEditPatch(id, req) }
     override suspend fun undoEditEntry(id: String, req: EditUndoRequest) = call { undoEditEntry(id, req) }
     override suspend fun editPresence(id: String, presence: EditPresence) { call { editPresence(id, presence) } }
+    override suspend fun previewLayouts(): JsonObject? = runCatching { call { previewLayouts() } }.getOrNull()
     override suspend fun leaveEditSession(id: String, device: String) { call { leaveEditSession(id, device) } }
+    override suspend fun recentEditSessions(limit: Int) = call { recentEditSessions(1, limit.coerceIn(1, 50)) }
+    override suspend fun saveEditView(id: String, view: JsonObject) { call { saveEditView(id, EditViewRequest(view)) } }
     /** Always the image presign + PUT (the server checks the upload is an image of the studio; no confirm step). */
     override suspend fun uploadEditFrame(png: ByteArray): String = putPresigned("image", "image/png", png) {}
     override suspend fun answerEditFrame(id: String, requestId: String, uploadId: String) { call { answerEditFrame(id, requestId, EditFrameAnswer(uploadId)) } }
