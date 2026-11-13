@@ -180,13 +180,18 @@ struct ChatTranscriptView: View {
         if j != showJump { showJump = j }
     }
 
+    /// Coalesced (run 607: a third of the main thread while a reply streamed was these scrolls, one per new row): at most
+    /// one scroll pending, a tenth of a second after the first ask.
     private func scrollToEnd(_ proxy: ScrollViewProxy, animated: Bool) {
-        DispatchQueue.main.async {
+        guard !followPending else { return }
+        followPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if animated {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.endId, anchor: .bottom) }
             } else {
                 proxy.scrollTo(Self.endId, anchor: .bottom)
             }
+            followPending = false
         }
     }
 
