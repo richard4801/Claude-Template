@@ -143,6 +143,8 @@ extension SnapshotRunner {
         let font = Fonts.nsFont(TypeScale.of(.c).textFamily, TypeScale.of(.c).body.size, .regular) ?? NSFont.systemFont(ofSize: 15)
         let line = NSLayoutManager().defaultLineHeight(for: font)
         for (width, height) in [(1440, 900), (1280, 800), (1000, 700), (960, 600)] {
+            // Rows measured at this size only (a row scrolled out of the lazy transcript keeps its old frame otherwise).
+            for k in state.composerFrames.keys where k.hasPrefix("chat bubble") || k.hasPrefix("chat reply") { state.composerFrames[k] = nil }
             size(width, height)
             var heights: [Int: CGFloat] = [:]
             for n in [1, 4, 12] {
