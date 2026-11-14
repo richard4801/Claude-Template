@@ -1,0 +1,28 @@
+From a18db05e7142dc4beb21b0da2b145adfbb179877 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 14 Nov 2026 22:04:56 +0000
+Subject: [PATCH] Photo: the empty stage reads "<n> photos, one run" (the
+ approved frame)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxoXQmfbR7CXwb939GC
+---
+ .../studio/muse/app/ui/screens/suite/composer/PhotoTab.kt       | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/PhotoTab.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/PhotoTab.kt
+index 0de18f09..6010ee31 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/PhotoTab.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/PhotoTab.kt
+@@ -101,7 +101,7 @@ fun PhotoStage(ui: ComposerUi, modifier: Modifier, wide: Boolean) {
+                 Spacer(Modifier.height(14.dp))
+                 T(if (busy) "Making ${PhotoRules.noun(count)}…" else "Your photos appear here", m.scale.label.copy(fontWeight = FontWeight.SemiBold), m.roles.ink, maxLines = 1)
+                 Spacer(Modifier.height(4.dp))
+-                T(if (busy) "They land here when they're ready" else "1 to ${PhotoRules.MAX_COUNT} photos per run", m.scale.caption, m.roles.ink2, maxLines = 1)
++                T(if (busy) "They land here when they're ready" else "${PhotoRules.noun(count)}, one run" /* the approved frame */, m.scale.caption, m.roles.ink2, maxLines = 1)
+             }
+             return@Column
+         }
+-- 
+2.43.0
+
