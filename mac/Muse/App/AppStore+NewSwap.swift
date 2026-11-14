@@ -10,7 +10,8 @@ enum SwapVariant: String, CaseIterable {
     case classic, remix
     var label: String { self == .classic ? "Swap" : "New Swap (beta)" }
     static let defaultsKey = "suite.swapVariant"
-    static var saved: SwapVariant { UserDefaults.standard.string(forKey: defaultsKey).flatMap(SwapVariant.init(rawValue:)) ?? .classic }
+    /// A saved choice wins; someone who never chose gets New Swap (the approved redesign frames; coordinator 2026-11-14).
+    static var saved: SwapVariant { UserDefaults.standard.string(forKey: defaultsKey).flatMap(SwapVariant.init(rawValue:)) ?? .remix }
 }
 
 /// Which picture an upload goes to.

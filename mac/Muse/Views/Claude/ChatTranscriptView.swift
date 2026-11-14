@@ -28,6 +28,8 @@ enum ChatRowKind: Hashable {
     case frame(url: String)
     /// A card Claude put up (ChatCards.swift); `messageId` is its stored line.
     case card(messageId: String, ClaudeCard)
+    /// One quiet line from MUSE (the chat was full and carried on in a fresh space).
+    case note(String)
 }
 
 struct ChatRow: Identifiable, Hashable {
@@ -49,6 +51,8 @@ struct ChatRow: Identifiable, Hashable {
                 let shown = ChatLeakFilter.reply(text, audience: audience)
                 guard !shown.isEmpty else { continue }
                 out.append(ChatRow(id: id, kind: .assistant(text: shown, streaming: streaming)))
+            case .tool(let id, _, let summary, _) where id.hasPrefix(ClaudeAutoCompact.freshSpacePrefix):
+                out.append(ChatRow(id: id, kind: .note(summary)))
             case .tool(let id, let name, let summary, let status):
                 let line = ChatToolLine(id: id, name: name, summary: ChatLeakFilter.toolSummary(summary, name: name), status: status)
                 if case .tools(let list)? = out.last?.kind {
@@ -79,6 +83,8 @@ struct ChatTranscriptState: Equatable {
     var emptyHint = ""
     /// The last turn ran without Blender's tools (its server didn't start): Retry Blender.
     var blenderFailed = false
+    /// The chat is too full even for a fresh space (auto-compact tried once): New chat instead of Try again.
+    var chatFull = false
     /// uvx is fetching Blender's tools (the relay was just switched on).
     var blenderWarming = false
 }
@@ -91,6 +97,7 @@ struct ChatTranscriptView: View {
     var resolve: (String) -> String = { $0 }
     var onRetry: () -> Void = {}
     var onRetryBlender: () -> Void = {}
+    var onNewChat: () -> Void = {}
     var onReload: () -> Void = {}
 
     @State private var pinned = true
@@ -272,8 +279,13 @@ struct ChatTranscriptView: View {
                 Ph("warning", 14).foregroundStyle(t.roles.danger)
                 Text(e).scaled(t.scale.caption, t.roles.ink).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: Space.s2)
-                RButton("Try again", kind: .quiet, small: true, action: onRetry)
-                    .help("Send your last message again")
+                if state.chatFull {
+                    RButton("New chat", kind: .quiet, small: true, action: onNewChat)
+                        .help("Start a new chat here and carry on")
+                } else {
+                    RButton("Try again", kind: .quiet, small: true, action: onRetry)
+                        .help("Send your last message again")
+                }
             }
             .accessibilityElement(children: .contain)
         }
@@ -305,6 +317,7 @@ struct ChatRowView: View, Equatable {
         case .tools(let lines): ChatToolRows(lines: lines)
         case .frame(let url): ChatFrame(url: resolve(url))
         case .card(let messageId, let card): ChatCardView(card: card, messageId: messageId, resolve: resolve)
+        case .note(let text): ChatNoteLine(text: text)
         }
     }
 }
@@ -427,6 +440,20 @@ struct ChatAssistantText: View {
 
 /// Tool steps: one compact line each (a spinner while running, a check when done, a warning when it failed), opening to
 /// one plain sentence.
+/// A quiet line from MUSE in the chat, centred and small (not a step of Claude's).
+struct ChatNoteLine: View {
+    @Environment(\.theme) private var t
+    let text: String
+    var body: some View {
+        Text(text)
+            .scaled(t.scale.caption, t.roles.ink2)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Space.s1)
+    }
+}
+
 struct ChatToolRows: View {
     let lines: [ChatToolLine]
     var body: some View {

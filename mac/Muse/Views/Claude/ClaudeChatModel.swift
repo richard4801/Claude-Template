@@ -308,6 +308,9 @@ final class ClaudeChatModel {
         return ChatLeakFilter.errorWords(e)
     }
 
+    /// The chat is too full even after MUSE's fresh-space recovery: the error offers New chat.
+    var chatFull: Bool { turnError == ClaudeAutoCompact.fullError }
+
     func send() {
         let text = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         // A video goes by its upload id: it must be on the server first.

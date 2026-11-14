@@ -399,13 +399,64 @@ public final class ClaudeScriptedLauncher: ClaudeLauncher, @unchecked Sendable {
 
 /// The demo turn: a little streamed text, one edit chip and a short answer (no real Claude anywhere).
 public enum ClaudeDemoScript {
+    /// A message with this in it gets the owner's 2026-11-14 failure ("Prompt is too long · automatic compaction failed")
+    /// unless it opens a fresh session with MUSE's handoff (the auto-compact check drives recovery with it).
+    public static let chatFullMarker = "[demo: chat full]"
+    /// The error Claude Code ended the owner's chat with.
+    public static let overflowError = "Prompt is too long · automatic compaction failed: API Error: Output blocked by content filtering policy"
+    public static let freshSessionId = "demo-session-fresh"
+
+    static func j(_ v: JSONValue) -> String {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return String(decoding: (try? e.encode(v)) ?? Data(), as: UTF8.self)
+    }
+
+    static func initLine(_ sid: String, model: String = "claude-sonnet-demo") -> String {
+        j(.object(["type": .string("system"), "subtype": .string("init"), "session_id": .string(sid), "model": .string(model),
+                   "tools": .array([.string("mcp__muse__get_edit"), .string("mcp__muse__apply_edit_ops")]),
+                   "mcp_servers": .array([.object(["name": .string("muse"), "status": .string("connected")])])]))
+    }
+
+    /// A turn that no longer fits, as Claude Code ends it: a short reply of its own, then an error result.
+    public static func overflowLines(sid: String = "demo-session-1") -> [String] {
+        [
+            initLine(sid),
+            j(.object(["type": .string("assistant"), "session_id": .string(sid), "message": .object(["id": .string("msg_full"), "role": .string("assistant"),
+                       "model": .string("<synthetic>"), "content": .array([.object(["type": .string("text"), "text": .string("Prompt is too long")])]),
+                       "usage": .object(["input_tokens": .number(0), "output_tokens": .number(0)])])])),
+            j(.object(["type": .string("result"), "subtype": .string("success"), "is_error": .bool(true), "result": .string(overflowError),
+                       "session_id": .string(sid), "total_cost_usd": .number(0)])),
+        ]
+    }
+
+    /// `/compact` as Claude Code answers it headless (2.1.325): compact_boundary, then a success result on the same session.
+    public static func compactLines(sid: String = "demo-session-1", postTokens: Int = 9_000, window: Int = 200_000) -> [String] {
+        [
+            initLine(sid),
+            j(.object(["type": .string("system"), "subtype": .string("compact_boundary"), "session_id": .string(sid),
+                       "compact_metadata": .object(["trigger": .string("manual"), "pre_tokens": .number(160_000), "post_tokens": .number(Double(postTokens))])])),
+            j(.object(["type": .string("result"), "subtype": .string("success"), "is_error": .bool(false), "result": .string(""), "session_id": .string(sid),
+                       "modelUsage": .object(["claude-sonnet-demo": .object(["contextWindow": .number(Double(window))])])])),
+        ]
+    }
+
+    /// A reply whose request used `tokens` of a `window` context (to drive the preventive compact).
+    public static func usageLine(sid: String = "demo-session-1", tokens: Int, window: Int = 200_000) -> [String] {
+        [
+            j(.object(["type": .string("assistant"), "session_id": .string(sid), "message": .object(["id": .string("msg_usage"), "role": .string("assistant"),
+                       "model": .string("claude-sonnet-demo"), "content": .array([]),
+                       "usage": .object(["input_tokens": .number(Double(tokens - 1000)), "cache_read_input_tokens": .number(900), "output_tokens": .number(100)])])])),
+            j(.object(["type": .string("result"), "subtype": .string("success"), "is_error": .bool(false), "result": .string("ok"), "session_id": .string(sid),
+                       "modelUsage": .object(["claude-sonnet-demo": .object(["contextWindow": .number(Double(window))])])])),
+        ]
+    }
+
     public static func lines(_ text: String) -> [String] {
-        let sid = "demo-session-1"
-        func j(_ v: JSONValue) -> String {
-            let e = JSONEncoder()
-            e.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-            return String(decoding: (try? e.encode(v)) ?? Data(), as: UTF8.self)
-        }
+        if text.hasPrefix("/compact") { return compactLines() }
+        let handoff = text.hasPrefix("[MUSE handoff]")
+        if text.contains(chatFullMarker), !handoff { return overflowLines() }
+        let sid = handoff ? freshSessionId : "demo-session-1"
         func delta(_ s: String) -> String {
             j(.object(["type": .string("stream_event"), "session_id": .string(sid),
                        "event": .object(["type": .string("content_block_delta"), "index": .number(0), "delta": .object(["type": .string("text_delta"), "text": .string(s)])])]))
@@ -413,9 +464,7 @@ public enum ClaudeDemoScript {
         let intro = "On it. I'll look at the edit first."
         let outro = "Done: I trimmed 0:03–0:05 so the turn lands on the beat. Undo brings it back."
         return [
-            j(.object(["type": .string("system"), "subtype": .string("init"), "session_id": .string(sid), "model": .string("claude-sonnet-demo"),
-                       "tools": .array([.string("mcp__muse__get_edit"), .string("mcp__muse__apply_edit_ops")]),
-                       "mcp_servers": .array([.object(["name": .string("muse"), "status": .string("connected")])])])),
+            initLine(sid),
             delta("On it. "), delta("I'll look at the edit first."),
             j(.object(["type": .string("assistant"), "session_id": .string(sid), "message": .object(["id": .string("msg_demo1"), "role": .string("assistant"),
                        "content": .array([.object(["type": .string("text"), "text": .string(intro)])])])])),

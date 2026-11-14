@@ -260,11 +260,13 @@ struct ClaudeChatView: View {
             rows: rows,
             state: ChatTranscriptState(loading: model.loading, loadError: model.loadError, offline: model.offline,
                                        turnError: model.turnError, busy: model.busy, emptyHint: hint,
-                                       blenderFailed: model.blenderFailed, blenderWarming: blender.running && blender.toolsState == .warming),
+                                       blenderFailed: model.blenderFailed, chatFull: model.chatFull,
+                                       blenderWarming: blender.running && blender.toolsState == .warming),
             accessory: accessory,
             resolve: { service.resolve($0) },
             onRetry: { model.retry() },
             onRetryBlender: { model.retryBlender() },
+            onNewChat: { Task { await model.newChat() } },
             onReload: { Task { await model.retryLoad() } })
     }
 

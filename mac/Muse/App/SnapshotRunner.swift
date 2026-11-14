@@ -140,7 +140,7 @@ enum SnapshotRunner {
                 ("composer_model", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store) }),
                 ("composer_model_list", { store.openTool(.shot); fillDemoDraft(store); pinDemoModel(store); state.overlay = "model_picker" }),
                 // Swap and Extend: the generic Model pill's list for that purpose (WS6, "pick the model everywhere").
-                ("composer_swap_model_list", { store.openTool(.swap); state.overlay = "engine_list:swap" }),
+                ("composer_swap_model_list", { store.setSwapVariant(.classic); store.openTool(.swap); state.overlay = "engine_list:swap" }), // the classic Swap's list (New Swap is the default since 2026-11-14)
                 ("composer_extend_model_list", { store.openTool(.extend); state.overlay = "engine_list:extend" }),
                 // Photo: the owner's photo model list.
                 ("composer_photo_model_list", { store.openPhoto(model: SampleData.demo); state.overlay = "model_picker" }),
