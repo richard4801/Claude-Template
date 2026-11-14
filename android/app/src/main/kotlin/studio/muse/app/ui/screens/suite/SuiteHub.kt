@@ -229,7 +229,7 @@ private fun RunningPanel(running: List<Job>, modifier: Modifier, queue: () -> Un
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(m.roles.hairline))
-        if (running.isEmpty()) T("Nothing is rendering. Takes you start show here with their progress.", m.scale.caption, m.roles.ink2)
+        if (running.isEmpty()) T("Nothing running", m.scale.caption, m.roles.ink2)
         running.forEach { j ->
             Row(Modifier.fillMaxWidth().press(onClick = queue), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(30.dp, 52.dp).clip(RoundedCornerShape(m.radii.chip))) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
