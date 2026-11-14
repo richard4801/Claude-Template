@@ -179,7 +179,10 @@ describe('edit sessions API and Claude tools', () => {
     expect(r.changes).toEqual(['Split at 0:02.0', 'Look · warm-honey 70 %', 'Added hook “3 things”']);
     expect(r.label).toBe('Split at 0:02.0 · Look · warm-honey 70 % · Added hook “3 things”');
     expect(r.entry).toMatchObject({ author: 'claude', byClaude: true });
-    await expect(tool('apply_edit_ops').run(env(), { sessionId: opened.sessionId, baseRevision: opened.revision, ops: [{ op: 'ratio', ratio: '1:1' }] })).rejects.toMatchObject({ code: 'stale_revision' });
+    // A stale base whose ops touch what changed since is refused, naming the change and its parts (ci_437fd7d7d5db).
+    const st = tool('apply_edit_ops').run(env(), { sessionId: opened.sessionId, baseRevision: opened.revision, ops: [{ op: 'trim', clipId: 'c1', inSec: 0.2 }] });
+    await expect(st).rejects.toMatchObject({ code: 'stale_revision' });
+    await expect(st).rejects.toThrow(/revision \d+ by you “Split at 0:02\.0 · .*” changed \/tracks/);
     const got = await tool('get_edit').run(env(), { sessionId: opened.sessionId }) as any;
     expect(got.summary.tracks[0].items).toHaveLength(2);
     expect(got.history[0]).toMatchObject({ byClaude: true });
@@ -191,6 +194,28 @@ describe('edit sessions API and Claude tools', () => {
     const appEntry = h.find((e: any) => e.author === 'app:phone-1');
     expect((await owner.req('POST', `/v1/edit-sessions/${opened.sessionId}/undo`, { entryId: appEntry.id, device: 'phone-1' })).body.entry.label).toBe('Undo: Trim');
     expect((await owner.req('POST', `/v1/edit-sessions/${opened.sessionId}/undo`, { entryId: appEntry.id })).body.code).toBe('already_undone');
+  });
+
+  it('stale apply_edit_ops: rebased when the parts it changes were not changed since; refused naming them when they were', async () => {
+    const svc = editSessionsOf(a.ctx);
+    const opened = await tool('open_edit').run(env(), { takeId }) as any;
+    const base = opened.revision as number;
+    const cur = (await svc.row(ownerUser, opened.sessionId)).project as M.EditProject;
+    // The person in the app changes the background colour; Claude, still on `base`, changes the first clip's volume.
+    const bg = cur.canvas.background === '#101010' ? '#202020' : '#101010';
+    expect((await owner.req('POST', `/v1/edit-sessions/${opened.sessionId}/patch`, { baseRevision: base, patch: [{ op: 'replace', path: '/canvas/background', value: bg }], label: 'Background', device: 'mac-1' })).body.revision).toBe(base + 1);
+    const r = await tool('apply_edit_ops').run(env(), { sessionId: opened.sessionId, baseRevision: base, ops: [{ op: 'volume', itemId: cur.tracks[0]!.items[0]!.id, volume: 0.7 }] }) as any;
+    expect(r.revision).toBe(base + 2);
+    expect(r.rebased).toMatchObject({ from: base, over: ['Background'] });
+    const now = (await svc.row(ownerUser, opened.sessionId)).project as M.EditProject;
+    expect(now.canvas.background).toBe(bg);
+    expect((now.tracks[0]!.items[0] as M.VideoClip).volume).toBe(0.7);
+    // The same parts: refused, naming who changed what.
+    const clash = tool('apply_edit_ops').run(env(), { sessionId: opened.sessionId, baseRevision: base, ops: [{ op: 'fill', kind: 'color', color: '#333333' }] });
+    await expect(clash).rejects.toMatchObject({ code: 'stale_revision' });
+    await expect(clash).rejects.toThrow(/revision \d+ by the person in the app “Background” changed \/canvas\/background/);
+    // A base from the future (or before the kept history) is a plain stale_revision.
+    await expect(tool('apply_edit_ops').run(env(), { sessionId: opened.sessionId, baseRevision: base + 99, ops: [{ op: 'ratio', ratio: '1:1' }] })).rejects.toMatchObject({ code: 'stale_revision' });
   });
 
   it('get_frame: approximate without an app; exact from the app when one is open', async () => {

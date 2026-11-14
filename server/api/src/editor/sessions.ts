@@ -1,7 +1,7 @@
 // Edit sessions (plans/claude-editing.md A, plans/api.md "Edit sessions"): a live, revisioned working copy of an
 // EditProject v2 per take, shared by the owner's apps and Claude. Every change is a JSON Patch with its inverse, so
 // every change (Claude's too) is undoable; changes reach the apps as `edit` events. Owner only.
-import { and, desc, eq, inArray, lte } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, lte } from 'drizzle-orm';
 import { newSafeIssues, previewOf, type EditPreview } from './safeArea.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads } from '../db/schema.js';
@@ -197,6 +197,35 @@ export class EditSessions {
     }
     return n;
   }
+  /**
+   * Claude's ops against an older revision: the base project is rebuilt from the history (each later change's inverse),
+   * the ops are applied to it, and their patch is applied to the current project when no path it touches was changed
+   * since (a path or one inside the other). Otherwise, or when the history no longer reaches back, 409 stale_revision
+   * naming each change since: who, what, and the parts it changed.
+   */
+  private async rebase(s: Session, base: number, ops: EditOp[]): Promise<{ project: M.EditProject; labels: string[]; over: string[] }> {
+    if (base > s.revision || base < 0) throw await this.stale(s.id, base);
+    const rows = (await this.ctx.db.select().from(editOps).where(and(eq(editOps.sessionId, s.id), gt(editOps.revision, base))).orderBy(desc(editOps.id)))
+      .filter(r => (r.patch as unknown[]).length);
+    const revs = new Set(rows.map(r => r.revision));
+    if (rows.length !== s.revision - base || revs.size !== rows.length) throw await this.stale(s.id, base); // pruned history
+    let baseProject = s.project as M.EditProject;
+    try { for (const r of rows) baseProject = applyPatch(baseProject, r.inverse as PatchOp[]); } catch { throw await this.stale(s.id, base); }
+    const { project: theirs, labels } = applyOps(baseProject, ops);
+    const mine = diff(baseProject, theirs);
+    const since = [...rows].reverse().map(r => ({ r, paths: (r.patch as PatchOp[]).map(o => o.path) }));
+    const hit = (a: string, b: string) => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+    const clash = since.filter(x => x.paths.some(q => mine.some(m => hit(m.path, q))));
+    const who = (r: OpRow) => (r.author === 'claude' ? 'you' : r.author.startsWith('app') ? 'the person in the app' : r.author);
+    const parts = (x: { r: OpRow; paths: string[] }) => `revision ${x.r.revision} by ${who(x.r)} “${x.r.label}” changed ${x.paths.slice(0, 8).join(', ')}${x.paths.length > 8 ? ` and ${x.paths.length - 8} more` : ''}`;
+    let project: M.EditProject | null = null;
+    if (!clash.length) { try { project = applyPatch(s.project as M.EditProject, mine); } catch { /* reported below */ } }
+    if (!project) {
+      const list = (clash.length ? clash : since).map(parts).join('; ');
+      throw new ApiError(409, 'stale_revision', `The edit moved on (revision ${s.revision}, you sent ${base}) and your change touches parts changed since: ${list} · get_edit (revision ${s.revision}) and re-apply against it`);
+    }
+    return { project, labels, over: since.map(x => x.r.label) };
+  }
   private async stale(id: string, baseRevision: number) {
     const [cur] = await this.ctx.db.select().from(editSessions).where(eq(editSessions.id, id));
     return new ApiError(409, 'stale_revision', `The edit moved on (revision ${cur?.revision ?? '?'}, you sent ${baseRevision}) · get it again and re-apply`);
@@ -232,9 +261,10 @@ export class EditSessions {
   /** Claude's ops (MCP apply_edit_ops): applied, validated, committed as one undoable change. */
   async applyClaude(u: AuthUser, id: string, b: { baseRevision?: unknown; ops?: unknown; label?: string; meta?: Record<string, unknown> }) {
     const s = await this.row(u, id), base = this.revOf(b);
-    if (base !== s.revision) throw await this.stale(id, base);
+    // A stale base is rebased when nothing Claude changes was changed since (ci_437fd7d7d5db); else 409 naming what moved.
+    const rb = base === s.revision ? null : await this.rebase(s, base, b.ops as EditOp[]);
     this.limit(id);
-    const { project, labels } = applyOps(s.project as M.EditProject, b.ops as EditOp[]);
+    const { project, labels } = rb ?? applyOps(s.project as M.EditProject, b.ops as EditOp[]);
     await this.linkUploads(s.studioId, project);
     this.check(project, s.takeId);
     // workstream 1: the owner's pinned playbook rules (no ramps, cuts only, …) hold for every change of Claude's.
@@ -244,6 +274,7 @@ export class EditSessions {
     const safe = newSafeIssues(s.project as M.EditProject, project, this.preview(id));
     return { revision: r.session.revision, changes: labels, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(project),
       ...(safe ? { safeAreaWarnings: safe } : {}),
+      ...(rb ? { rebased: { from: base, over: rb.over, note: `Applied on top of revision ${s.revision}: the changes since your revision ${base} (${rb.over.join(' · ')}) touch other parts of the edit` } } : {}),
       ...(notice && r.entry ? { notice, undoEntryId: r.entry.id, tell: 'Say this to the person in one plain line (their app shows it with Undo; undo_edit with this entryId reverts exactly it).' } : {}) };
   }
   private limit(id: string) {

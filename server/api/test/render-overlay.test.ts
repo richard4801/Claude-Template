@@ -16,7 +16,7 @@ import { ENC, ff, hasFfmpeg } from './recreate-fixture.js';
 function evalExpr(e: string, vars: Record<string, number>): number {
   const fns = { _if: (c: number, a: number, b: number) => (c ? a : b), lt: (a: number, b: number) => +(a < b), lte: (a: number, b: number) => +(a <= b), gte: (a: number, b: number) => +(a >= b),
     clip: (v: number, a: number, b: number) => Math.min(b, Math.max(a, v)), pow: Math.pow, sin: Math.sin, cos: Math.cos, mod: (a: number, b: number) => a % b, hypot: Math.hypot,
-    sqrt: Math.sqrt, min: Math.min, max: Math.max, PI: Math.PI };
+    sqrt: Math.sqrt, abs: Math.abs, min: Math.min, max: Math.max, PI: Math.PI };
   const js = e.replace(/\bif\(/g, '_if(');
   return Function(...Object.keys(fns), ...Object.keys(vars), `return ${js};`)(...Object.values(fns), ...Object.values(vars)) as number;
 }
@@ -54,7 +54,7 @@ describe('overlay expressions match model.ts (unit)', () => {
     const want = M.itemCorners({ width: W, height: H }, 4, 3, 'contain', tr);
     const got = [at(1, 1), at(iw + 1, 1), at(iw + 1, ih + 1), at(1, ih + 1)];
     got.forEach((g, i) => { expect(g[0]).toBeCloseTo(want[i]![0], 1); expect(g[1]).toBeCloseTo(want[i]![1], 1); });
-    for (const mode of M.BLEND_MODES) for (const [x, y] of [[0, 0], [30, 200], [128, 64], [200, 250], [255, 128], [90, 30]]) {
+    for (const mode of M.ALL_BLEND_MODES) for (const [x, y] of [[0, 0], [30, 200], [128, 64], [200, 250], [255, 128], [90, 30]]) {
       const v = evalExpr(L.blendExpr(mode), { x: x!, y: y! });
       expect(Math.abs(v - 255 * M.blendChannel(mode, x! / 255, y! / 255))).toBeLessThan(0.01);
     }
@@ -156,6 +156,19 @@ describe.skipIf(!hasFfmpeg)('render overlays (ffmpeg)', () => {
     expect(sr!).toBeGreaterThan(240); expect(Math.abs(sg! - 64)).toBeLessThan(14); expect(Math.abs(sb! - 64)).toBeLessThan(14);
     expect(grey(await px(scr.out, 1, 0.05, 0.05))).toBe(true); // outside the picture: untouched
     expect(grey(await px(scr.out, 3, 0.5, 0.5))).toBe(true); // after it
+  }, 90_000);
+
+  it('blend modes difference and exclusion (gated for the apps; the render draws them): red over grey', async () => {
+    // Validation refuses them until BLEND_NEXT_LIVE, so this renders without it (renderProject itself takes any mode).
+    const dif = path.join(dir, 'difference.mp4'), exc = path.join(dir, 'exclusion.mp4');
+    const r = await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, project(vid({ startSec: 0, blend: 'difference' })), files, dif, { maxSide: 640, audio: 'none' });
+    expect(r.unsupported).toEqual([]);
+    const [dr, dg, db] = await px(dif, 1, 0.5, 0.5); // |grey − red| = (191, 64, 64)
+    expect(Math.abs(dr! - 191)).toBeLessThan(14); expect(Math.abs(dg! - 64)).toBeLessThan(14); expect(Math.abs(db! - 64)).toBeLessThan(14);
+    await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, project(vid({ startSec: 0, blend: 'exclusion' })), files, exc, { maxSide: 640, audio: 'none' });
+    const [er, eg, eb] = await px(exc, 1, 0.5, 0.5); // 0.25 + 1 − 2·0.25 = 0.75 → (191, 64, 64) on grey 64
+    expect(Math.abs(er! - 191)).toBeLessThan(14); expect(Math.abs(eg! - 64)).toBeLessThan(14); expect(Math.abs(eb! - 64)).toBeLessThan(14);
+    expect(grey(await px(dif, 3, 0.5, 0.5))).toBe(true);
   }, 90_000);
 
   it('chroma key, a background-removal matte and a mask make parts of the picture see-through', async () => {
