@@ -14,9 +14,10 @@ import { estimateOne } from '../replicate/prices.js';
 /** How many of Replicate's image models the picker lists beyond the curated ones. */
 const BROWSE_IMAGE_MODELS = 40;
 import { modelName, type StepOverrides } from '../images/steps.js';
+import { sideOf } from '../suite/plan.js';
 import { memberRules, saveMemberRules, type MemberRules } from './members.js';
 import { labelList } from './labels.js';
-import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
+import { DEFAULT_LADDER, EXTEND_LADDER, familyOf, inputSlotsOf, modelById, NO_INPUTS, RECAST_LADDER, type InputSlots, type ModelSpec } from '../suite/registry.js';
 import { suiteSettings } from '../suite/schema.js';
 import { adaptedExtend } from '../suite/extend.js';
 import { remixSupport } from '../suite/remix.js';
@@ -45,7 +46,15 @@ export type Engine = {
   fit?: 'native' | 'adapted'; fitNote?: string;
   /** Priced live from the provider's free quote (Wan 3.0 on Higgsfield): `price` is null until a request is planned. */
   livePrice?: boolean;
+  /**
+   * Owner 2026-11-14 (one model, several providers): every resolution the model makes across its providers, each with
+   * its $/s and the provider (and full label) it runs on. 0 with `livePrice` = priced when a shot is planned.
+   */
+  resolutions?: ResolutionPrice[];
+  /** With ?resolution=: whether this model makes it, else the nearest it makes (picking it moves there), in words. */
+  resolutionFit?: { asked: string; has: boolean; resolution: string; note: string | null };
 };
+export type ResolutionPrice = { id: string; label: string; perSec: number; provider?: string; providerName?: string; modelLabel?: string; livePrice?: boolean };
 export type Choice = { model: string; source: 'request' | 'studio'; engine: Engine };
 
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
@@ -78,6 +87,9 @@ export const modelChoice = (ctx: Ctx) => { let s = services.get(ctx); if (!s) { 
 export class ModelChoice {
   constructor(private ctx: Ctx) {}
 
+  /** The studio's suite settings (model switches, price corrections, ladders). */
+  prefs(studioId: string) { return this.ctx.suite.prefs(studioId); }
+
   // ------------------------------------------------------------------ candidates
   /** Swap engines that can run now (hosted: Replicate set up and the model not switched off; GPU: the pods offer it). */
   private swapUsable(prefs: { models?: Record<string, { enabled?: boolean }> }) {
@@ -103,51 +115,69 @@ export class ModelChoice {
   }
 
   /** The quote for a swap on a chosen engine: its `RenderReq` (priced like /v1/jobs prices it) for `takes` of a clip. */
-  async swapQuote(studioId: string, id: string, quality: string | undefined, clipSeconds: number | null | undefined, takes = 1) {
+  /**
+   * Owner 2026-11-14 (one model, several providers): MiniMax H3's swap at HD (2K) runs on Higgsfield (half Replicate's
+   * 2K rate) when its key is set, it hasn't refused in the last 30 minutes and the owner hasn't switched it off; a clip
+   * shorter than Higgsfield's 5 s minimum stays on Replicate (padding would bill seconds that aren't there).
+   */
+  swapRoute(id: string, quality: string | undefined, prefs: { models?: Record<string, { enabled?: boolean }> }, clipSeconds?: number | null): string {
+    if (id !== 'h3' || quality !== 'hd' || (clipSeconds != null && clipSeconds < HF_SWAP_MIN_SEC)) return id;
+    const hf = this.ctx.suite.providers.higgsfield;
+    return hf.configured() && !this.ctx.suite.isDown('higgsfield') && prefs.models?.['h3-hf']?.enabled !== false ? 'h3-hf' : id;
+  }
+
+  async swapQuote(studioId: string, id0: string, quality: string | undefined, clipSeconds: number | null | undefined, takes = 1) {
     const prefs = await this.ctx.suite.prefs(studioId);
+    const id = this.swapRoute(id0, quality, prefs, clipSeconds);
     const q = this.swapPrice(id, quality ?? 'standard', clipSeconds, prefs.models?.[id]?.priceScale ?? 1);
     const e = swapEngineById(id)!;
     const rr: P.RenderReq = e.runs === 'gpu' ? { ...q.rr, takes, clipSeconds } : { ...q.rr, takes };
     return { ...q, rr, cost: P.totalCost(rr) };
   }
 
-  private videoEntry(m: ModelSpec, purposes: Purpose[], scale: number, resolution?: string): Engine {
-    const res = (resolution && m.resolutions.find(r => r.id === resolution)) || m.resolutions.at(-1)!;
+  private videoEntry(m: ModelSpec, purposes: Purpose[], scale: number, resolution?: string, rs?: ResolutionPrice[], provider?: string): Engine {
+    const list: ResolutionPrice[] = rs ?? m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: m.livePrice ? 0 : r4(r.perSec * scale) }));
+    const at = (resolution && list.find(r => r.id === resolution)) || list.at(-1)!;
     const perRun = m.byo?.perRunUsd ? r4(m.byo.perRunUsd * scale) : null;
-    return { model: m.id, name: m.byo?.displayName ?? m.name, kind: 'video', purposes, custom: !!m.byo, provider: m.byo ? m.byo.providerKind : m.provider,
+    const live = rs ? !!at.livePrice && !at.perSec : !!m.livePrice;
+    return { model: m.id, name: m.byo?.displayName ?? m.name, kind: 'video', purposes, custom: !!m.byo, provider: provider ?? (m.byo ? m.byo.providerKind : m.provider),
       notice: m.licence.notice ?? null,
       limits: { minSeconds: m.duration.min, maxSeconds: m.duration.max, allowedSeconds: m.duration.allowed ?? null, aspectRatios: m.aspectRatios,
-        resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label })), maxInputSeconds: m.recast?.sourceSeconds[1] ?? m.extend?.sourceSeconds[1] ?? m.refs.videoSecondsMax ?? null },
-      resolution: res.id, price: m.livePrice ? null : perRun != null ? { basis: 'per_run', usd: perRun } : { basis: 'per_second', usd: r4(res.perSec * scale) }, inputs: inputSlotsOf([m]),
-      ...(m.livePrice ? { livePrice: true } : {}) };
+        resolutions: list.map(r => ({ id: r.id, label: r.label })), maxInputSeconds: m.recast?.sourceSeconds[1] ?? m.extend?.sourceSeconds[1] ?? m.refs.videoSecondsMax ?? null },
+      resolution: at.id, price: live ? null : perRun != null ? { basis: 'per_run', usd: perRun } : { basis: 'per_second', usd: at.perSec }, inputs: inputSlotsOf([m]),
+      ...(rs ? { resolutions: rs } : {}), ...(live ? { livePrice: true } : {}) };
   }
 
-  private async videoEngines(studioId: string): Promise<Engine[]> {
+  /** `quotes` false: no live display quotes (a check or a default lookup needs the list, not its prices). */
+  private async videoEngines(studioId: string, quotes = true): Promise<Engine[]> {
     const suite = this.ctx.suite;
     // The studio's custom video models, freshly loaded (an added, renamed or switched-on model shows straight away).
     await suite.byo.ensure(studioId).catch(() => {});
     const p = await suite.prefs(studioId);
     // Every model is listed (owner 2026-11-12): a provider that refused recently stays (Auto skips it, not the picker).
     const avail = suite.mode === 'off' ? new Set() : suite.configured();
-    const ladderRes = (id: string) => { for (const t of ['draft', 'standard', 'hd', 'cinema'] as const) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };
+    const ladderRes = (id: string) => { for (const t of ['draft', 'standard', 'hd', 'cinema'] as const) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => familyOf(x.model) === id); if (s) return s.resolution; } return undefined; };
     const out = new Map<string, Engine>();
-    for (const m of [...MODELS, ...customModelsOf(studioId)]) {
-      const pref = p.models?.[m.id];
-      if (m.status === 'removed' || m.licence.blockNewFeatures || pref?.enabled === false || (m.licence.requiresAck && !pref?.acknowledgedAt) || !avail.has(m.provider)) continue;
+    // Owner 2026-11-14: one entry per model, its resolutions across its providers (suite/service.ts pickerModels).
+    for (const f of suite.mode === 'off' ? [] : await suite.pickerModels(studioId, p, avail as Set<ModelSpec['provider']>, quotes)) {
       // Every video model is listed (owner 2026-11-12), also one made only for New Swap (Wan 2.7 Edit): its purposes
       // are the ones it's made for; the others adapt (candidates).
-      out.set(m.id, this.videoEntry(m, videoPurposes(m), pref?.priceScale ?? 1, ladderRes(m.id)));
+      const purposes = PURPOSES.filter(x => f.routes.some(m => videoPurposes(m).includes(x)));
+      const e = this.videoEntry({ ...f.spec, id: f.head.id }, purposes, p.models?.[f.head.id]?.priceScale ?? 1, ladderRes(f.head.id), f.resolutions, f.provider);
+      out.set(f.head.id, { ...e, inputs: inputSlotsOf(f.routes) });
     }
     // Character swap (and Recreate swap fills): the hosted H3 family joins with "swap"; Edit / Fast on our GPU are added.
+    // A provider route of a listed model (MiniMax H3 on Higgsfield) gives that model "swap" instead of a second entry.
     for (const e of this.swapUsable(p)) {
-      const cur = out.get(e.id);
+      const fam = familyOf(e.id), cur = out.get(fam);
       if (e.runs !== 'gpu') {
-        const m = modelById(e.id)!, sp = this.swapPrice(e.id, 'standard', null, p.models?.[e.id]?.priceScale ?? 1);
+        const m = modelById(fam)!, sp = this.swapPrice(e.id, 'standard', null, p.models?.[e.id]?.priceScale ?? 1);
         // A swap-only model (Genjutsu) is listed at its swap resolution and price.
         const base = cur && cur.purposes.length ? cur : this.videoEntry(m, cur?.purposes ?? [], p.models?.[e.id]?.priceScale ?? 1, sp.resolution ?? undefined);
-        out.set(e.id, { ...base, purposes: PURPOSES.filter(x => base.purposes.includes(x) || x === 'swap' || x === 'fill'),
+        const hf = e.runs === 'higgsfield' && fam === e.id;
+        out.set(fam, { ...base, purposes: PURPOSES.filter(x => base.purposes.includes(x) || x === 'swap' || x === 'fill'),
           ...(e.genjutsu ? { keeps: GENJUTSU_KEEPS, bestFor: 'Same moves, new look or scene: a new outfit or background, added characters or products' } : {}),
-          limits: { ...base.limits, minSeconds: e.genjutsu?.minSec ?? (e.runs === 'higgsfield' ? HF_SWAP_MIN_SEC : P.REPLICATE_MIN_SEC), maxInputSeconds: e.genjutsu?.maxSec ?? P.REPLICATE_MAX_SEC } });
+          limits: { ...base.limits, minSeconds: e.genjutsu?.minSec ?? (hf ? HF_SWAP_MIN_SEC : cur?.limits.minSeconds ?? P.REPLICATE_MIN_SEC), maxInputSeconds: e.genjutsu?.maxSec ?? P.REPLICATE_MAX_SEC } });
       } else {
         const sp = this.swapPrice(e.id, 'standard', P.SAMPLE_CLIP_SEC);
         out.set(e.id, { model: e.id, name: e.name, kind: 'video', purposes: ['swap', 'fill'], custom: false, provider: 'runpod', notice: e.notice ?? null,
@@ -228,9 +258,9 @@ export class ModelChoice {
   }
 
   /** Every engine of the studio (owner view), or only those of one kind. */
-  async all(u: AuthUser, kinds: EngineKind[] = ['video', 'image', 'tool']): Promise<Engine[]> {
+  async all(u: AuthUser, kinds: EngineKind[] = ['video', 'image', 'tool'], o: { quotes?: boolean } = {}): Promise<Engine[]> {
     return labelList([
-      ...(kinds.includes('video') ? await this.videoEngines(u.studioId) : []),
+      ...(kinds.includes('video') ? await this.videoEngines(u.studioId, o.quotes ?? true) : []),
       ...(kinds.includes('image') ? await this.imageEngines(u.studioId, u) : []),
       ...(kinds.includes('tool') ? this.toolEngines() : []),
     ], { showProviders: true }) as Engine[];
@@ -241,8 +271,8 @@ export class ModelChoice {
    * the purpose first, then the rest, which MUSE adapts (`fit: 'adapted'` with a one-line `fitNote`). Image purposes
    * already list every image model. Tools stay per job (a matte model can't caption).
    */
-  async candidates(u: AuthUser, purpose: Purpose) {
-    const all = await this.all(u, [PURPOSE_INFO[purpose].kind]);
+  async candidates(u: AuthUser, purpose: Purpose, o: { quotes?: boolean } = {}) {
+    const all = await this.all(u, [PURPOSE_INFO[purpose].kind], o);
     if (PURPOSE_INFO[purpose].kind !== 'video') return all.filter(e => e.purposes.includes(purpose));
     const native = all.filter(e => e.purposes.includes(purpose));
     // Our GPU's swap engines (Edit, Fast) run only the classic swap: they can't be adapted to other purposes.
@@ -258,7 +288,7 @@ export class ModelChoice {
     if (LADDER_PURPOSES.includes(purpose)) {
       const prefs = await this.ctx.suite.prefs(u.studioId);
       const steps = purpose === 'recast' ? RECAST_LADDER.draft : purpose === 'extend' ? EXTEND_LADDER.draft : (prefs.ladder?.draft?.length ? prefs.ladder.draft : DEFAULT_LADDER.draft);
-      return { model: steps.map(s => s.model).find(has) ?? null, rule: 'ladder' };
+      return { model: steps.map(s => familyOf(s.model)).find(has) ?? null, rule: 'ladder' };
     }
     if (purpose === 'swap') {
       const id = SWAP_ENGINES.find(e => e.ref === this.ctx.config.REPLICATE_VIDEO_MODEL)?.id ?? 'h3';
@@ -319,7 +349,8 @@ export class ModelChoice {
   private memberViews(list: Engine[], rules: MemberRules): Engine[] {
     return labelList(list.filter(e => ModelChoice.forMembers(e, rules)).map(e => {
       const { provider, notice: _n, members: _m, browsed: _b, providerName: _pn, label: _l, ...rest } = e;
-      return rules.showProviderNames && provider ? { ...rest, provider } : rest;
+      if (rules.showProviderNames && provider) return { ...rest, provider };
+      return rest.resolutions ? { ...rest, resolutions: rest.resolutions.map(({ provider: _p, providerName: _rp, modelLabel: _ml, ...r }) => r) } : rest;
     }), { showProviders: rules.showProviderNames }) as Engine[];
   }
   /** The owner's view of an entry: every field, `members` (shown to members) on video and image models. */
@@ -344,7 +375,7 @@ export class ModelChoice {
     if (b.hidden !== undefined) {
       if (!b.hidden || typeof b.hidden !== 'object' || Array.isArray(b.hidden)) throw badRequest('hidden: {model: true or false}');
       hidden = {};
-      const known = new Set((await this.all(u, ['video', 'image'])).map(e => e.model));
+      const known = new Set((await this.all(u, ['video', 'image'], { quotes: false })).map(e => e.model));
       for (const [id, v] of Object.entries(b.hidden as Record<string, unknown>)) {
         if (typeof v !== 'boolean') throw badRequest(`hidden.${id}: true or false`);
         if (!known.has(id) && !(await this.ctx.suite.byo.isStudioModel(u.studioId, id))) throw badRequest(`Unknown model ${id}`);
@@ -365,15 +396,16 @@ export class ModelChoice {
     const m = e.kind === 'video' ? modelById(e.model) : undefined;
     const prefs = m ? await this.ctx.suite.prefs(u.studioId) : undefined;
     const scale = (m && prefs?.models?.[m.id]?.priceScale) ?? 1;
-    const tiers = m ? (['draft', 'standard', 'hd', 'cinema'] as const).filter(t => (prefs?.ladder?.[t]?.length ? prefs.ladder[t]! : DEFAULT_LADDER[t]).some(s => s.model === m.id)) : [];
+    const tiers = m ? (['draft', 'standard', 'hd', 'cinema'] as const).filter(t => (prefs?.ladder?.[t]?.length ? prefs.ladder[t]! : DEFAULT_LADDER[t]).some(s => familyOf(s.model) === m.id)) : [];
     return { tier: tiers[0] ?? null, tiers,
-      resolutions: m ? m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: r4(r.perSec * scale) })) : e.limits.resolutions.map(r => ({ ...r, perSec: null })),
+      resolutions: e.resolutions ?? (m ? m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: r4(r.perSec * scale) })) : e.limits.resolutions.map(r => ({ ...r, perSec: null }))),
       perSec: e.price?.basis === 'per_second' ? e.price.usd : null, perRun: e.price?.basis === 'per_run' ? e.price.usd : null,
       minSeconds: e.limits.minSeconds, maxSeconds: e.limits.maxSeconds, allowedSeconds: e.limits.allowedSeconds, aspectRatios: e.limits.aspectRatios };
   }
 
-  async list(u: AuthUser, purpose?: unknown) {
+  async list(u: AuthUser, purpose?: unknown, resolution?: unknown) {
     if (purpose !== undefined && purpose !== '' && !toPurpose(purpose)) throw badRequest(`purpose: one of ${PURPOSES.join(', ')}`);
+    if (resolution !== undefined && (typeof resolution !== 'string' || resolution.length > 20)) throw badRequest('resolution: a resolution id such as 1080p');
     const only = toPurpose(purpose);
     const studio = await this.studioDefaults(u.studioId);
     const engines = only ? await this.candidates(u, only) : await this.all(u);
@@ -381,7 +413,7 @@ export class ModelChoice {
     for (const p of only ? [only] : PURPOSES) {
       const cands = only ? engines : engines.filter(e => e.purposes.includes(p));
       const b = await this.builtin(u, p, cands);
-      const st = studio[p] && cands.some(e => e.model === studio[p]) ? studio[p]! : null;
+      const st = studio[p] && cands.some(e => e.model === familyOf(studio[p]!)) ? familyOf(studio[p]!) : studio[p] && cands.some(e => e.model === studio[p]) ? studio[p]! : null;
       purposes.push({ id: p, label: PURPOSE_INFO[p].label, kind: PURPOSE_INFO[p].kind, default: st ?? b.model, studioDefault: u.role === 'owner' ? st : null, rule: st ? 'fixed' : b.rule });
     }
     const def = only ? purposes[0]!.default : null;
@@ -390,7 +422,10 @@ export class ModelChoice {
     const view = [];
     // The default first, then the others in candidate order (made for this purpose, then adapted).
     const ordered = only && def ? [...shown.filter(e => e.model === def), ...shown.filter(e => e.model !== def)] : shown;
-    for (const e of ordered) view.push({ ...(await this.pickerFields(u, e)), ...e, ...(only ? { default: e.model === def } : {}) });
+    for (const e of ordered) {
+      const rf = typeof resolution === 'string' && resolution ? resolutionFit(e, resolution) : undefined;
+      view.push({ ...(await this.pickerFields(u, e)), ...e, ...(only ? { default: e.model === def } : {}), ...(rf ? { resolutionFit: rf } : {}) });
+    }
     const ps = u.role === 'owner' ? purposes : purposes.map(p => ({ ...p, default: null }));
     // With ?purpose: also `purpose`, `default` and `models` (= engines), the shape WS7 proposed.
     return { ...(only ? { purpose: only, default: ps[0]!.default, models: view } : {}), purposes: ps, engines: view,
@@ -403,8 +438,9 @@ export class ModelChoice {
    * from them (4c), else 403 owner_only (tools, hidden models, other refs); 400 engine_not_allowed with the valid list otherwise.
    */
   async check(u: AuthUser, purpose: Purpose, model: string): Promise<Engine> {
-    const cands = await this.candidates(u, purpose);
-    const e = cands.find(x => x.model === model);
+    const cands = await this.candidates(u, purpose, { quotes: false });
+    // An old id of a provider route ("h3-hf") is its model's entry (owner 2026-11-14: one entry per model).
+    const e = cands.find(x => x.model === model) ?? cands.find(x => x.model === familyOf(model));
     if (u.role !== 'owner') {
       const rules = await this.memberRules(u.studioId);
       if (e && ModelChoice.forMembers(e, rules)) return e;
@@ -442,7 +478,7 @@ export class ModelChoice {
     if (requested) return { model: requested, source: 'request', engine: await this.check(u, purpose, requested) };
     const d = (await this.studioDefaults(u.studioId))[purpose];
     if (!d) return null;
-    const e = (await this.candidates(u, purpose)).find(x => x.model === d);
+    const e = (await this.candidates(u, purpose, { quotes: false })).find(x => x.model === d || x.model === familyOf(d));
     // A member runs on the studio's default too, unless it's a custom model the owner hid from members.
     if (!e || (u.role !== 'owner' && e.custom && !ModelChoice.forMembers(e, await this.memberRules(u.studioId)))) return null;
     return { model: d, source: 'studio', engine: e };
@@ -452,17 +488,34 @@ export class ModelChoice {
 export { VIDEO_PURPOSES };
 
 /**
+ * Owner 2026-11-14: a resolution picked first never forces a model. Every model stays listed; this says whether it
+ * makes `asked`, else the one it would use (the nearest it makes, larger on a tie) and what it makes, in words.
+ */
+export function resolutionFit(e: Engine, asked: string): Engine['resolutionFit'] | undefined {
+  const rs = e.resolutions ?? e.limits.resolutions;
+  if (e.kind !== 'video' || !rs.length) return undefined;
+  const same = rs.find(r => r.id.toLowerCase() === asked.toLowerCase());
+  if (same) return { asked, has: true, resolution: same.id, note: null };
+  const want = sideOf(asked);
+  const near = [...rs].sort((a, b) => Math.abs(sideOf(a.id) - want) - Math.abs(sideOf(b.id) - want) || sideOf(b.id) - sideOf(a.id))[0]!;
+  const words = (l: string) => l.split(' ')[0]!;
+  return { asked, has: false, resolution: near.id, note: `Makes ${rs.map(r => words(r.label)).join(', ')} · picking it uses ${words(near.label)}` };
+}
+
+/**
  * Character swap on a chosen engine (POST /v1/jobs, the Suite's swap mode, Recreate swap fills). Mutates the jobs request:
  * the engine (hosted, or Edit / Fast on our GPU), the hosted model ref and the swap engine id. A request that names Edit or
  * Fast itself (engine "h3" / "viggle") keeps it unless it also asks for a model; the studio default applies to the hosted
  * swap. `pre`: a choice the caller already made (undefined: choose now). Returns the choice, or null (built-in behaviour).
  */
+const u0Prefs = (mc: ModelChoice, u: AuthUser) => mc.prefs(u.studioId);
 export async function applySwapEngine(mc: ModelChoice, u: AuthUser, r: Record<string, any>, requested?: string | null, pre?: Choice | null): Promise<Choice | null> {
   for (const k of ['swapEngine', 'videoModel', 'videoNoResolution', 'minSec', 'maxSec', 'resolutionLabel']) delete r[k]; // never taken from the client
   if (!requested && pre === undefined && r.engine && r.engine !== 'replicate') return null;
   const choice = pre !== undefined ? pre : await mc.choose(u, 'swap', requested);
   if (!choice) return null;
-  const e = swapEngineById(choice.model);
+  // MiniMax H3 is one entry on two providers (owner 2026-11-14): HD runs on Higgsfield when it can (ModelChoice.swapRoute).
+  const e = swapEngineById(swapEngineById(choice.model) ? mc.swapRoute(choice.model, r.quality, await u0Prefs(mc, u)) : choice.model);
   // Every model can be picked for Swap (owner 2026-11-12); a non-swap model runs as a New Swap in the AI suite's
   // planner. This classic job pipeline can't adapt one: a picked one is said plainly; a studio default is skipped here.
   if (!e && choice.source === 'request') throw Object.assign(new ApiError(400, 'engine_not_allowed', `${choice.engine.label ?? choice.engine.name} isn’t a swap model: generate it from the AI suite’s Swap, where it runs as a New Swap`), { extra: { purpose: 'swap', valid: SWAP_ENGINES.map(x => x.id) } });

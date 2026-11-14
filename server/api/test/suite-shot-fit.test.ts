@@ -59,16 +59,26 @@ describe('guide keyframes are hints, not hard frames', () => {
 
 describe('adapt, don\'t block (a picked model)', () => {
   const pick = (id: string, r: ReturnType<typeof req>, res?: string) => pickAdapted('cinema', r, CHAR, { providers: ALL, engineModel: id, resolution: res });
-  it('the person\'s own frames on H3 · Higgsfield go as reference images, the opening frame first, and it says so', () => {
+  it('H3 · Higgsfield takes start and end frames (image-to-video); an end frame alone goes as a reference image, and it says so', () => {
     const r = req({ modelId: 'mia', frames: { start: { url: 'https://x/a.png' }, end: { url: 'https://x/b.png' } } });
-    expect(fit(modelById('h3-hf')!, '2K', needOf(r, CHAR)).why).toBe('no keyframes');
-    const a = pick('h3-hf', r);
+    expect(fit(modelById('h3-hf')!, '2K', needOf(r, CHAR)).why).toBeNull();
+    const both = pick('h3-hf', r);
+    if ('error' in both) throw new Error(JSON.stringify(both.refusals));
+    expect(both.pick.model.id).toBe('h3-hf');
+    expect(both.adapted.adapted).toEqual([]);
+    const fp = buildPlan(both.adapted.request, both.adapted.need, both.pick, CHAR, {});
+    expect([fp.kind, fp.ref, !!fp.images.start, !!fp.images.end]).toEqual(['i2v', 'minimax/h3/image-to-video', true, true]);
+    // Higgsfield's image-to-video needs the start picture: an end frame alone can't be a frame there.
+    const endOnly = req({ modelId: 'mia', frames: { end: { url: 'https://x/b.png' } } });
+    expect(fit(modelById('h3-hf')!, '2K', needOf(endOnly, CHAR)).why).toBe('no keyframes');
+    expect(fit(modelById('h3')!, '2K', needOf(endOnly, CHAR)).why).toBeNull(); // Replicate H3 takes it (the strict pick goes there)
+    const a = pickAdapted('cinema', endOnly, CHAR, { providers: new Set(['higgsfield']), engineModel: 'h3-hf' });
     if ('error' in a) throw new Error(JSON.stringify(a.refusals));
     expect(a.adapted.adapted).toContain('frames_as_refs');
     expect(a.adapted.notes.join(' ')).toMatch(/frames are sent as reference images/);
     const plan = buildPlan(a.adapted.request, a.adapted.need, a.pick, CHAR, {});
-    expect(plan.images.refs.map(x => x.label)).toEqual(['face, front', 'face, profile', 'opening frame', 'end frame']);
-    expect(plan.prompt).toMatch(/Open on <Image 3>\.[\s\S]*End like <Image 4>\./);
+    expect(plan.images.refs.map(x => x.label)).toEqual(['face, front', 'face, profile', 'end frame']);
+    expect(plan.prompt).toMatch(/End like <Image 3>\./);
   });
   it('a length outside the range is clamped ("made 15 s, … max")', () => {
     const a = pick('h3-hf', req({ modelId: 'mia', duration: 20 }));
@@ -103,8 +113,12 @@ describe('refusals say exactly why', () => {
     expect(refusalLine(a.refusals[0]!)).toBe("Veo 3.1 Lite · Replicate: can't use an audio reference; needs an image or video with the audio reference");
   });
   it('a provider that isn\'t set up is said plainly', () => {
-    const a = pickAdapted('hd', req(), null, { providers: new Set(['replicate']), engineModel: 'h3-hf' });
+    const a = pickAdapted('hd', req(), null, { providers: new Set(['replicate']), engineModel: 'wan-3.0' });
     if (!('error' in a)) throw new Error('should refuse');
-    expect(refusalLine(a.refusals[0]!)).toBe('MiniMax H3 · Higgsfield: is not set up in this studio yet');
+    expect(refusalLine(a.refusals[0]!)).toBe('Wan 3.0 · Higgsfield: is not set up in this studio yet');
+    // MiniMax H3 is one model on two providers (owner 2026-11-14): its old Higgsfield id runs on Replicate without the key.
+    const h = pickAdapted('hd', req(), null, { providers: new Set(['replicate']), engineModel: 'h3-hf' });
+    if ('error' in h) throw new Error(JSON.stringify(h.refusals));
+    expect([h.pick.model.id, h.pick.resolution.id]).toEqual(['h3', '2K']);
   });
 });

@@ -130,6 +130,7 @@ export function hfValidation(text: string): HfFieldIssue[] {
 }
 
 const HF_QUOTES = new Map<string, { usd: number | null; at: number }>();
+const HF_PENDING = new Map<string, Promise<number | null>>();
 export class HiggsfieldProvider implements VideoProvider {
   id = 'higgsfield' as const;
   constructor(private ctx: Ctx, private fetchFn: typeof fetch = fetch) {}
@@ -165,6 +166,14 @@ export class HiggsfieldProvider implements VideoProvider {
     if (!this.configured()) return null;
     const k = `${ref}|${JSON.stringify(body)}`, hit = HF_QUOTES.get(k);
     if (hit && Date.now() - hit.at < (hit.usd == null ? 30_000 : 600_000)) return hit.usd;
+    // The same quote asked again while the first is on its way (the pickers ask for several at once) waits for that one.
+    const pending = HF_PENDING.get(k);
+    if (pending) return pending;
+    const p = this.fetchQuote(ref, body, k).finally(() => HF_PENDING.delete(k));
+    HF_PENDING.set(k, p);
+    return p;
+  }
+  private async fetchQuote(ref: string, body: Record<string, unknown>, k: string): Promise<number | null> {
     const res = await this.fetchFn(`${this.base()}/estimate/${ref}`, { method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }).catch(() => null);
     const b = res?.ok ? (await res.json().catch(() => ({}))) as { usd?: unknown; currency?: string } : {};
     const usd = Number(b.usd);

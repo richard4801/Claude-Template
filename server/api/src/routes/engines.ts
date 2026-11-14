@@ -6,7 +6,7 @@ import { modelChoice } from '../engines/service.js';
 
 export async function registerEngineRoutes(app: FastifyInstance, ctx: Ctx) {
   const mc = modelChoice(ctx);
-  app.get('/v1/engines', async req => mc.list(req.user, (req.query as { purpose?: string } | undefined)?.purpose));
+  app.get('/v1/engines', async req => { const q = (req.query ?? {}) as { purpose?: string; resolution?: string }; return mc.list(req.user, q.purpose, q.resolution); });
   app.get('/v1/engines/defaults', { config: { owner: true } }, async req => mc.defaultsView(req.user));
   app.patch('/v1/engines/defaults', { config: { owner: true } }, async req => mc.setDefaults(req.user, req.body));
   // 4c: "Show provider names to members" and the per-model "hide from members" switches (owner).

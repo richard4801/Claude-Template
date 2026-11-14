@@ -15,9 +15,38 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
   const frames = !!(u.start || u.end);
   switch (m.adapter) {
     case 'byo': return byoInput(m, p, u); // WS5: an owner-added model, filled from its own schema
-    case 'hf-h3': // Higgsfield (api.higgsfield.ai): text-to-video / reference-to-video; 2K only; no watermark (labels are the user's choice)
-      i.duration = p.seconds; i.resolution = '2K'; i.aspect_ratio = p.aspect; i.aigc_watermark = false;
+    case 'hf-h3': // Higgsfield (api.higgsfield.ai): text / image / reference-to-video; 2K only; no watermark (labels are the user's choice)
+      i.duration = p.seconds; i.resolution = '2K'; i.aigc_watermark = false;
+      if (p.kind === 'i2v') { i.image_url = u.start; set(i, 'end_image_url', u.end); i.aspect_ratio = 'adaptive'; break; } // image-to-video: no references
+      i.aspect_ratio = p.aspect;
       set(i, 'image_urls', u.refs.slice(0, 9)); set(i, 'video_urls', u.videos.slice(0, 3)); set(i, 'audio_urls', u.audio ? [u.audio] : undefined);
+      break;
+    // ---- Higgsfield routes (registry `family`; schemas in assets/higgsfield/catalog.json). Whole seconds everywhere.
+    case 'hf-seedance': // Seedance 2.0 / 2.5: t2v; i2v image_url (+ end_image_url); ref2v image_urls, video_urls, audio_urls
+      i.duration = Math.round(p.seconds); i.resolution = p.resolution; i.generate_audio = p.mode === 'remix' ? false : p.audio;
+      if (p.kind === 'i2v') { i.image_url = u.start; set(i, 'end_image_url', u.end); break; } // the picture sets the shape
+      i.aspect_ratio = p.aspect;
+      if (p.kind === 'ref2v') {
+        set(i, 'image_urls', u.refs.slice(0, m.refs.images)); set(i, 'video_urls', u.videos.slice(0, m.refs.videos));
+        set(i, 'audio_urls', u.audio ? [u.audio] : undefined);
+      }
+      break;
+    case 'hf-kling-o3': // Kling 3.0 Omni ("Kling O3"): mode std / pro / 4k; image-reference (image_urls) or first-last-frame
+      i.duration = Math.round(p.seconds); i.mode = p.resolution === '720p' ? 'std' : p.resolution === '4k' ? '4k' : 'pro'; i.sound = p.audio ? 'on' : 'off';
+      i.aspect_ratio = p.aspect;
+      if (p.kind === 'i2v') { i.first_frame_url = u.start; set(i, 'last_frame_url', u.end); }
+      else set(i, 'image_urls', u.refs.slice(0, m.refs.images));
+      break;
+    case 'hf-kling-v3': // Kling 3.0: the endpoint carries std / pro / 4k (refByResolution); i2v image_url (+ last_image_url)
+      i.duration = Math.round(p.seconds); i.sound = p.audio ? 'on' : 'off';
+      if (p.kind === 'i2v') { i.image_url = u.start; set(i, 'last_image_url', u.end); } else i.aspect_ratio = p.aspect;
+      break;
+    case 'hf-wan-2.7': // Wan 2.7: t2v; i2v image_url (+ end_image_url); ref2v image_urls, video_urls (≤ 10 s)
+      i.duration = p.kind === 'ref2v' ? Math.min(10, Math.round(p.seconds)) : Math.round(p.seconds); i.resolution = p.resolution;
+      set(i, 'negative_prompt', p.negative); if (p.seed != null && p.seed >= 1) i.seed = Math.min(2147483646, p.seed);
+      if (p.kind === 'i2v') { i.image_url = u.start; set(i, 'end_image_url', u.end); break; }
+      i.aspect_ratio = p.aspect;
+      if (p.kind === 'ref2v') { set(i, 'image_urls', u.refs.slice(0, m.refs.images)); set(i, 'video_urls', u.videos.slice(0, m.refs.videos)); }
       break;
     case 'minimax-h3':
       i.duration = p.seconds;

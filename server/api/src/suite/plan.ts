@@ -8,7 +8,8 @@ import { sanitizeDirection } from '../prompt/engine.js';
 import { run } from '../prompt/scripts/builders.js';
 import { CameraSpecSchema, stripMoveTokens, VideoRefSchema, type VideoRef } from './camera.js';
 import { compileCamera, type CompiledCamera } from './compile.js';
-import { DEFAULT_LADDER, modelById, refFor, TIER_INFO, TIERS, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type ShotMode, type Tier } from './registry.js';
+import { DEFAULT_LADDER, modelById, refFor, routesOf, TIER_INFO, TIERS, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type ShotMode, type Tier } from './registry.js';
+import { routesAt, unionResolutions } from './routes.js';
 import { modelLabel } from '../engines/labels.js';
 
 export const ImageRefSchema = z.object({ asset: z.string().max(80).optional(), url: z.string().max(2000).optional() }).refine(v => !!v.asset || !!v.url, 'an image needs asset or url');
@@ -157,7 +158,7 @@ export function misfits(m: ModelSpec, resolution: string, n: Need): { why: strin
   if (n.directed && !(m.modes.guide || m.camera.referenceVideo)) why.push('no guide clip');
   if (n.mode === 'text' && !m.modes.text) why.push('no text-to-video');
   if (n.mode === 'image') {
-    if (!m.modes.image || (n.start && !m.frames.start) || (n.end && !m.frames.end)) why.push('no keyframes');
+    if (!m.modes.image || (n.start && !m.frames.start) || (n.end && !m.frames.end) || (n.end && !n.start && m.frames.endNeedsStart)) why.push('no keyframes');
     else if (n.middle > m.frames.middle) why.push(`at most ${m.frames.middle} middle frames`);
   }
   if (n.mode === 'reference' && (!m.modes.reference || m.refs.images < 1)) why.push('no reference images');
@@ -205,7 +206,7 @@ const ASPECT_VALUE = (a: string) => { const [w, h] = a.split(':').map(Number); r
 export const nearestAspect = (a: string, list: string[]) => list.reduce((p, c) => (Math.abs(Math.log(ASPECT_VALUE(c) / ASPECT_VALUE(a))) < Math.abs(Math.log(ASPECT_VALUE(p) / ASPECT_VALUE(a))) ? c : p));
 
 /** The short side a resolution id stands for ("1080p" 1080, "2K" 1440, "768x1344" 768); unknown: the largest. */
-const sideOf = (id: string) => { const x = /^(\d+)x(\d+)$/.exec(id); if (x) return Math.min(+x[1]!, +x[2]!); if (/^2k$/i.test(id)) return 1440; if (/^4k$/i.test(id)) return 2160; const p = /^(\d+)p$/i.exec(id); return p ? +p[1]! : Infinity; };
+export const sideOf = (id: string) => { const x = /^(\d+)x(\d+)$/.exec(id); if (x) return Math.min(+x[1]!, +x[2]!); if (/^2k$/i.test(id)) return 1440; if (/^4k$/i.test(id)) return 2160; const p = /^(\d+)p$/i.exec(id); return p ? +p[1]! : Infinity; };
 
 /** Misfits MUSE can work around by changing the request (adaptRequest); everything else refuses. */
 const ADAPTABLE = (code: string) => /^(no \S+|length .*|too many reference images|no keyframes|no audio with keyframes|at most \d+ middle frames|no reference videos|audio needs an image or video reference)$/.test(code)
@@ -290,12 +291,34 @@ export function framesAsRefs(r0: ShotRequest): ShotRequest {
   return r;
 }
 
-export type Pick = { model: ModelSpec; resolution: Resolution; seconds: number; tried: { model: string; resolution: string; why: string }[] };
+/**
+ * `alternates`: other provider routes of the same model that make this shot at the same resolution and length (owner
+ * 2026-11-14). The service prices each (live quotes included) and runs the cheapest; the runner falls back among them.
+ */
+export type Pick = { model: ModelSpec; resolution: Resolution; seconds: number; tried: { model: string; resolution: string; why: string }[]; alternates?: ModelSpec[] };
 
 type PickOpts = { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; resolution?: string; studioId?: string };
+/** A picked model without a resolution: the best its routes make. */
+const bestResolution = (id: string) => unionResolutions(id).at(-1)?.id ?? modelById(id)?.resolutions.at(-1)?.id ?? '';
 const ladderOf = (tier: Tier, o: PickOpts): LadderStep[] => o.engineModel
-  ? [{ model: o.engineModel, resolution: o.resolution ?? modelById(o.engineModel)?.resolutions.at(-1)?.id ?? '' }]
+  ? [{ model: o.engineModel, resolution: o.resolution ?? bestResolution(o.engineModel) }]
   : o.prefs?.ladder?.[tier]?.length ? o.prefs.ladder[tier]! : DEFAULT_LADDER[tier];
+/**
+ * The specs a ladder step (or a picked model) can run on: its model's routes whose provider is set up and that make the
+ * step's resolution, cheapest known price first. None makes it: the named model (strict: it says "no 1080p"), or with
+ * `adapt` every set-up route, head first (the adapted pick moves to the nearest resolution). No route set up: the
+ * named model, which says its provider isn't set up.
+ */
+function stepSpecs(step: LadderStep, o: PickOpts, adapt = false): ModelSpec[] {
+  const named = modelById(step.model);
+  const all = routesOf(step.model);
+  if (all.length <= 1 || !named) return named ? [named] : [];
+  const set = all.filter(m => o.providers.has(m.provider));
+  if (!set.length) return [named];
+  const at = routesAt(step.model, step.resolution, m => set.includes(m));
+  if (at.length) return at;
+  return adapt ? set : [set.includes(named) ? named : set[0]!];
+}
 /** Why a ladder step can't be used in this studio at all (before looking at the shot), or null. */
 function unusable(step: LadderStep, o: PickOpts): { m?: ModelSpec; why: string | null } {
   const m = modelById(step.model);
@@ -306,17 +329,26 @@ function unusable(step: LadderStep, o: PickOpts): { m?: ModelSpec; why: string |
   if (!o.providers.has(m.provider)) return { m, why: `${m.provider} not set up` };
   return { m, why: null };
 }
+/** The other routes that make the shot as `m` does (same resolution, same length), cheapest first. */
+function alternatesOf(m: ModelSpec, resolution: string, n: Need, seconds: number, o: PickOpts): ModelSpec[] {
+  return routesAt(m.id, resolution).filter(x => x.id !== m.id && !unusable({ model: x.id, resolution }, o).why && !misfits(x, resolution, n).why.length && misfits(x, resolution, n).seconds === seconds);
+}
 
-/** The model for a tier: the first ladder step that is allowed, set up and fits. */
+/** The model for a tier: the first ladder step that is allowed, set up and fits (on the cheapest route that makes it). */
 export function pickModel(tier: Tier, n: Need, o: PickOpts): Pick | { error: string; tried: Pick['tried'] } {
   const tried: Pick['tried'] = [];
-  for (const step of ladderOf(tier, o)) {
-    const u = unusable(step, o);
-    if (u.why) { tried.push({ ...step, why: u.why }); continue; }
-    const m = u.m!;
-    const f = fit(m, step.resolution, n);
-    if (f.why) { tried.push({ ...step, why: f.why }); continue; }
-    return { model: m, resolution: m.resolutions.find(x => x.id === step.resolution)!, seconds: f.seconds, tried };
+  for (const step0 of ladderOf(tier, o)) {
+    const specs = stepSpecs(step0, o);
+    if (!specs.length) { tried.push({ ...step0, why: 'unknown model' }); continue; }
+    for (const spec of specs) {
+      const step = { model: spec.id, resolution: step0.resolution };
+      const u = unusable(step, o);
+      if (u.why) { tried.push({ ...step, why: u.why }); continue; }
+      const m = u.m!;
+      const f = fit(m, step.resolution, n);
+      if (f.why) { tried.push({ ...step, why: f.why }); continue; }
+      return { model: m, resolution: m.resolutions.find(x => x.id === step.resolution)!, seconds: f.seconds, tried, alternates: alternatesOf(m, step.resolution, n, f.seconds, o) };
+    }
   }
   return { error: 'nothing_fits', tried };
 }
@@ -329,21 +361,27 @@ export type Refusal = { model: string; name: string; reasons: string[] };
  */
 export function pickAdapted(tier: Tier, r: ShotRequest, character: Character | null, o: PickOpts): { pick: Pick; adapted: Adapted } | { error: 'nothing_fits'; tried: Pick['tried']; refusals: Refusal[] } {
   const tried: Pick['tried'] = [], refusals: Refusal[] = [];
-  for (const step of ladderOf(tier, o)) {
-    const u = unusable(step, o);
-    if (u.why) {
-      tried.push({ ...step, why: u.why });
-      if (u.m) refusals.push({ model: u.m.id, name: modelName(u.m), reasons: [whyWords(u.why, u.m)] });
-      continue;
+  for (const step0 of ladderOf(tier, o)) {
+    const specs = stepSpecs(step0, o, true);
+    if (!specs.length) { tried.push({ ...step0, why: 'unknown model' }); continue; }
+    for (const spec of specs) {
+      const step = { model: spec.id, resolution: step0.resolution };
+      const u = unusable(step, o);
+      if (u.why) {
+        tried.push({ ...step, why: u.why });
+        if (u.m) refusals.push({ model: u.m.id, name: modelName(u.m), reasons: [whyWords(u.why, u.m)] });
+        continue;
+      }
+      const m = u.m!;
+      const a = adaptRequest(m, step.resolution, r, character);
+      if (a.why.length) {
+        tried.push({ ...step, why: a.why[0]! });
+        refusals.push({ model: m.id, name: modelName(m), reasons: [...new Set(a.why.map(w => whyWords(w, m, a.need)))] });
+        continue;
+      }
+      const seconds = fit(m, a.resolution, a.need).seconds;
+      return { pick: { model: m, resolution: m.resolutions.find(x => x.id === a.resolution)!, seconds, tried, alternates: alternatesOf(m, a.resolution, a.need, seconds, o) }, adapted: a };
     }
-    const m = u.m!;
-    const a = adaptRequest(m, step.resolution, r, character);
-    if (a.why.length) {
-      tried.push({ ...step, why: a.why[0]! });
-      refusals.push({ model: m.id, name: modelName(m), reasons: [...new Set(a.why.map(w => whyWords(w, m, a.need)))] });
-      continue;
-    }
-    return { pick: { model: m, resolution: m.resolutions.find(x => x.id === a.resolution)!, seconds: fit(m, a.resolution, a.need).seconds, tried }, adapted: a };
   }
   return { error: 'nothing_fits', tried, refusals };
 }
@@ -406,6 +444,8 @@ export type ShotPlan = {
   sentImages?: SentView;
   /** What MUSE changed so the model could make it (adaptRequest codes: frames_as_refs, length:15, aspect:16:9, …). */
   adapted?: string[];
+  /** The model's provider routes priced for this shot (owner 2026-11-14), when it has several; the cheapest runs. */
+  routes?: { model: string; provider: ProviderId; estimate: number | null }[];
 };
 type Pick_<T, K extends keyof T> = { [P in K]: T[P] };
 
@@ -555,7 +595,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const estimate = Math.round(((perSec * billed + extraCost) * r.takes + separation) * 10000) / 10000;
 
   return {
-    tier: r.quality, mode: n.mode, modelId: m.id, provider: m.provider, ref: refFor(m, kind), kind, resolution: p.resolution.id, seconds: p.seconds, aspect: r.aspectRatio,
+    tier: r.quality, mode: n.mode, modelId: m.id, provider: m.provider, ref: refFor(m, kind, p.resolution.id), kind, resolution: p.resolution.id, seconds: p.seconds, aspect: r.aspectRatio,
     audio: r.audio && m.audio !== 'none', takes: r.takes, seed: m.seed ? r.seed : undefined, prompt, negative: m.negativePrompt ? negList.join(', ') : undefined, params: cam.params,
     images, videos, audioRef: audioPlan, promptNoAudio, speaking, separationUsd: separation, perSec, billedPerTake: billed, extraPerTake: extraCost, estimate,
     camera: { moves: cam.moves, notes: cam.notes, usesGuide: cam.usesGuide }, notes, sentImages,

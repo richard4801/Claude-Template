@@ -57,9 +57,12 @@ describe('every model: the estimate is what the runner settles', () => {
         const p = pickModel('hd', needOf(r, ch), { providers: ALL, engineModel: m.id, resolution: res.id });
         if ('error' in p) return; // a model this plain shot can't run is priced by its own tests
         const plan = buildPlan(r, needOf(r, ch), p, ch, {});
-        const settled = plan.perSec * billedSeconds(m, plan.seconds, { videoInput: plan.videos.length > 0 }) * plan.takes + plan.extraPerTake * plan.takes;
+        // The model may run on another provider route at this resolution (registry `family`): the route that runs settles.
+        const run = p.model;
+        expect(plan.modelId).toBe(run.id);
+        const settled = plan.perSec * billedSeconds(run, plan.seconds, { videoInput: plan.videos.length > 0 }) * plan.takes + plan.extraPerTake * plan.takes;
         expect(plan.estimate).toBeCloseTo(settled, 4);
-        expect(plan.extraPerTake).toBeCloseTo(extraPerTake(modelById(m.id)!, plan.images.refs.length), 6); // only images actually sent are charged
+        expect(plan.extraPerTake).toBeCloseTo(extraPerTake(modelById(run.id)!, plan.images.refs.length), 6); // only images actually sent are charged
       });
     }
   }

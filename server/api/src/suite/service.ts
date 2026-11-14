@@ -23,7 +23,8 @@ import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixGroup, REMI
 import { z } from 'zod';
 import { billedSeconds, buildPlan, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
-import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, inputSlotsOf, MODELS, NO_INPUTS, modelById, modelView, MOCK_MODEL, TIER_INFO, TIERS, type ProviderId, type Tier } from './registry.js';
+import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, familyOf, refFor, inputSlotsOf, isRoute, MODELS, NO_INPUTS, modelById, modelView, MOCK_MODEL, publicModels, routesOf, TIER_INFO, TIERS, type ModelSpec, type ProviderId, type Tier } from './registry.js';
+import { familySpec, providersKey, quoteBody, routesAt, samplePlan, unionResolutions, type RateFn } from './routes.js';
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 import { rigCheck } from './rigcheck.js';
@@ -151,7 +152,7 @@ export class SuiteService {
           if (!Array.isArray(steps) || steps.length > 10) throw badRequest(`ladder.${tier}: up to 10 steps`);
           out[tier as Tier] = steps.map((s: any) => {
             const m = modelById(String(s?.model));
-            if (!m || m.id === 'mock' || (m.byo && m.byo.studioId !== u.studioId) || !m.resolutions.some(r => r.id === s?.resolution)) throw badRequest(`ladder.${tier}: unknown model or resolution`);
+            if (!m || m.id === 'mock' || (m.byo && m.byo.studioId !== u.studioId) || !routesOf(m.id).some(x => x.resolutions.some(r => r.id === s?.resolution))) throw badRequest(`ladder.${tier}: unknown model or resolution`);
             return { model: m.id, resolution: String(s.resolution) };
           });
         }
@@ -175,16 +176,18 @@ export class SuiteService {
     const avail = this.available();
     const tiers = TIERS.map(t => {
       const steps = p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t];
-      const usable = steps.map(s => ({ s, m: modelById(s.model) })).filter(x => x.m && x.m.status !== 'removed' && !x.m.licence.blockNewFeatures
-        && p.models?.[x.m.id]?.enabled !== false && avail.has(x.m.provider) && x.m.resolutions.some(r => r.id === x.s.resolution));
+      // Each step on the cheapest route of its model that makes its resolution (registry `family`).
+      const usable = steps.map(s => ({ s, m: routesAt(s.model, s.resolution, m => m.status !== 'removed' && !m.licence.blockNewFeatures
+        && p.models?.[m.id]?.enabled !== false && avail.has(m.provider))[0] })).filter(x => !!x.m);
       const first = usable[0];
       const res = first?.m!.resolutions.find(r => r.id === first.s.resolution);
       const base = { id: t, label: TIER_INFO[t].label, detail: TIER_INFO[t].detail, available: !!first,
-        resolution: res?.label.split(' ')[0] ?? null, fromPerSec: usable.length ? round2(Math.min(...usable.map(x => x.m!.resolutions.find(r => r.id === x.s.resolution)!.perSec * (p.models?.[x.m!.id]?.priceScale ?? 1))) * 1000) / 1000 : null,
+        resolution: res?.label.split(' ')[0] ?? null, fromPerSec: usable.some(x => !x.m!.livePrice) ? round2(Math.min(...usable.filter(x => !x.m!.livePrice).map(x => x.m!.resolutions.find(r => r.id === x.s.resolution)!.perSec * (p.models?.[x.m!.id]?.priceScale ?? 1))) * 1000) / 1000 : null,
         maxSeconds: usable.length ? Math.max(...usable.map(x => x.m!.duration.max)) : null,
         minSeconds: usable.length ? Math.min(...usable.map(x => x.m!.duration.min)) : null,
         canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo), inputs: inputSlotsOf(usable.map(x => x.m!)) };
-      return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, label: specName(x.m!), resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
+      // `model` is the public model the pickers list (a route's family); `route` the spec this step runs on.
+      return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: familyOf(x.m!.id), ...(isRoute(x.m!) ? { route: x.m!.id } : {}), name: x.m!.name, label: specName(x.m!), resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
     });
     // Composer tools (plans/video-composer.md "Tools on the shell"): which the apps can offer now. Talking and UGC ad are
     // shots (audio / product references); Extend continues a finished take.
@@ -206,26 +209,78 @@ export class SuiteService {
   }
 
   /**
+   * Dollars per second for the pickers: known rates from the registry, and for a live-priced route (Higgsfield, no
+   * published rate) its free quote of a 5 s shot at that resolution (cached by the provider for 10 minutes). Quotes
+   * that don't come back within 2.5 s are left unknown (shown as no price, priced exactly when a shot is planned).
+   */
+  async pickerRates(specs: ModelSpec[]): Promise<RateFn> {
+    const quotes = new Map<string, number>();
+    const hf = this.providers.higgsfield;
+    const live = specs.filter(m => m.livePrice && m.provider === 'higgsfield');
+    if (live.length && hf.configured() && hf.quote) {
+      const run = Promise.all(live.flatMap(m => m.resolutions.map(async r => {
+        const plan = samplePlan(m, r.id);
+        const usd = await hf.quote!(refFor(m, plan.kind, r.id), quoteBody(m, plan)).catch(() => null);
+        if (usd != null && usd > 0) quotes.set(`${m.id}|${r.id}`, usd / plan.seconds);
+      })));
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([run, new Promise<void>(res => { timer = setTimeout(res, 2500); })]);
+      clearTimeout(timer);
+    }
+    return (m, res) => (m.livePrice ? quotes.get(`${m.id}|${res}`) ?? null : m.resolutions.find(r => r.id === res)?.perSec ?? null);
+  }
+
+  /**
+   * The video models the pickers list (owner 2026-11-14: one entry per model): each public model with a usable route
+   * (switched on, licensed, its provider set up), its limits as one model, and its resolutions across routes, each with
+   * the route and provider it runs on and that route's $/s after the owner's price correction (0 = priced live, unknown).
+   */
+  async pickerModels(studioId: string, p: SuitePrefs, avail: Set<ProviderId>, quotes = true) {
+    const usable = (m: ModelSpec) => m.status !== 'removed' && !m.licence.blockNewFeatures && p.models?.[m.id]?.enabled !== false
+      && !(m.licence.requiresAck && !p.models?.[m.id]?.acknowledgedAt) && avail.has(m.provider);
+    const heads = publicModels(studioId);
+    const rate = await this.pickerRates(quotes ? heads.flatMap(h => routesOf(h.id)).filter(usable) : []);
+    const r4 = (v: number) => Math.round(v * 10000) / 10000;
+    const out = [];
+    for (const head of heads) {
+      const spec = familySpec(head.id, usable, rate);
+      if (!spec) continue;
+      const routes = routesOf(head.id).filter(usable);
+      const provOf = (m: ModelSpec) => (m.byo ? m.byo.providerKind : m.provider);
+      const resolutions = unionResolutions(head.id, usable, rate).map(r => {
+        const m = modelById(r.model)!;
+        return { id: r.id, label: r.label, perSec: r.rate == null ? 0 : r4(r.rate * (p.models?.[m.id]?.priceScale ?? 1)),
+          provider: provOf(m), providerName: providerLabel(provOf(m)), modelLabel: specName(m), ...(r.livePrice ? { livePrice: true } : {}) };
+      });
+      out.push({ head, spec, routes, resolutions, provider: providersKey(routes.map(provOf) as ProviderId[]) });
+    }
+    return out;
+  }
+
+  /**
    * WS5 · the owner's model picker: every engine the owner can pick for a shot or a photo, flat across tiers. Video: each
    * usable registry model that makes shots (enabled, licensed, its provider set up) and each enabled custom video model.
    * Image: the studio's photo model and each enabled custom image model. Prices are after the model's priceScale.
    */
   async ownerEngines(studioId: string, p: SuitePrefs, avail: Set<ProviderId>) {
     const rules = await modelChoice(this.ctx).memberRules(studioId); // 4c: `members` = shown to members
-    const tiersOf = (id: string) => TIERS.filter(t => (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).some(s => s.model === id));
-    const ladderRes = (id: string) => { for (const t of TIERS) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };
-    const video = [...MODELS, ...customModelsOf(studioId)].filter(m => m.status !== 'removed' && !m.licence.blockNewFeatures && p.models?.[m.id]?.enabled !== false
-      && !(m.licence.requiresAck && !p.models?.[m.id]?.acknowledgedAt) && avail.has(m.provider) && (m.modes.text || m.modes.image || m.modes.reference || SWAP_ENGINES.some(e => e.id === m.id && e.genjutsu)))
-      .map(m => {
-        const scale = p.models?.[m.id]?.priceScale ?? 1, tiers = tiersOf(m.id);
-        const resolution = ladderRes(m.id) && m.resolutions.some(r => r.id === ladderRes(m.id)) ? ladderRes(m.id)! : m.resolutions.at(-1)!.id;
+    const tiersOf = (id: string) => TIERS.filter(t => (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).some(s => familyOf(s.model) === id));
+    const ladderRes = (id: string) => { for (const t of TIERS) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => familyOf(x.model) === id); if (s) return s.resolution; } return undefined; };
+    // Owner 2026-11-14: one entry per model; its resolutions are the union of its provider routes, each priced on the
+    // route it runs on (suite/routes.ts), with that route's provider.
+    const video = (await this.pickerModels(studioId, p, avail))
+      .filter(f => f.spec.modes.text || f.spec.modes.image || f.spec.modes.reference || SWAP_ENGINES.some(e => e.id === f.head.id && e.genjutsu))
+      .map(({ head: h, spec: m, routes, resolutions: rs, provider }) => {
+        const tiers = tiersOf(h.id), lr = ladderRes(h.id);
+        const resolution = lr && rs.some(r => r.id === lr) ? lr : rs.at(-1)!.id;
         // WS13: what this model can be picked for (plans/model-choice.md); the hosted H3 family also swaps.
-        const purposes = [...videoPurposes(m), ...(SWAP_ENGINES.some(e => e.id === m.id && (e.runs === 'replicate' ? this.ctx.replicate.configured : e.runs === 'higgsfield' && this.providers.higgsfield.configured())) ? ['swap' as const] : [])];
-        return { model: m.id, name: m.byo?.displayName ?? m.name, provider: m.byo ? m.byo.providerKind : m.provider as string, kind: 'video' as const, custom: !!m.byo, members: !rules.hidden.has(m.id), purposes, tier: tiers[0] ?? null, tiers, resolution,
-          resolutions: m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: Math.round(r.perSec * scale * 10000) / 10000 })),
-          perSec: Math.round((m.resolutions.find(r => r.id === resolution)?.perSec ?? 0) * scale * 10000) / 10000,
-          perRun: m.byo?.perRunUsd ? Math.round(m.byo.perRunUsd * scale * 10000) / 10000 : null,
-          minSeconds: m.duration.min, maxSeconds: m.duration.max, allowedSeconds: m.duration.allowed ?? null, aspectRatios: m.aspectRatios, inputs: inputSlotsOf([m]) };
+        const purposes = [...new Set([...routes.flatMap(x => videoPurposes(x)), ...(routes.some(x => SWAP_ENGINES.some(e => e.id === x.id && (e.runs === 'replicate' ? this.ctx.replicate.configured : e.runs === 'higgsfield' && this.providers.higgsfield.configured()))) ? ['swap' as const] : [])])];
+        const at = rs.find(r => r.id === resolution)!;
+        return { model: h.id, name: h.byo?.displayName ?? h.name, provider, kind: 'video' as const, custom: !!h.byo, members: !rules.hidden.has(h.id), purposes, tier: tiers[0] ?? null, tiers, resolution,
+          resolutions: rs, perSec: at.perSec,
+          perRun: h.byo?.perRunUsd ? Math.round(h.byo.perRunUsd * (p.models?.[h.id]?.priceScale ?? 1) * 10000) / 10000 : null,
+          minSeconds: m.duration.min, maxSeconds: m.duration.max, allowedSeconds: m.duration.allowed ?? null, aspectRatios: m.aspectRatios, inputs: inputSlotsOf(routes),
+          ...(at.livePrice && !at.perSec ? { livePrice: true } : {}) };
       });
     // Every image model the owner can pick (the same list as GET /v1/engines: the studio's photo model, the curated ones,
     // Replicate's popular image models, and the studio's own), so the Photo picker isn't limited to the default.
@@ -248,7 +303,10 @@ export class SuiteService {
     // Relabelled for this list: with provider names hidden, the bare name (models that would look the same get "· Option n").
     return labelList(list.filter(e => ok.has(e.model)).map(e => {
       const { members: _m, label: _l, provider, ...rest } = e;
-      return rules.showProviderNames && provider ? { ...rest, provider } : rest;
+      if (rules.showProviderNames && provider) return { ...rest, provider };
+      // Providers hidden (4c): each resolution's route stays unnamed too.
+      const rs = rest.resolutions as Record<string, unknown>[] | undefined;
+      return rs ? { ...rest, resolutions: rs.map(({ provider: _p, providerName: _pn, modelLabel: _ml, ...r }) => r) } : rest;
     }), { showProviders: rules.showProviderNames });
   }
 
@@ -369,15 +427,33 @@ export class SuiteService {
       const fail = first && skipped ? { tried: [...first.tried, ...last.tried], refusals: [...first.refusals, ...last.refusals] } : last;
       throw await this.nothingFits(u, r, character, need, fail, choice?.source === 'request');
     }
-    const pick = got.pick;
     const texts = await this.ctx.prompts.texts(u.studioId);
     const talk = await this.resolveSpeaking(u.studioId, got.request);
-    const plan = buildPlan(got.request, got.need, pick, character, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale, speaking: talk.speaking,
-      separationUsd: SEPARATION_ESTIMATE_USD, sent: await sentImagesOf(this.ctx).forRequest(u, r) });
-    await this.livePrice(plan, prefs);
+    const sent = await sentImagesOf(this.ctx).forRequest(u, r);
+    const { plan, pick } = await this.cheapestRoute(got.pick, pk => buildPlan(got.request, got.need, pk, character, { texts, priceScale: prefs.models?.[pk.model.id]?.priceScale, speaking: talk.speaking,
+      separationUsd: SEPARATION_ESTIMATE_USD, sent }), prefs);
     if (got.notes.length) { plan.notes.unshift(...got.notes); plan.adapted = got.adapted; }
     if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };
+  }
+
+  /**
+   * Owner 2026-11-14: the picked model may run on several providers at this resolution (registry `family`): each route
+   * is priced for this exact shot (live quotes included) and the cheapest runs; the head wins a tie. A route without a
+   * price right now is skipped; with none priced, the first refusal is said. `plan.routes` keeps the comparison.
+   */
+  private async cheapestRoute(pick: ModelPick, make: (p: ModelPick) => ShotPlan, prefs: SuitePrefs) {
+    const cands: ModelPick[] = [pick, ...(pick.alternates ?? []).map(m => ({ ...pick, model: m, resolution: m.resolutions.find(x => x.id === pick.resolution.id)!, alternates: [] }))];
+    const priced: { pick: ModelPick; plan: ShotPlan }[] = [];
+    let err: unknown;
+    for (const c of cands) {
+      const plan = make(c);
+      try { await this.livePrice(plan, prefs); priced.push({ pick: c, plan }); } catch (e) { err ??= e; }
+    }
+    if (!priced.length) throw err;
+    const best = priced.reduce((a, b) => (b.plan.estimate < a.plan.estimate - 1e-9 ? b : a));
+    if (cands.length > 1) best.plan.routes = cands.map(c => ({ model: c.model.id, provider: c.model.provider, estimate: priced.find(q => q.pick === c)?.plan.estimate ?? null }));
+    return best;
   }
 
   /**
@@ -525,7 +601,9 @@ export class SuiteService {
     if (!m?.livePrice) return;
     const sample = { image: 'https://example.com/muse-estimate.jpg', video: 'https://example.com/muse-estimate.mp4', audio: 'https://example.com/muse-estimate.wav' };
     const seconds = Math.max(m.duration.min, Math.min(m.duration.max, Math.round(plan.seconds)));
-    const body: Record<string, unknown> = { prompt: 'x', duration: seconds, resolution: plan.resolution, generate_audio: plan.audio,
+    // Wan 3.0 keeps the body it was first quoted with; every other live route is quoted with its real request (media
+    // replaced by placeholders, suite/routes.ts quoteBody).
+    const body: Record<string, unknown> = m.adapter !== 'hf-wan3' ? quoteBody(m, { ...plan, seconds }) : { prompt: 'x', duration: seconds, resolution: plan.resolution, generate_audio: plan.audio,
       ...(plan.kind === 'i2v' ? { image_url: sample.image, ...(plan.images.end || plan.remix?.frames?.end ? { end_image_url: sample.image } : {}) } : {}),
       ...(plan.kind === 'ref2v' ? { ...(plan.images.refs.length || plan.remix?.personStill ? { image_urls: Array.from({ length: Math.min(10, Math.max(1, plan.images.refs.length + (plan.remix?.personStill ? 1 : 0))) }, () => sample.image) } : {}),
         ...(plan.videos.length ? { video_urls: plan.videos.slice(0, 5).map(() => sample.video) } : {}), ...(plan.audioRef ? { audio_urls: [sample.audio] } : {}) } : {}) };
@@ -706,7 +784,11 @@ export class SuiteService {
     };
     if (u.role !== 'owner') return base;
     const m = modelById(plan.modelId)!;
-    return { ...base, engine: { model: m.id, name: m.name, label: specName(m), provider: m.provider, ref: plan.ref, resolution: plan.resolution, perSec: plan.perSec, billedPerTake: plan.billedPerTake,
+    // Owner 2026-11-14: which provider this resolution runs on ("Seedance 2.5 · Higgsfield"), the model it belongs to, and
+    // the other providers' prices for this shot when the model has several (null: no price from it right now).
+    return { ...base, engine: { model: m.id, family: familyOf(m.id), name: m.name, label: specName(m), provider: m.provider, providerName: providerLabel(m.provider),
+      ...(plan.routes ? { routes: plan.routes.map(x => ({ ...x, providerName: providerLabel(x.provider), chosen: x.model === m.id })) } : {}),
+      ref: plan.ref, resolution: plan.resolution, perSec: plan.perSec, billedPerTake: plan.billedPerTake,
       licence: m.licence, notice: m.licence.notice ?? null }, input: { negative: plan.negative ?? null, params: plan.params, images: plan.images, videos: plan.videos, audio: plan.audioRef ?? null }, tried };
   }
 

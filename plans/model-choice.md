@@ -73,3 +73,31 @@ Members see only the custom models the owner made available (`members:true`), by
 - studio defaults: set, priced, applied to members, refused, cleared, and the ladder fallback warning;
 - a client can't smuggle `videoModel` into a job;
 - `/v1/suite/catalog` `engines[].purposes`.
+
+## One model, several providers (owner 2026-11-14, branch claude/model-resolutions)
+
+"I should have options. Right now I'm tied to using a certain model for a certain quality." Server only; the installed
+apps keep working unchanged.
+
+- **Registry** (`server/api/src/suite/registry.ts`): a spec may be a ROUTE of another model (`family`). Routes:
+  `h3-hf` (MiniMax H3 2K, now also image-to-video), `seedance-2.5-hf` (480p/720p/1080p), `seedance-2.0-hf` (480p–4K),
+  `kling-v3-omni-hf` (Higgsfield "Kling O3", 720p/1080p/4K), `wan-2.7-hf` (720p/1080p). New model `kling-v3`
+  (Kling 3.0, Higgsfield only, std/pro/4K endpoints via `refByResolution`). Request fields from
+  `assets/higgsfield/catalog.json`. Higgsfield routes without a verified plan rate are `livePrice` (free /estimate).
+- **Routing** (`suite/routes.ts`): the pickers list the head once; `resolutions[]` is the union of its routes, each on the
+  cheapest route that makes it. At plan time every route that can make the shot at that resolution and length is priced
+  (live quotes included) and the cheapest runs (`plan.routes`, owner `engine.routes`). A route that refuses at start (no
+  credit, bad key, busy, down) hands the shot to another route at the same resolution (runner, generalised from h3-hf);
+  the quoted price stands.
+- **Contract additions** (additive): every video entry's `resolutions[]` item has `provider`, `providerName`,
+  `modelLabel` ("Seedance 2.5 · Higgsfield") and `livePrice` (perSec 0 = priced when planned); members with provider
+  names off get none of them. A multi-provider entry's label is "Seedance 2.5 · Replicate + Higgsfield"
+  (`provider` "replicate+higgsfield"). `GET /v1/engines?purpose=…&resolution=1080p` adds `resolutionFit {asked, has,
+  resolution, note}` per model (a resolution never forces a model). Owner estimate `engine`: `family`, `providerName`,
+  `routes[{model, provider, providerName, estimate, chosen}]`. Old ids (`h3-hf`) resolve as their model everywhere
+  (engineModel, studio defaults, ladders). Classic Swap: `h3` at HD runs on Higgsfield (`swapRoute`) when it can.
+- **Not merged**: New Swap's model list (`/v1/suite/remix/models`) still shows MiniMax H3 per provider and leaves the
+  new routes out (it prices one resolution per entry).
+- **App follow-up (not built)**: show `resolutions[i].modelLabel` in the pill and chips instead of the entry label;
+  Android: show live-priced chips ("priced at Generate") instead of hiding perSec 0; Mac `snapResolution`: nearest
+  resolution before the ladder's, with `resolutionFit.note`.

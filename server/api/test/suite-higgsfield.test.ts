@@ -16,11 +16,12 @@ import { demoModel, makeApp, people, until } from './helpers.js';
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version']); execFileSync('ffprobe', ['-version']); return true; } catch { return false; } })();
 
 describe('Higgsfield H3 in the registry', () => {
-  it('is first on the HD ladder, 2K only, 5–15 s, no keyframes (frame shots stay on Replicate H3)', () => {
+  it('is first on the HD ladder, a route of MiniMax H3, 2K only, 5–15 s, start + end frames on image-to-video', () => {
     expect(DEFAULT_LADDER.hd[0]).toEqual({ model: 'h3-hf', resolution: '2K' });
     expect(DEFAULT_LADDER.hd[1]).toEqual({ model: 'h3', resolution: '2K' });
     const m = modelById('h3-hf')!;
-    expect(m).toMatchObject({ provider: 'higgsfield', duration: { min: 5, max: 15 }, modes: { image: false }, refs: { images: 9, videos: 3, audios: 3 } });
+    expect(m).toMatchObject({ family: 'h3', provider: 'higgsfield', duration: { min: 5, max: 15 }, modes: { image: true }, frames: { start: true, end: true, withRefs: false, endNeedsStart: true },
+      refs: { images: 9, videos: 3, audios: 3 }, ref: { i2v: 'minimax/h3/image-to-video' } });
     expect(m.resolutions.map(r => [r.id, r.perSec])).toEqual([['2K', 0.065]]);
   });
   it('charges $0.08 per reference image beyond the 5 included', () => {
@@ -139,48 +140,57 @@ describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield H3 against a FAKE Higgsfield
     return { req: r.body.request, j };
   };
 
-  it('Character swap: MiniMax H3 · Higgsfield is offered only with the key, at $0.065/s 2K, 5–15 s', async () => {
+  it('Character swap: MiniMax H3 is one entry; its 2K runs on Higgsfield at $0.065/s only with the key', async () => {
     for (const [creds, offered] of [[true, true], [false, false]] as const) {
       const a = await makeApp(env(creds ? { HF_CREDENTIALS: 'hfid:hfsecret' } : {}));
       const { owner } = await people(a, 0, { topUp: 100 });
       try {
         const list = (await owner.req('GET', '/v1/engines?purpose=swap')).body;
-        const hfRow = (list.engines ?? list).find((e: any) => e.model === 'h3-hf');
-        if (!offered) { expect(hfRow).toBeUndefined(); continue; }
-        expect(hfRow).toMatchObject({ name: 'MiniMax H3', label: 'MiniMax H3 · Higgsfield', providerName: 'Higgsfield', resolution: '2K', price: { basis: 'per_second', usd: 0.065 } });
-        expect(hfRow.purposes).toContain('swap');
-        expect(hfRow.limits).toMatchObject({ minSeconds: 5, maxInputSeconds: 15 });
+        const rows = (list.engines ?? list).filter((e: any) => e.model === 'h3' || e.model === 'h3-hf');
+        expect(rows.map((e: any) => e.model)).toEqual(['h3']); // never a second H3 row (owner 2026-11-14)
+        const row = rows[0];
+        expect(row.purposes).toContain('swap');
+        const twoK = row.resolutions.find((r: any) => r.id === '2K');
+        if (!offered) {
+          expect(row).toMatchObject({ label: 'MiniMax H3 · Replicate', providerName: 'Replicate' });
+          expect(twoK).toMatchObject({ provider: 'replicate', perSec: 0.13 });
+          continue;
+        }
+        expect(row).toMatchObject({ name: 'MiniMax H3', label: 'MiniMax H3 · Replicate + Higgsfield', providerName: 'Replicate + Higgsfield' });
+        expect(row.resolutions.map((r: any) => [r.id, r.provider, r.perSec, r.modelLabel])).toEqual([['768P', 'replicate', 0.08, 'MiniMax H3 · Replicate'], ['2K', 'higgsfield', 0.065, 'MiniMax H3 · Higgsfield']]);
+        // The old id still resolves: a request for h3-hf is checked against the H3 entry.
+        expect((await owner.req('PATCH', '/v1/engines/defaults', { purpose: 'swap', model: 'h3-hf' })).status).toBe(200);
       } finally { await a.close(); }
     }
   });
 
-  it('labels: the same H3 on Replicate and on Higgsfield never look the same (owner, members, provider names off)', async () => {
+  it('labels: H3 is one entry; each resolution names its provider; members with provider names off see neither', async () => {
     const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
     const { owner, members: [member] } = await people(a, 1, { topUp: 100 });
     try {
-      const h3s = (l: any[]) => l.filter((e: any) => e.model === 'h3' || e.model === 'h3-hf').sort((x: any, y: any) => x.model.localeCompare(y.model));
+      const h3s = (l: any[]) => l.filter((e: any) => e.model === 'h3' || e.model === 'h3-hf');
       const unique = (l: any[]) => expect(new Set(l.map((e: any) => e.label)).size).toBe(l.length);
       for (const who of [owner, member!]) {
         const eng = (await who.req('GET', '/v1/engines?purpose=swap')).body.engines;
-        expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate', 'MiniMax H3 · Higgsfield']);
+        expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate + Higgsfield']);
         unique(eng);
         for (const e of eng) expect(e.label).toBe(`${e.name} · ${e.providerName}`);
         const cat = (await who.req('GET', '/v1/suite/catalog')).body.engines;
-        expect(h3s(cat).map((e: any) => [e.name, e.label, e.providerName])).toEqual([['MiniMax H3', 'MiniMax H3 · Replicate', 'Replicate'], ['MiniMax H3', 'MiniMax H3 · Higgsfield', 'Higgsfield']]);
+        expect(h3s(cat).map((e: any) => [e.name, e.label, e.providerName, e.resolutions.map((r: any) => r.providerName)])).toEqual([['MiniMax H3', 'MiniMax H3 · Replicate + Higgsfield', 'Replicate + Higgsfield', ['Replicate', 'Higgsfield']]]);
         unique(cat);
       }
-      // 4c switch off: members get no provider, and the two H3s become "Option 1" and "Option 2", never the same bare name.
+      // 4c switch off: members get no provider anywhere, the entry or its resolutions.
       await owner.req('PATCH', '/v1/engines/members', { showProviderNames: false });
       const eng = (await member!.req('GET', '/v1/engines?purpose=swap')).body.engines;
-      expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3 · Option 1', 'MiniMax H3 · Option 2']);
+      expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3']);
       unique(eng);
       expect(JSON.stringify(eng)).not.toMatch(/Higgsfield|Replicate|"provider(Name)?"/);
       const cat = (await member!.req('GET', '/v1/suite/catalog')).body.engines;
       unique(cat);
-      expect(h3s(cat).map((e: any) => e.name)).toEqual(['MiniMax H3 · Option 1', 'MiniMax H3 · Option 2']);
+      expect(h3s(cat).map((e: any) => e.name)).toEqual(['MiniMax H3']);
       expect(JSON.stringify(cat)).not.toMatch(/Higgsfield|Replicate|"provider(Name)?"/);
       // The owner always sees providers.
-      expect(h3s((await owner.req('GET', '/v1/engines?purpose=swap')).body.engines).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate', 'MiniMax H3 · Higgsfield']);
+      expect(h3s((await owner.req('GET', '/v1/engines?purpose=swap')).body.engines).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate + Higgsfield']);
     } finally { await a.close(); }
   });
 

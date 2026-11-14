@@ -12,7 +12,7 @@ import { DEFAULT_TEXTS, type PromptTexts } from '../prompt/library.js';
 import { run } from '../prompt/scripts/builders.js';
 import { sanitizeDirection } from '../prompt/engine.js';
 import { billedSeconds, extraPerTake, joinTokens, perSecond, planRefSent, token, type Character, type RemixToggles, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
-import { MODELS, customModelsOf, modelById, refFor, type EditDo, type EditToggle, type ModelSpec, type ProviderId } from './registry.js';
+import { MODELS, customModelsOf, isRoute, modelById, refFor, type EditDo, type EditToggle, type ModelSpec, type ProviderId } from './registry.js';
 
 /** The toggles that are on, in the order the apps show them (character "face" is the optional face swap). */
 export function togglesOn(x: RemixToggles): EditToggle[] {
@@ -151,7 +151,9 @@ const ROUTE_RANK: Record<RemixRoute, number> = { edit: 0, reference: 1, frames: 
  * run at all, why.
  */
 export function remixModels(x: RemixToggles, o: PickOpts): (RemixCandidate & { unavailable: string | null })[] {
-  const all = [...MODELS.filter(m => m.status !== 'removed'), ...(o.studioId ? customModelsOf(o.studioId) : [])];
+  // New Swap prices each entry at one resolution, so it keeps one entry per provider for H3 (h3-hf, Auto's pick for her)
+  // and leaves out the other provider routes (registry `family`), which the shot pickers merge into their model.
+  const all = [...MODELS.filter(m => m.status !== 'removed' && (!isRoute(m) || m.id === 'h3-hf')), ...(o.studioId ? customModelsOf(o.studioId) : [])];
   const order = autoOrder(x);
   const rank = (m: ModelSpec) => { const i = order.indexOf(m.id); return i >= 0 ? i : 100 + ROUTE_RANK[routeOf(m)] * 100 + (m.byo ? 50 : 0); };
   return all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i)
@@ -359,7 +361,7 @@ export function buildRemixPlan(r: ShotRequest, x: RemixToggles, p: RemixPick, pe
   const perRun = m.byo ? m.byo.perRunUsd * scale : extraPerTake(m, sentCount); // per-run price; Higgsfield H3's pictures past 5
   const estimate = Math.round((perSec * billed + perRun) * r.takes * 10000) / 10000;
   return {
-    tier: r.quality, mode: 'remix', modelId: m.id, provider: m.provider, ref: refFor(m, kind), kind, resolution: res.id, seconds, aspect: r.aspectRatio,
+    tier: r.quality, mode: 'remix', modelId: m.id, provider: m.provider, ref: refFor(m, kind, res.id), kind, resolution: res.id, seconds, aspect: r.aspectRatio,
     audio: false, takes: r.takes, seed: m.seed ? r.seed : undefined, prompt, params: {},
     images: { middle: [], refs }, videos: videoIn ? [{ video: { key: clip.key, seconds: used }, use: 'source' }] : [], speaking: false, separationUsd: 0,
     perSec, billedPerTake: billed, extraPerTake: perRun, estimate, camera: { moves: [], notes: [], usesGuide: false }, notes,

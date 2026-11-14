@@ -9,7 +9,8 @@
 const PROVIDERS: Record<string, string> = {
   replicate: 'Replicate', fal: 'fal', higgsfield: 'Higgsfield', muapi: 'Muapi', runpod: 'MUSE', byo: 'Custom', assemblyai: 'AssemblyAI', mock: 'Test',
 };
-export const providerLabel = (p: string) => PROVIDERS[p] ?? (p ? p.charAt(0).toUpperCase() + p.slice(1) : p);
+export const providerLabel = (p: string): string => p.includes('+') ? p.split('+').map(providerLabel).join(' + ')
+  : PROVIDERS[p] ?? (p ? p.charAt(0).toUpperCase() + p.slice(1) : p);
 
 /** Old suffixes that named the provider inside the model's own name: "MiniMax H3 (Higgsfield)", "SeedVR2 (own GPU)". */
 const SUFFIX = new RegExp(`\\s*(?:\\((?:${[...Object.values(PROVIDERS), 'own GPU'].join('|')})\\)|·\\s*(?:${Object.values(PROVIDERS).join('|')}))\\s*$`, 'i');

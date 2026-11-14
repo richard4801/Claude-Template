@@ -269,7 +269,8 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
     expect(r.models).toEqual(r.engines);
     const k = r.models.find((e: any) => e.model === 'kling-v4');
     expect(k).toMatchObject({ tier: 'standard', perSec: expect.any(Number), perRun: null, minSeconds: 3, maxSeconds: 30, allowedSeconds: null, aspectRatios: expect.arrayContaining(['9:16']) });
-    expect(k.resolutions[0]).toEqual({ id: '720p', label: '720p', perSec: 0.157 });
+    // Each resolution also says the provider it runs on (owner 2026-11-14: one model, several providers).
+    expect(k.resolutions[0]).toEqual({ id: '720p', label: '720p', perSec: 0.157, provider: 'replicate', providerName: 'Replicate', modelLabel: 'Kling 4.0 · Replicate' });
     expect((await owner.req('GET', '/v1/engines?purpose=recreate')).body.purpose).toBe('fill');
     expect((await owner.req('GET', '/v1/engines?purpose=model_photos')).body.purpose).toBe('character');
     expect((await owner.req('GET', '/v1/engines?purpose=background')).body.purpose).toBe('plate');

@@ -21,7 +21,8 @@ import type { JobRow } from '../gpu/controller.js';
 import type { VideoRef } from './camera.js';
 import { buildInput, type MediaUrls } from './inputs.js';
 import { billedSeconds, shotNote, type ShotPlan } from './plan.js';
-import { modelById } from './registry.js';
+import { modelById, refFor, type ProviderId } from './registry.js';
+import { fallbackRoute } from './routes.js';
 import type { SuiteService } from './service.js';
 import type { ProviderStatus, VideoProvider } from './providers.js';
 
@@ -329,11 +330,15 @@ export class SuiteRunner {
       modelName = model.name ?? modelName;
       let provider = this.suite.providerFor(plan);
       let ref = plan.ref;
-      const alt = modelById('h3');
+      // Owner 2026-11-14: the same model on another provider at the same resolution (registry `family`; MiniMax H3 2K on
+      // Higgsfield ↔ Replicate, Seedance, Kling 3.0 Omni, Wan 2.7) takes the shot when this provider refuses at start.
+      const live = this.suite.mode === 'live';
+      const alt = fallbackRoute(model, plan, x => (live ? this.suite.providerFor({ provider: x.provider }).configured() : this.suite.available().has(x.provider))
+        && (plan.provider !== 'byo') && !x.byo);
       let moved = false;
-      const moveToReplicate = () => { model = alt!; provider = this.suite.providers.replicate; ref = typeof alt!.ref === 'string' ? alt!.ref : (alt!.ref.ref2v ?? alt!.ref.t2v ?? ''); moved = true; };
-      // A shot that already moved to Replicate (Higgsfield refused at its start) resumes there, never on Higgsfield again.
-      if (provider.id === 'higgsfield' && model.adapter === 'hf-h3' && alt && prior.some(t => t.id && t.provider === 'replicate')) moveToReplicate();
+      const moveToAlt = () => { model = alt!; provider = this.suite.providerFor({ provider: alt!.provider }); ref = refFor(alt!, plan.kind, plan.resolution); moved = true; };
+      // A shot that already moved (its provider refused at its start) resumes on the route it moved to, never back.
+      if (alt && live && prior.some(t => t.id && t.provider === alt.provider)) moveToAlt();
       const mock = provider.id === 'mock';
       if (!(await this.toolsReady())) throw new Error('ffmpeg is not installed on the server');
       await report(1, 0.01, 'Preparing');
@@ -341,7 +346,7 @@ export class SuiteRunner {
       const prepare = () => (prepared ??= this.prepare(job, plan, mock, tmp, report, cancelled));
       const inputFor = async () => {
         const p = await prepare();
-        return buildInput(model!, { ...plan, prompt: p.prompt, ...(moved ? { resolution: '2K' } : {}) }, p.urls);
+        return buildInput(model!, { ...plan, prompt: p.prompt }, p.urls);
       };
       const takes: TakeState[] = prior.map(x => ({ ...x }));
       const outputs: Record<string, unknown>[] = [], billed: number[] = [];
@@ -377,15 +382,15 @@ export class SuiteRunner {
           try {
             ts.id = await provider.start(ref, seeded(input), hooks);
           } catch (e) {
-            // Higgsfield refused before anything ran (no credit, bad key, busy, down): skip it for a while and run the
-            // same shot on Replicate H3 2K (same model, prompt and references). The quoted price stands (the studio
-            // absorbs the difference); the owner sees why in the log. Nothing was charged by Higgsfield.
-            const canMove = provider.id === 'higgsfield' && model.adapter === 'hf-h3' && alt && e instanceof ReplicateError && ['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind)
-              && !takes.some(t => t.id) && this.suite.providers.replicate.configured();
+            // The provider refused before anything ran (no credit, bad key, busy, down): skip it for a while and run the
+            // same shot on the model's other route at the same resolution (same prompt and references). The quoted price
+            // stands (the studio absorbs the difference); the owner sees why in the log. Nothing was charged.
+            const canMove = !moved && alt && e instanceof ReplicateError && ['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind) && !takes.some(t => t.id);
             if (!canMove) throw e;
-            this.suite.markDown('higgsfield');
-            ctx.log.warn({ job: job.id, reason: (e as Error).message }, 'higgsfield refused at start: running the shot on Replicate H3');
-            moveToReplicate();
+            // Higgsfield is skipped for a while on any refusal (as before); Replicate only when it has no credit or key.
+            if (provider.id === 'higgsfield' || (provider.id !== 'mock' && (e as ReplicateError).kind !== 'rate_limited')) this.suite.markDown(provider.id as ProviderId);
+            ctx.log.warn({ job: job.id, from: model.id, to: alt!.id, reason: (e as Error).message }, `${provider.id} refused at start: running the shot on ${alt!.provider}`);
+            moveToAlt();
             input = await inputFor();
             ts.id = await provider.start(ref, seeded(input), hooks);
           }

@@ -22,7 +22,7 @@ export type RefStyle = 'angle' /* <Image 1>, <Video 1> */ | 'at' /* @image_1, @v
 /** Which camera wording template the compiler uses (prompt library keys suite.camera.format.*). */
 export type CameraVocab = 'kling' | 'seedance' | 'h3' | 'veo' | 'wan' | 'ltx' | 'generic';
 /** Which input mapper builds the provider input (suite/inputs.ts). */
-export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'hf-genjutsu' | 'hf-wan3' | 'wan-2.7-edit' | 'mock' | 'byo';
+export type Adapter = 'minimax-h3' | 'kling-v4' | 'kling-v3-omni' | 'seedance' | 'veo' | 'wan-2.7' | 'ltx-2.3' | 'fal-h3-3d' | 'fal-h3-recast' | 'kling-o1' | 'wan-animate' | 'hf-h3' | 'hf-genjutsu' | 'hf-wan3' | 'hf-seedance' | 'hf-kling-o3' | 'hf-kling-v3' | 'hf-wan-2.7' | 'wan-2.7-edit' | 'mock' | 'byo';
 
 export type Resolution = { id: string; label: string; shortSide: number; perSec: number; perSecWithVideo?: number; audioPerSec?: number };
 
@@ -30,8 +30,17 @@ export type ModelSpec = {
   id: string;
   name: string;
   provider: ProviderId;
+  /**
+   * One model on several providers (owner 2026-11-14: "I should have options"): a ROUTE names the public model it runs
+   * (`family`, the head's id). The pickers list the head once, with the union of its routes' resolutions; each resolution
+   * runs on the cheapest route that offers it for the shot (suite/routes.ts), and falls back to another route at the
+   * same resolution when the first provider refuses at start. A route keeps its own id (old ids, prices, owner switches).
+   */
+  family?: string;
   /** Provider model ref; per mode where a family has separate endpoints (Wan 2.7 t2v/i2v/r2v). */
   ref: string | Partial<Record<'t2v' | 'i2v' | 'ref2v' | 'guide', string>>;
+  /** Endpoints that differ by resolution (Higgsfield Kling 3.0: std / pro / 4k paths): resolution id → ref, before `ref`. */
+  refByResolution?: Record<string, Partial<Record<'t2v' | 'i2v' | 'ref2v' | 'guide', string>>>;
   adapter: Adapter;
   modes: { text: boolean; image: boolean; reference: boolean; guide?: boolean; recast?: boolean };
   /**
@@ -54,7 +63,8 @@ export type ModelSpec = {
    */
   edit?: EditCaps;
   recast?: { maxPeople: number; keepsCuts: boolean; keepsAudio: boolean; refsPerPerson: number; totalImages: number; faceCrops: boolean; sourceSeconds: [number, number]; maxShotSeconds?: number };
-  frames: { start: boolean; end: boolean; middle: number; /** frames and references can be combined */ withRefs: boolean };
+  frames: { start: boolean; end: boolean; middle: number; /** frames and references can be combined */ withRefs: boolean;
+    /** an end frame only with a start frame (Higgsfield's image-to-video needs image_url) */ endNeedsStart?: boolean };
   refs: { images: number; videos: number; audios: number; /** all images (frames + refs) together */ totalImages?: number; videoSecondsMax?: number; videoSecondsMin?: number;
     /** Reference images included in the price; each one beyond costs `extraImageUsd` per take (Higgsfield H3: 5, $0.08). */
     includedImages?: number; extraImageUsd?: number };
@@ -167,14 +177,82 @@ export const MODELS: ModelSpec[] = [
   // keyframes, so frame shots stay on Replicate H3 (modes.image false). 2K only, 5–15 s. $0.13/s list, 50% off on the
   // owner's claimed plan (verified with POST /estimate on 2026-11-06) = $0.065/s; each reference image beyond the 5
   // included costs $0.08 (extraPerTake). Out of credit / bad key at start → the shot moves to Replicate H3 (runner).
-  { id: 'h3-hf', name: 'MiniMax H3', provider: 'higgsfield',
-    ref: { t2v: 'minimax/h3/text-to-video', ref2v: 'minimax/h3/reference-to-video' }, adapter: 'hf-h3',
-    modes: { text: true, image: false, reference: true }, frames: { start: false, end: false, middle: 0, withRefs: false },
+  { id: 'h3-hf', family: 'h3', name: 'MiniMax H3', provider: 'higgsfield',
+    ref: { t2v: 'minimax/h3/text-to-video', i2v: 'minimax/h3/image-to-video', ref2v: 'minimax/h3/reference-to-video' }, adapter: 'hf-h3',
+    // image-to-video (catalog.json minimax/h3/image-to-video, 2026-11-11): image_url + end_image_url, no references.
+    modes: { text: true, image: true, reference: true }, frames: { start: true, end: true, middle: 0, withRefs: false, endNeedsStart: true },
     refs: { images: 9, videos: 3, audios: 3, includedImages: 5, extraImageUsd: 0.08 }, duration: { min: 5, max: 15 },
     resolutions: [R('2K', '2K', 1440, 0.065)], aspectRatios: AR_FULL,
     audio: 'always', negativePrompt: false, seed: false, camera: { vocab: 'h3', refStyle: 'angle', referenceVideo: true }, lora: false,
     licence: hosted('MiniMax H3 via Higgsfield (hosted)'), status: 'active',
-    notes: '50% max-discount price; each reference image beyond 5 adds $0.08.' },
+    notes: '50% max-discount price; each reference image beyond 5 adds $0.08. A route of MiniMax H3 (h3): 2K runs here when it is cheaper.' },
+  // ---------------------------------------------------------------- Higgsfield routes of the models above (owner 2026-11-14)
+  // Request schemas from assets/higgsfield/catalog.json (docs.higgsfield.ai, read 2026-11-11). Higgsfield publishes no
+  // per-second rate for these and this account's quote can't be read offline, so they are priced live (`livePrice`: the
+  // free POST /estimate for the exact request); `perSec` 0 is never shown as a price. The prompt is written for the
+  // family's head (same reference words), so a shot can move between routes at start without a new prompt.
+  // Seedance 2.5: text / image (image_url + end_image_url) / reference (≤ 30 images, ≤ 10 videos, ≤ 10 audio), 4–30 s,
+  // 480p / 720p / 1080p (Replicate stops at 720p). No seed field. Earlier console reading: 720p ≈ $0.32/s after the
+  // plan's 30% (dearer than Replicate's $0.2312), so 480p/720p normally stay on Replicate and 1080p runs here.
+  { id: 'seedance-2.5-hf', family: 'seedance-2.5', name: 'Seedance 2.5', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'bytedance/seedance-2.5/text-to-video', i2v: 'bytedance/seedance-2.5/image-to-video', ref2v: 'bytedance/seedance-2.5/reference-to-video' }, adapter: 'hf-seedance',
+    modes: { text: true, image: true, reference: true, guide: true }, frames: { start: true, end: true, middle: 0, withRefs: false, endNeedsStart: true },
+    refs: { images: 30, videos: 10, audios: 10, videoSecondsMax: 30 }, duration: { min: 4, max: 30 },
+    resolutions: [R('480p', '480p', 480, 0), R('720p', '720p', 720, 0), R('1080p', '1080p', 1080, 0)],
+    aspectRatios: AR_FULL, audio: 'flag', negativePrompt: false, seed: false,
+    camera: { vocab: 'seedance', refStyle: 'bracket', referenceVideo: true }, lora: false,
+    extend: { after: 'reference', before: 'reference', sourceSeconds: [2, 30] },
+    licence: hosted('Seedance via Higgsfield (hosted)', { notes: 'May refuse realistic faces as references.' }), status: 'active',
+    notes: 'A route of Seedance 2.5: adds 1080p. Priced live from Higgsfield’s free estimate.' },
+  // Seedance 2.0: text / image / reference (≤ 9 images, ≤ 3 videos, ≤ 3 audio), 4–15 s, 480p–4K, no seed.
+  { id: 'seedance-2.0-hf', family: 'seedance-2.0', name: 'Seedance 2.0', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'bytedance/seedance-2.0/text-to-video', i2v: 'bytedance/seedance-2.0/image-to-video', ref2v: 'bytedance/seedance-2.0/reference-to-video' }, adapter: 'hf-seedance',
+    modes: { text: true, image: true, reference: true, guide: true }, frames: { start: true, end: true, middle: 0, withRefs: false, endNeedsStart: true },
+    refs: { images: 9, videos: 3, audios: 3, videoSecondsMax: 15 }, duration: { min: 4, max: 15 },
+    resolutions: [R('480p', '480p', 480, 0), R('720p', '720p', 720, 0), R('1080p', '1080p', 1080, 0), R('4k', '4K', 2160, 0)],
+    aspectRatios: AR_FULL, audio: 'flag', negativePrompt: false, seed: false,
+    camera: { vocab: 'seedance', refStyle: 'bracket', referenceVideo: true }, lora: false,
+    licence: hosted('Seedance via Higgsfield (hosted)', { notes: 'May refuse realistic faces as references.' }), status: 'active',
+    notes: 'A route of Seedance 2.0. Priced live from Higgsfield’s free estimate.' },
+  // Kling 3.0 Omni = Higgsfield's "Kling O3": mode std / pro / 4k (Replicate's standard / pro / 4k), 3–15 s, 9:16 16:9
+  // 1:1, sound on/off. Text and references on image-reference (image_urls), frames on first-last-frame. No reference
+  // videos here (video-reference is a separate endpoint, ≤ 10 s): a shot with one stays on Replicate.
+  { id: 'kling-v3-omni-hf', family: 'kling-v3-omni', name: 'Kling 3.0 Omni', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'kling-video/o3/image-reference', i2v: 'kling-video/o3/first-last-frame', ref2v: 'kling-video/o3/image-reference' }, adapter: 'hf-kling-o3',
+    modes: { text: true, image: true, reference: true }, frames: { start: true, end: true, middle: 0, withRefs: false, endNeedsStart: true },
+    refs: { images: 7, videos: 0, audios: 0 }, duration: { min: 3, max: 15 },
+    resolutions: [R('720p', '720p · standard', 720, 0), R('1080p', '1080p · pro', 1080, 0), R('4k', '4K', 2160, 0)],
+    aspectRatios: ['9:16', '16:9', '1:1'], audio: 'flag', negativePrompt: false, seed: false,
+    camera: { vocab: 'kling', refStyle: 'triple', referenceVideo: false }, lora: false, promptMax: 2500,
+    licence: hosted('Kling via Higgsfield (hosted)'), status: 'active',
+    notes: 'A route of Kling 3.0 Omni (Higgsfield “Kling O3”). Priced live from Higgsfield’s free estimate.' },
+  // Kling 3.0 (not Omni): Higgsfield only. std / pro / 4k are separate endpoints (refByResolution); text (aspect 9:16,
+  // 16:9, 1:1) and image (image_url + last_image_url, aspect from the picture); 3–15 s; sound on/off. `elements` are
+  // Kling element ids, not pictures: no reference images.
+  { id: 'kling-v3', name: 'Kling 3.0', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'kling-video/v3.0/pro/text-to-video', i2v: 'kling-video/v3.0/pro/image-to-video' }, adapter: 'hf-kling-v3',
+    refByResolution: {
+      '720p': { t2v: 'kling-video/v3.0/std/text-to-video', i2v: 'kling-video/v3.0/std/image-to-video' },
+      '1080p': { t2v: 'kling-video/v3.0/pro/text-to-video', i2v: 'kling-video/v3.0/pro/image-to-video' },
+      '4k': { t2v: 'kling-video/v3.0/4k/text-to-video', i2v: 'kling-video/v3.0/4k/image-to-video' },
+    },
+    modes: { text: true, image: true, reference: false }, frames: { start: true, end: true, middle: 0, withRefs: false, endNeedsStart: true },
+    refs: { images: 0, videos: 0, audios: 0 }, duration: { min: 3, max: 15 },
+    resolutions: [R('720p', '720p · standard', 720, 0), R('1080p', '1080p · pro', 1080, 0), R('4k', '4K', 2160, 0)],
+    aspectRatios: ['9:16', '16:9', '1:1'], audio: 'flag', negativePrompt: false, seed: false,
+    camera: { vocab: 'kling', refStyle: 'none', referenceVideo: false }, lora: false, promptMax: 2500,
+    licence: hosted('Kling via Higgsfield (hosted)'), status: 'active',
+    notes: 'Text or a start (and end) frame; 3–15 s; 720p standard, 1080p pro, 4K. Priced live from Higgsfield’s free estimate.' },
+  // Wan 2.7: text (5 aspects), image (image_url + end_image_url), reference (image_urls, video_urls; 16:9 or 9:16,
+  // ≤ 10 s); 2–15 s; 720p / 1080p; negative prompt and seed. Aspects kept to 9:16 and 16:9 (the reference endpoint's).
+  { id: 'wan-2.7-hf', family: 'wan-2.7', name: 'Wan 2.7', provider: 'higgsfield', livePrice: true,
+    ref: { t2v: 'wan/v2.7/text-to-video', i2v: 'wan/v2.7/image-to-video', ref2v: 'wan/v2.7/reference-to-video' }, adapter: 'hf-wan-2.7',
+    modes: { text: true, image: true, reference: true }, frames: { start: true, end: true, middle: 0, withRefs: false, endNeedsStart: true },
+    refs: { images: 5, videos: 3, audios: 0 }, duration: { min: 2, max: 15 },
+    resolutions: [R('720p', '720p', 720, 0), R('1080p', '1080p', 1080, 0)], aspectRatios: ['9:16', '16:9'],
+    audio: 'always', negativePrompt: true, seed: true, camera: { vocab: 'wan', refStyle: 'none', referenceVideo: false }, lora: false,
+    licence: hosted('Wan via Higgsfield (hosted)'), status: 'active',
+    notes: 'A route of Wan 2.7 (reference shots max 10 s). Priced live from Higgsfield’s free estimate.' },
   // ---------------------------------------------------------------- Wan 3.0 / Wan 3.0 Prime on Higgsfield (owner 2026-11-12)
   // docs.higgsfield.ai/docs/models/wan-3 and wan-3-prime (read 2026-11-12; schemas in assets/higgsfield/catalog.json):
   // text-to-video, image-to-video (image_url, end_image_url) and reference-to-video (image_urls ≤ 10, video_urls ≤ 5,
@@ -336,6 +414,20 @@ export function setCustomModels(studioId: string, list: ModelSpec[]) {
 export const customModelsOf = (studioId: string) => [...CUSTOM.values()].filter(m => m.byo?.studioId === studioId);
 export const modelById = (id: string) => BY_ID.get(id) ?? CUSTOM.get(id) ?? (id === 'mock' ? MOCK_MODEL : undefined);
 
+/** The public model an id runs for: a route's family ("h3-hf" → "h3"), else the id itself. */
+export const familyOf = (id: string) => modelById(id)?.family ?? id;
+/** A route of another model (listed under its family's head, never on its own). */
+export const isRoute = (m: ModelSpec) => !!m.family && m.family !== m.id;
+const ROUTES = new Map<string, ModelSpec[]>();
+for (const m of MODELS) if (isRoute(m)) ROUTES.set(m.family!, [...(ROUTES.get(m.family!) ?? []), m]);
+/** Every spec of a public model: the head first, then its routes in registry order. Custom models have no routes. */
+export function routesOf(id: string): ModelSpec[] {
+  const head = modelById(familyOf(id));
+  return head ? [head, ...(ROUTES.get(head.id) ?? [])] : [];
+}
+/** The models the pickers list: every registry model that isn't a route of another, then the studio's custom models. */
+export const publicModels = (studioId?: string) => [...MODELS.filter(m => !isRoute(m)), ...(studioId ? customModelsOf(studioId) : [])];
+
 export type LadderStep = { model: string; resolution: string };
 /**
  * The quality ladder: per tier, candidate models best-first. A shot takes the first candidate that is enabled, licensed,
@@ -366,7 +458,9 @@ export const CAMERA_TARGETS: Record<string, LadderStep> = {
 };
 
 /** The provider ref to call for a mode. */
-export function refFor(m: ModelSpec, kind: 't2v' | 'i2v' | 'ref2v' | 'guide'): string {
+export function refFor(m: ModelSpec, kind: 't2v' | 'i2v' | 'ref2v' | 'guide', resolution?: string): string {
+  const byRes = resolution ? m.refByResolution?.[resolution] : undefined;
+  if (byRes) return byRes[kind] ?? byRes.ref2v ?? byRes.i2v ?? byRes.t2v ?? '';
   if (typeof m.ref === 'string') return m.ref;
   return m.ref[kind] ?? m.ref.ref2v ?? m.ref.i2v ?? m.ref.t2v ?? '';
 }
@@ -394,7 +488,7 @@ export function inputSlotsOf(ms: ModelSpec[]): InputSlots {
 export function modelView(m: ModelSpec, s?: { enabled?: boolean; acknowledgedAt?: number | null; priceScale?: number }, configured = true) {
   const blocked = m.status === 'removed' || !!m.licence.blockNewFeatures;
   return {
-    id: m.id, name: m.name, label: modelLabel(m.byo?.displayName ?? m.name, m.byo ? m.byo.providerKind : m.provider), provider: m.provider, ref: m.ref, status: m.status, modes: m.modes, frames: m.frames, refs: m.refs, duration: m.duration,
+    id: m.id, ...(m.family ? { family: m.family } : {}), name: m.name, label: modelLabel(m.byo?.displayName ?? m.name, m.byo ? m.byo.providerKind : m.provider), provider: m.provider, ref: m.ref, status: m.status, modes: m.modes, frames: m.frames, refs: m.refs, duration: m.duration,
     resolutions: m.resolutions, aspectRatios: m.aspectRatios, fps: m.fps ?? null, audio: m.audio, camera: m.camera, lora: m.lora, licence: m.licence, notes: m.notes ?? null,
     enabled: !blocked && (s?.enabled ?? true), blocked, blockedReason: m.status === 'removed' ? 'Removed by the provider' : m.licence.blockNewFeatures ? 'Licence: not for new features' : null,
     needsAck: !!m.licence.requiresAck && !s?.acknowledgedAt, configured, priceScale: s?.priceScale ?? 1,
