@@ -1,0 +1,173 @@
+From a10a136a13adebf13b156e9e703cda19e1e77ad1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 14 Nov 2026 22:33:22 +0000
+Subject: [PATCH] Composer: a long prompt never squeezes the stage or the Rig
+ out (owner bug, build 654)
+
+The prompt grows to five lines or 22% of the page, whichever is smaller, then
+scrolls inside (the expand button keeps the full editor). The stage and the Rig
+keep at least 36% of the page (180 pt); the Rig scrolls inside. The presets strip
+shows only on a page tall enough (790 pt) and hides first. Same on Shot, Photo
+and Swap.
+
+Review: long_prompt_stage and long_prompt_rig in suite-design-check.txt, a
+~1,500-character prompt with the presets strip asked for, themes a-d at
+1000x700, 1152x720 and 1440x900.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxoXQmfbR7CXwb939GC
+---
+ mac/Muse/App/SnapshotRunner+SuiteDesign.swift | 63 ++++++++++++++++++-
+ .../Views/Suite/Composer/ComposerView.swift   | 28 +++++++--
+ 2 files changed, 86 insertions(+), 5 deletions(-)
+
+diff --git a/mac/Muse/App/SnapshotRunner+SuiteDesign.swift b/mac/Muse/App/SnapshotRunner+SuiteDesign.swift
+index 2982f7d0..f970cbf7 100644
+--- a/mac/Muse/App/SnapshotRunner+SuiteDesign.swift
++++ b/mac/Muse/App/SnapshotRunner+SuiteDesign.swift
+@@ -12,7 +12,8 @@ import MuseCore
+ //   home_opens_shot    "Open in composer" opens Shot with the prompt carried over and starts no job
+ //   price_on_generate  on Shot and the filled Swap, Generate shows its price ("· $x" or "· Free")
+ // and the Photo tab (owner-approved 2026-11-14, plans/design/photo/): mac_<a|b>_photo_<empty|filled|results>_<w>x<h>.png at
+-// 1000 × 700, 1152 × 720 and 1440 × 900, with photo_fits, photo_price, photo_empty_stage, photo_carousel and photo_presets.
++// 1000 × 700, 1152 × 720 and 1440 × 900, with photo_fits, photo_price, photo_empty_stage, photo_carousel and photo_presets;
++// and the long prompt (owner bug 2026-11-14): long_prompt_stage and long_prompt_rig on Shot, Photo and Swap, themes a–d.
+ extension SnapshotRunner {
+     static func suiteDesignShots(_ store: AppStore, dir: URL) async {
+         guard let w = mainWindow else { return }
+@@ -180,6 +181,66 @@ extension SnapshotRunner {
+         store.suite.photoSessionJobs = []
+         store.themeID = .a
+ 
++        // Owner bug 2026-11-14 (build 654): a long prompt grew to half the window and squeezed the stage and the Rig out.
++        // A ~1,500-character prompt on Shot, Photo and the classic Swap (prompt on), with the presets strip asked for, in
++        // themes a–d at 1000 × 700, 1152 × 720 and 1440 × 900 (mac_<theme>_longprompt_<tool>_<w>x<h>.png):
++        //   long_prompt_stage  the stage keeps at least 40% of its height with a short prompt
++        //   long_prompt_rig    the Rig panel is on screen and shows its rows (all of them, or at least 160 pt of them, the
++        //                      rest a scroll away inside the panel)
++        let longText = """
++         SUBJECT: a woman in her late twenties, dark curly hair to the shoulders, oversized charcoal hoodie, black jeans and white sneakers, small gold hoops, no other jewellery, natural make-up.
++
++         LOCATION: a flat city rooftop at golden hour, a low railing behind her, the skyline soft and out of focus, warm backlight catching the edges of her hair, a few string lights not yet on.
++
++         ACTION: 0–2 s she stands still, looking past the camera, then turns her head to camera and smiles. 2–4 s she starts to dance, small steps, shoulders loose, one hand into her hair. 4–6 s she spins once, the hoodie swinging, and laughs. 6–8 s she stops, catches her breath and points at the camera, still laughing.
++
++         CAMERA: handheld, slight sway, a slow push in through the whole take, eye level, 35 mm, shallow depth of field, the skyline melting into bokeh.
++
++         LIGHT AND LOOK: golden backlight with a soft warm fill from the left, gentle lens flare at the spin, warm film grade with lifted blacks, fine grain.
++        """
++        for theme in [ThemeID.a, .b, .c, .d] {
++            store.themeID = theme
++            for (width, height) in [(1000, 700), (1152, 720), (1440, 900)] {
++                w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
++                for tool in ["shot", "photo", "swap"] {
++                    var normal: CGFloat = 0
++                    for long in [false, true] {
++                        store.suite.picker = nil
++                        store.suite.feedOpen = false
++                        store.suite.claude.open = false
++                        switch tool {
++                        case "photo": store.openPhoto(model: SampleData.demo)
++                        case "swap": store.openTool(.swap); store.setSwapVariant(.classic); store.suite.swap.promptOn = true
++                        default: store.openTool(.shot); fillDemoDraft(store)
++                        }
++                        store.suite.composer.tokens = PromptTokens.text(long ? longText : " on a rooftop at golden hour. ")
++                        state.overlay = "presets" // the owner's case: the presets strip asked for
++                        try? await Task.sleep(for: .seconds(1.5))
++                        state.probeTick += 1
++                        try? await Task.sleep(for: .seconds(0.3))
++                        w.contentView?.layoutSubtreeIfNeeded()
++                        let frames = state.composerFrames
++                        let main = frames["composer main row"]?.height ?? 0
++                        if !long { normal = main; continue }
++                        let content = w.contentView?.bounds.size ?? .zero
++                        let label = "\(tool) \(theme.rawValue) \(width)x\(height)"
++                        line(normal > 0 && main >= normal * 0.4, "long_prompt_stage", "\(label) stage \(Int(main)) of \(Int(normal)) with a short prompt")
++                        if let rail = frames["composer rail"], let inner = frames["composer rail content"] {
++                            let onScreen = rail.minY >= 0 && rail.maxY <= content.height + 0.5
++                            let shown = rail.height >= min(inner.height, 160)
++                            line(onScreen && shown, "long_prompt_rig", "\(label) Rig panel \(Int(rail.height)) tall of \(Int(inner.height)), on screen \(onScreen)")
++                        } else {
++                            line(false, "long_prompt_rig", "\(label) Rig panel not drawn")
++                        }
++                        capture(dir.appendingPathComponent("mac_\(theme.rawValue)_longprompt_\(tool)_\(width)x\(height).png"))
++                    }
++                }
++            }
++        }
++        state.overlay = nil
++        store.suite.composer.tokens = PromptTokens()
++        store.themeID = .a
++
+         store.setSwapVariant(.classic)
+         w.setFrame(full, display: true)
+         try? await Task.sleep(for: .seconds(1))
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerView.swift b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+index a2c39b3b..a58b1160 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerView.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+@@ -40,6 +40,21 @@ let composerPromptMinHeight: CGFloat = 60
+ /// Below this window height the composer page scrolls as a whole (header, a short picture, the prompt bar).
+ let composerMinHeight: CGFloat = 520
+ 
++/// The prompt's auto-grow stops at five lines (16 pt at 1.35 plus the box's insets) or 22% of the page, whichever is
++/// smaller; past that it scrolls inside, and the expand button opens the full editor (owner bug 2026-11-14: a long prompt
++/// grew to half the window and squeezed the stage and the Rig out).
++func composerPromptCap(_ pageHeight: CGFloat) -> CGFloat {
++    max(composerPromptMinHeight, min(132, (pageHeight * 0.22).rounded()))
++}
++
++/// The stage and the Rig panel never get less than this (36% of the page, at least 180 pt): the prompt and the presets
++/// strip give way first, and the Rig scrolls inside.
++func composerMainMinHeight(_ pageHeight: CGFloat) -> CGFloat { max(180, (pageHeight * 0.36).rounded()) }
++
++/// The presets strip shows only on a page tall enough to keep the stage and the Rig at their minimum with the prompt at
++/// its cap; on a shorter page it hides first (Presets in the header still toggles it on a taller one).
++let composerPresetsMinPageHeight: CGFloat = 790
++
+ struct ComposerView: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+@@ -165,7 +180,7 @@ struct ComposerView: View {
+             // The redesign (plans/design/suite-redesign): "Video suite", the tabs, and this page's quiet tools.
+             SuitePageHeader { headerTools(width: width) }
+                 .layoutPriority(1)
+-            if presetsOpen && hasPresets {
++            if (presetsOpen || SnapshotRunner.state.overlay == "presets") && hasPresets && height >= composerPresetsMinPageHeight {
+                 PresetsRow()
+             }
+             if store.isNewSwap {
+@@ -195,13 +210,17 @@ struct ComposerView: View {
+                             }
+                             .frame(maxWidth: .infinity, alignment: .leading)
+                             .padding(Space.s4)
++                            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "composer rail content") } }
+                         }
+                         .frame(width: narrow ? 272 : 294)
+                         .frame(maxHeight: .infinity, alignment: .top)
+                         .suitePanel(t)
++                        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "composer rail") } }
+                     }
+                 }
+-                .frame(minHeight: 0, maxHeight: .infinity)
++                // The stage and the Rig keep their minimum: the prompt is capped and the presets strip hides first.
++                .frame(minHeight: composerMainMinHeight(height), maxHeight: .infinity)
++                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "composer main row") } }
+                 .zIndex(0)
+                 // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
+                 // full height; the row above takes what is left.
+@@ -210,8 +229,9 @@ struct ComposerView: View {
+                         .layoutPriority(1)
+                         .zIndex(1)
+                 }
+-                // The prompt grows with its text up to ~40% of the page's height, then scrolls (owner, 2026-11-11).
+-                ComposerPromptBar(promptMaxHeight: max(composerPromptMinHeight, (height * 0.4).rounded()))
++                // The prompt grows with its text up to five lines or 22% of the page, then scrolls; the expand button opens
++                // the full editor (owner bug 2026-11-14).
++                ComposerPromptBar(promptMaxHeight: composerPromptCap(height))
+                     .fixedSize(horizontal: false, vertical: true)
+                     .layoutPriority(1)
+                     .zIndex(1)
+-- 
+2.43.0
+
