@@ -83,10 +83,10 @@ struct ChatTranscriptState: Equatable {
     var emptyHint = ""
     /// The last turn ran without Blender's tools (its server didn't start): Retry Blender.
     var blenderFailed = false
-    /// uvx is fetching Blender's tools (the relay was just switched on).
-    var blenderWarming = false
     /// The chat is too full even for a fresh space (auto-compact tried once): New chat instead of Try again.
     var chatFull = false
+    /// uvx is fetching Blender's tools (the relay was just switched on).
+    var blenderWarming = false
 }
 
 struct ChatTranscriptView: View {
