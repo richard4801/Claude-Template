@@ -224,11 +224,26 @@ struct ComposerView: View {
     /// The page's own tools beside the tabs, all quiet: the preset's name, Add to storyboard, Engines (owner), the panel
     /// switch, Takes and Presets. Claude is the title bar's "Ask Claude".
     @ViewBuilder private func headerTools(width: CGFloat) -> some View {
+        // Words where they fit, icons when the row is tight (run 642: Soft Tactile at 1000 pt ran 40 pt past the window
+        // once "Add to storyboard" showed).
+        ViewThatFits(in: .horizontal) {
+            headerToolsRow(width: width, words: true)
+            headerToolsRow(width: width, words: false)
+        }
+    }
+
+    private func headerToolsRow(width: CGFloat, words: Bool) -> some View {
         let d = store.suite.composer
         let preset = d.collapsed.flatMap { id in store.suite.camera.presets.first { $0.id == id } }
         let photoPreset = d.tool == .photo ? store.photoPreset : nil // Photo tool (workstream 3)
-        HStack(spacing: Space.s2) {
-            if let name = preset?.label ?? photoPreset?.name {
+        let takesTitle = store.suite.feedOpen ? "Hide takes" : (d.tool == .photo ? "Photos" : "Takes")
+        let takesHelp = store.suite.feedOpen ? "Back to the picture" : "Everything you made with this tool, newest first"
+        let toggleTakes: () -> Void = {
+            store.suite.feedOpen.toggle()
+            if store.suite.feedOpen { store.suite.claude.open = false }
+        }
+        return HStack(spacing: Space.s2) {
+            if words, let name = preset?.label ?? photoPreset?.name {
                 Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1)
             }
             if store.isComingSoon(d.tool) { SuiteTag(text: SuiteText.comingSoon) }
@@ -244,15 +259,20 @@ struct ComposerView: View {
                 headerIcon("sidebar-simple", help: setupHidden ? "Show the Rig panel on the right" : "Hide the Rig panel (its rows move above the prompt)",
                            on: !setupHidden) { setupHidden.toggle() }
             }
-            headerText(store.suite.feedOpen ? "Hide takes" : (d.tool == .photo ? "Photos" : "Takes"),
-                       help: store.suite.feedOpen ? "Back to the picture" : "Everything you made with this tool, newest first") {
-                store.suite.feedOpen.toggle()
-                if store.suite.feedOpen { store.suite.claude.open = false }
+            if words {
+                headerText(takesTitle, help: takesHelp, toggleTakes)
+            } else {
+                headerIcon("stack", help: takesTitle, on: store.suite.feedOpen, toggleTakes)
             }
             if hasPresets {
-                headerText(presetsOpen ? "Hide presets" : "Presets", help: presetsOpen ? "Hide the presets" : "Start from a preset") { presetsOpen.toggle() }
+                if words {
+                    headerText(presetsOpen ? "Hide presets" : "Presets", help: presetsOpen ? "Hide the presets" : "Start from a preset") { presetsOpen.toggle() }
+                } else {
+                    headerIcon("faders", help: presetsOpen ? "Hide the presets" : "Presets: start from a preset", on: presetsOpen) { presetsOpen.toggle() }
+                }
             }
         }
+        .fixedSize()
     }
 
     private func headerIcon(_ icon: String, help: String, on: Bool = false, _ run: @escaping () -> Void) -> some View {
