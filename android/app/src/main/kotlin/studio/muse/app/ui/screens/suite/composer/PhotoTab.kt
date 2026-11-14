@@ -101,7 +101,7 @@ fun PhotoStage(ui: ComposerUi, modifier: Modifier, wide: Boolean) {
                 Spacer(Modifier.height(14.dp))
                 T(if (busy) "Making ${PhotoRules.noun(count)}…" else "Your photos appear here", m.scale.label.copy(fontWeight = FontWeight.SemiBold), m.roles.ink, maxLines = 1)
                 Spacer(Modifier.height(4.dp))
-                T(if (busy) "They land here when they're ready" else "1 to ${PhotoRules.MAX_COUNT} photos per run", m.scale.caption, m.roles.ink2, maxLines = 1)
+                T(if (busy) "They land here when they're ready" else if (ui.photo?.request != null) "${PhotoRules.noun(count)}, one run" else "1 to ${PhotoRules.MAX_COUNT} photos per run" /* the approved frames: empty, then filled */, m.scale.caption, m.roles.ink2, maxLines = 1)
             }
             return@Column
         }
