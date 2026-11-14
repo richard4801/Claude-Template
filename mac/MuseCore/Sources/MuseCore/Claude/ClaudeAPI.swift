@@ -79,6 +79,8 @@ public protocol ClaudeAPI: Sendable {
     func answerPermission(_ id: String, allow: Bool, message: String?) async throws
     /// upload_local_file: the person said yes and the Mac uploaded the file.
     func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws
+    /// What this Mac does with a question (the server tells Claude): its card is up, the upload's bytes so far, checking.
+    func permissionProgress(_ id: String, _ p: ClaudePermissionProgress) async throws
     /// Results arrive in the chat: this Mac answers it (false: another Mac of the person already does).
     func claimResult(_ id: String) async throws -> Bool
     /// Claude operating the MUSE window: calls waiting for this person; claim one (false: another Mac does it); answer it.
@@ -116,6 +118,7 @@ public extension ClaudeAPI {
     func pendingPermissions() async throws -> [ClaudePermissionAsk] { [] }
     func answerPermission(_ id: String, allow: Bool, message: String?) async throws { throw ApiError("not_found", "This server can't ask about files yet") }
     func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws { throw ApiError("not_found", "This server can't take uploads from Claude yet") }
+    func permissionProgress(_ id: String, _ p: ClaudePermissionProgress) async throws {}
     func claimResult(_ id: String) async throws -> Bool { true }
     func pendingUiCalls() async throws -> [UiCall] { [] }
     func claimUiCall(_ id: String, device: String) async throws -> Bool { false }
@@ -177,7 +180,9 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         }
         return r
     }
-    public static let capabilities = "files,results,ui"
+    /// `acks`: this app tells the server when a card is up (or an upload starts), so a question no card will ever show
+    /// for ends at once with why, instead of Claude Code waiting until it gives up (ci_1d271380f0de).
+    public static let capabilities = "files,results,ui,acks"
 
     private func send(_ r: URLRequest) async throws -> Data {
         let (data, resp): (Data, URLResponse?)
@@ -286,6 +291,13 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
     private struct UploadAnswer: Encodable { var allow = true; var result: ClaudeLocalUpload }
     public func finishUpload(_ id: String, _ result: ClaudeLocalUpload) async throws {
         _ = try await send(request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))", body: try encoder.encode(UploadAnswer(result: result))))
+    }
+    public func permissionProgress(_ id: String, _ p: ClaudePermissionProgress) async throws {
+        var r = request("POST", "v1/claude/permissions/\(try ClaudeIds.check(id))/progress", body: try encoder.encode(p))
+        r.timeoutInterval = 15
+        do { _ = try await send(r) } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
+            // An older server: no progress, the upload still finishes.
+        }
     }
     public func claimResult(_ id: String) async throws -> Bool {
         do {

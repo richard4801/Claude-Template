@@ -228,6 +228,9 @@ public final class LiveEventHub: @unchecked Sendable {
         r.timeoutInterval = 40
         r.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        // The stream reconnects within seconds of a server restart: saying what this app can do here lets Claude's file
+        // questions reach it at once, instead of "not connected" until the next Claude heartbeat (ci_1d271380f0de).
+        r.setValue(HTTPClaudeAPI.capabilities, forHTTPHeaderField: "X-Muse-Caps")
         return r
     }
 

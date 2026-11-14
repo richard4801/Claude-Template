@@ -329,7 +329,7 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         }
     }
 
-    enum UploadBody {
+    enum UploadBody: Sendable {
         case data(Data)
         case file(URL)
         var size: Int? {
@@ -374,12 +374,45 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     /// A video for a Claude chat message (plans/claude-video-vision.md): an upload of kind "clip", presigned, PUT and
     /// confirmed with its meta. → its upload id, marked as a video. Confirm also lists it among the studio's clips.
     public func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?) async throws -> ClaudeAttachment {
+        try await uploadClaudeVideo(file, meta: meta, contentType: contentType, progress: progress, onRetry: nil)
+    }
+
+    /// The same, for big files (upload_local_file, ci_5c0e35ee5488): the PUT is tried up to `ClaudeUploadRetry.maxAttempts`
+    /// times on the same link (a dropped or stalled connection; `onRetry` hears each new try), a failure says why, and
+    /// confirm (the server reads the whole file back to fingerprint it) gets `ClaudeUploadRetry.confirmTimeout`.
+    public func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?,
+                                  onRetry: (@Sendable (Int) -> Void)?) async throws -> ClaudeAttachment {
         let body = UploadBody.file(file)
-        guard let id = try await presignAndPut(kind: "clip", contentType: contentType, body: body, progress: progress) else {
-            throw ApiError("upload_failed", "Couldn't upload the video. Try again.")
-        }
-        let _: ClaudeVideoConfirmed = try await call("POST", "v1/uploads/\(Self.pathKey(id))/confirm", ConfirmBody(meta: meta))
-        return ClaudeAttachment(uploadId: id, mimeType: contentType, bytes: body.size, video: true)
+        let ticket: PresignedUpload = try await call("POST", "v1/uploads/presign", PresignBody(kind: "clip", contentType: contentType, bytes: body.size))
+        guard let target = resolve(ticket.url) else { throw ApiError("upload_failed", "Couldn't upload the video: the server gave no upload address.") }
+        var put = URLRequest(url: target)
+        put.httpMethod = ticket.method.isEmpty ? "PUT" : ticket.method
+        put.timeoutInterval = 600
+        for (k, v) in ticket.headers { put.setValue(v, forHTTPHeaderField: k) }
+        if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        let req = put
+        try await ClaudeUploadRetry.run(onRetry: onRetry) { try await self.putBytes(req, body: body, progress: progress) }
+        var confirm = request("POST", "v1/uploads/\(Self.pathKey(ticket.uploadId))/confirm", body: try encoder.encode(ConfirmBody(meta: meta)))
+        confirm.timeoutInterval = ClaudeUploadRetry.confirmTimeout
+        _ = try await send(confirm)
+        return ClaudeAttachment(uploadId: ticket.uploadId, mimeType: contentType, bytes: body.size, video: true)
+    }
+
+    /// A sound for upload_local_file: the editor upload, its PUT retried like a video's, with progress.
+    public func uploadClaudeAudio(_ file: URL, contentType: String, progress: UploadProgress?, onRetry: (@Sendable (Int) -> Void)?) async throws -> String {
+        let body = UploadBody.file(file)
+        let ticket: PresignedUpload = try await call("POST", "v1/editor/uploads/presign", EditorPresignBody(contentType: contentType, bytes: body.size, purpose: nil))
+        guard let target = resolve(ticket.url) else { throw ApiError("upload_failed", "Couldn't upload the sound: the server gave no upload address.") }
+        var put = URLRequest(url: target)
+        put.httpMethod = ticket.method.isEmpty ? "PUT" : ticket.method
+        put.timeoutInterval = 600
+        for (k, v) in ticket.headers { put.setValue(v, forHTTPHeaderField: k) }
+        if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        let req = put
+        try await ClaudeUploadRetry.run(onRetry: onRetry) { try await self.putBytes(req, body: body, progress: progress) }
+        return ticket.uploadId
     }
     /// Confirm's reply (a clip) is not needed here: any JSON object reads.
     private struct ClaudeVideoConfirmed: Decodable {}

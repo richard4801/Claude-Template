@@ -117,7 +117,10 @@ public struct ClaudeCommand: Hashable, Sendable {
         env["HOME"] = env["HOME"] ?? home
         env["MCP_TIMEOUT"] = env["MCP_TIMEOUT"] ?? mcpStartTimeoutMs
         // A MUSE tool call that waits on a person (an approval card) or on the Mac (render_camera_guides) sends nothing
-        // while it waits; Claude Code's 5-minute idle limit for HTTP MCP servers would cut it off. One hour, as the server's.
+        // while it waits. Claude Code (2.1) aborts an HTTP MCP call whose answer hasn't started after MCP_TOOL_TIMEOUT,
+        // 60 s when unset (raised to at most 5 min by the idle setting), with "The operation timed out." (ci_1d271380f0de:
+        // Bash and Read wait on permission_prompt, which waits on the card). Both are one hour, as the server's own wait.
+        env["MCP_TOOL_TIMEOUT"] = env["MCP_TOOL_TIMEOUT"] ?? mcpWaitTimeoutMs
         env["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"] = env["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"] ?? mcpWaitTimeoutMs
         return env
     }

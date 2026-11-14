@@ -4,12 +4,14 @@ import MuseCore
 
 // Claude in the Edit suite (workstream 3, plans/claude-editing.md A): for the studio owner, the editor shares its edit live
 // with Claude through the take's edit session (MuseCore EditSessionSync). Local changes are pushed (debounced 0.5 s), remote
-// ones (Claude's, the phone's) are shown at once with a "Claude edited this" toast, presence is announced every 30 s, and
+// ones (Claude's, the phone's) are shown at once with a "Claude edited this" toast, presence is announced every 15 s, and
 // Claude's requests are answered here: exact frames rendered with the same engine as the preview, Save to Gallery, the export
 // sheet with Claude's preset (the disclosure switches stay the owner's), and paid helpers wait for the owner's yes.
 // Members never get here: their editor stays local.
 extension EditSuiteSession {
-    static let presenceEvery: UInt64 = 30_000_000_000
+    /// The server counts an app as online for 45 s after it checks in: every 15 s, so one slow or failed check-in (a big
+    /// upload on the same connection) doesn't make Claude's get_frame fall back to "no app online" while the edit is open.
+    static let presenceEvery: UInt64 = 15_000_000_000
     static let pushAfter: UInt64 = 500_000_000
 
     /// "Studio MacBook Pro": how this Mac shows in the session's online list.
@@ -174,7 +176,8 @@ extension EditSuiteSession {
         case .pending(let p):
             if p.isWaiting { askPending = p } else if askPending?.id == p.id { askPending = nil }
         case .frameRequest(let rid, let t, let width):
-            await answerFrame(requestId: rid, t: t, width: width)
+            // Not on the event loop: loading a big clip for the frame mustn't hold up the edit's other events.
+            Task { await self.answerFrame(requestId: rid, t: t, width: width) }
         case .appRequest(let r):
             runAppRequest(r)
         case .closed:

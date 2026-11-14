@@ -339,3 +339,94 @@ public struct ClaudeLocalUpload: Codable, Hashable, Sendable {
         self.durationSec = durationSec
     }
 }
+
+/// What this Mac does with a question, for the server and so for Claude (`POST /v1/claude/permissions/:id/progress`):
+/// "asking" (its card is up), "uploading" (bytes so far of the total; try n), "confirming" (the server checks the file).
+public struct ClaudePermissionProgress: Codable, Hashable, Sendable {
+    public var phase: String
+    public var sentBytes: Int?
+    public var totalBytes: Int?
+    public var attempt: Int?
+    public init(phase: String, sentBytes: Int? = nil, totalBytes: Int? = nil, attempt: Int? = nil) {
+        self.phase = phase
+        self.sentBytes = sentBytes
+        self.totalBytes = totalBytes
+        self.attempt = attempt
+    }
+    public static let asking = ClaudePermissionProgress(phase: "asking")
+    public static let confirming = ClaudePermissionProgress(phase: "confirming")
+
+    /// At most every 2 s (or a 5% step) while uploading, so a big file doesn't send hundreds of requests.
+    public static func shouldSend(fraction: Double, lastFraction: Double, now: Double, lastAt: Double) -> Bool {
+        fraction >= 1 || fraction - lastFraction >= 0.05 || now - lastAt >= 2
+    }
+}
+
+/// upload_local_file on the Mac: turns the upload's progress into the few reports the server needs (throttled, in order):
+/// uploading n of total bytes (try k), then "confirming" once every byte is up.
+public final class ClaudeUploadReporter: @unchecked Sendable {
+    public let total: Int
+    private let send: @Sendable (ClaudePermissionProgress) async -> Void
+    private let now: @Sendable () -> Double
+    private let lock = NSLock()
+    private var lastFraction = -1.0
+    private var lastAt = 0.0
+    private var attempt = 1
+    private var confirming = false
+    private var chain: Task<Void, Never>?
+
+    public init(total: Int, now: @escaping @Sendable () -> Double = { Date().timeIntervalSince1970 },
+                send: @escaping @Sendable (ClaudePermissionProgress) async -> Void) {
+        self.total = total
+        self.now = now
+        self.send = send
+    }
+
+    /// The upload began (the person said yes, or the folder is always allowed).
+    public func started() async {
+        await send(ClaudePermissionProgress(phase: "uploading", sentBytes: 0, totalBytes: total, attempt: 1))
+    }
+
+    /// For the uploader's progress callback (0…1).
+    public var progress: UploadProgress { { [self] f in self.on(f) } }
+    /// For the uploader's retry callback (try n is starting).
+    public var retry: @Sendable (Int) -> Void { { [self] n in self.onRetry(n) } }
+
+    func on(_ f: Double) {
+        lock.lock()
+        var out: ClaudePermissionProgress?
+        let t = now()
+        if f >= 1 {
+            if !confirming { confirming = true; out = .confirming }
+        } else if !confirming, ClaudePermissionProgress.shouldSend(fraction: f, lastFraction: lastFraction, now: t, lastAt: lastAt) {
+            lastFraction = f
+            lastAt = t
+            out = ClaudePermissionProgress(phase: "uploading", sentBytes: Int((Double(total) * max(0, f)).rounded()), totalBytes: total, attempt: attempt)
+        }
+        lock.unlock()
+        if let out { enqueue(out) }
+    }
+
+    func onRetry(_ n: Int) {
+        lock.lock()
+        attempt = n
+        lastFraction = -1
+        lastAt = now()
+        confirming = false
+        lock.unlock()
+        enqueue(ClaudePermissionProgress(phase: "uploading", sentBytes: 0, totalBytes: total, attempt: n))
+    }
+
+    /// Reports go out one after another, so "confirming" never lands before the last byte count.
+    private func enqueue(_ p: ClaudePermissionProgress) {
+        lock.lock()
+        let prev = chain
+        let send = self.send
+        let next = Task { _ = await prev?.value; await send(p) }
+        chain = next
+        lock.unlock()
+    }
+
+    /// Waits for every report sent so far (tests).
+    public func flushed() async { let c = lock.withLock { chain }; _ = await c?.value }
+}

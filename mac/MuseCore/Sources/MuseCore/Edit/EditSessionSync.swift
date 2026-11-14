@@ -254,7 +254,7 @@ public final class EditSessionSync {
     /// Claude's changes, newest first (for the Claude panel).
     public var claudeEntries: [EditHistoryEntry] { history.filter(\.byClaude) }
 
-    /// "I have the edit open" (every 30 s): Claude's frames and save/export come to this app.
+    /// "I have the edit open" (every 15 s): Claude's frames and save/export come to this app.
     public func announce(label: String, platform: String = "mac", canRender: Bool = true, preview: EditPreview? = nil) async throws {
         try await api.announceEditPresence(sessionId: sessionId, EditPresence(device: device, label: label, platform: platform, canRender: canRender,
                                                                               preview: preview))
