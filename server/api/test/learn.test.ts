@@ -197,8 +197,12 @@ describe('learning editor · API', () => {
     const list = (await owner.req('GET', '/v1/learn/playbook')).body;
     expect(list.map((r: any) => r.id)).toEqual([r2.id, r1.id]); // pinned first
     expect((await owner.req('GET', '/v1/learn/playbook?area=captions')).body.map((r: any) => r.id)).toEqual([r1.id]);
-    for (const bad of [{ text: '' }, { text: 'x'.repeat(301) }, { text: 'ok', area: 'colour' }, { text: 'ok', evidence: [{ kind: 'gossip' }] }])
+    for (const bad of [{ text: '' }, { text: 'x'.repeat(301) }, { text: 'ok', area: 42 }, { text: 'ok', evidence: [{ kind: 'gossip' }] }])
       expect((await owner.req('POST', '/v1/learn/playbook', bad)).status).toBe(400);
+    // A near word is filed where it belongs (ci_df48bab446d1), not refused.
+    const colour = (await owner.req('POST', '/v1/learn/playbook', { text: 'Warm colour on talking shots', area: 'colour' })).body;
+    expect(colour.area).toBe('look');
+    expect((await owner.req('DELETE', `/v1/learn/playbook/${colour.id}`)).status).toBe(204);
     expect((await owner.req('PATCH', `/v1/learn/playbook/${r1.id}`, { pinned: 'yes' })).status).toBe(400);
     expect((await owner.req('DELETE', `/v1/learn/playbook/${r1.id}`)).status).toBe(204);
     expect((await owner.req('DELETE', `/v1/learn/playbook/${r1.id}`)).status).toBe(404);
