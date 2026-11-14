@@ -612,6 +612,14 @@ describe.skipIf(!hasFfmpeg)('Recreate · the flow through the API and Claude\'s 
   it('the playbook tools call the learning editor: read, add a rule (unpinned), report a gap; owner only', async () => {
     const add = await tool('playbook_add').run(env(), { text: 'Captions sit above the lower third on talking shots', area: 'text', evidence: [{ kind: 'note', note: 'Tuff edit' }] }) as any;
     expect(add).toMatchObject({ text: 'Captions sit above the lower third on talking shots', pinned: false });
+    // ci_df48bab446d1: near words and plurals are filed where they belong; an unknown word goes to "other", kept with the rule.
+    for (const [given, area] of [['effects', 'look'], ['Transitions', 'transition'], ['typography', 'text'], ['fonts', 'text'], ['Music', 'audio'],
+      ['colour', 'look'], ['cuts', 'pacing'], ['edit', 'pacing'], ['Captions', 'captions'], ['color-grading', 'look']] as const) {
+      expect((await tool('playbook_add').run(env(), { text: `Rule about ${given}`, area: given }) as any).area).toBe(area);
+    }
+    const odd = await tool('playbook_add').run(env(), { text: 'Keep the brand logo in the corner', area: 'branding' }) as any;
+    expect(odd.area).toBe('other');
+    expect(JSON.stringify(odd)).toContain('Area given: branding');
     await tool('report_gap').run(env(), { key: 'effect:lens-flare', kind: 'effect', what: 'Lens flare', note: 'Tuff edit, s2' });
     const ctx = await tool('playbook_read').run(env(), { referenceId: refId }) as any;
     expect(ctx.playbook.map((r: any) => r.text)).toContain('Captions sit above the lower third on talking shots');

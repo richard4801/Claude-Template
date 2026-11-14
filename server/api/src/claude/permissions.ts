@@ -69,7 +69,7 @@ export function uploadView(st: UploadState, macReportsProgress: boolean): Record
   if (st.phase === 'done' && st.result) return { status: 'done', ...st.result };
   if (st.phase === 'failed') return { status: 'failed', error: st.error ?? 'The upload failed.' };
   const base = { status: st.phase === 'sent' || st.phase === 'asking' ? 'waiting_for_approval' : st.phase, uploadTicket: st.ticket,
-    next: `Call upload_status {"uploadTicket":"${st.ticket}"} to wait for it (each call waits up to ${UPLOAD_ANSWER_MS / 1000} s).` };
+    next: `Call upload_status {"uploadTicket":"${st.ticket}"} (or upload_local_file with the same uploadTicket) to wait for it; each call waits up to ${UPLOAD_ANSWER_MS / 1000} s.` };
   switch (st.phase) {
     case 'sent': return { ...base, message: macReportsProgress
       ? `Sent to MUSE on the Mac; it hasn't shown the "Upload ${name} to MUSE?" card yet.`
@@ -156,6 +156,9 @@ export class PermissionHub {
    */
   async upload(u: AuthUser, path: string, purpose: string): Promise<Record<string, unknown>> {
     if (isSecretPath(path)) return { status: 'failed', error: CREDENTIAL_REFUSAL };
+    // The same file asked for again while it is still on its way (Claude retrying): follow that upload, no second card.
+    const inFlight = [...this.uploads.values()].find(x => x.userId === u.id && x.path === path && x.phase !== 'done' && x.phase !== 'failed');
+    if (inFlight) return this.uploadStatus(u, inFlight.ticket);
     const notReady = await this.macReady(u.id);
     if (notReady) return { status: 'failed', error: notReady };
     const now = Date.now();
@@ -260,12 +263,17 @@ export const PERMISSION_TOOL = {
 /** upload_local_file (owner and members): a file on the person's Mac, uploaded after they say yes. */
 export const UPLOAD_TOOL = {
   name: 'upload_local_file', scope: 'assets:write', title: 'Upload a file from this Mac (asks first)',
-  description: 'Uploads a file from the person\'s Mac to MUSE after they approve it on a card ("Upload … to MUSE?"). Images (JPEG, PNG, WebP, HEIC, up to 10 MB), videos (MP4, MOV, up to 500 MB) and sound (MP3, M4A, AAC, WAV, or an MP4 with sound only, up to 200 MB; the Mac reads the file to tell). Answers within 40 s: {status: "done", uploadId, kind: "image" | "clip" | "audio", url, durationSec?}, {status: "failed", error}, or, while the person hasn\'t approved yet or a big file is still going up, {status: "waiting_for_approval" | "uploading" | "confirming", uploadTicket, percent?, message}: then call upload_status {uploadTicket} (each call waits up to 40 s) until it is done or failed, and tell the person what the message says. Then use the uploadId: suite_add_reference for an image in the shot, watch for a video; for a sound, apply_edit_ops {"op":"add_music","asset":{"upload":uploadId,"durationSec":durationSec}}, then auto_captions with that item\'s itemId to caption a song. Keys, passwords and tokens are never uploaded. Use it when the person names a file on their Mac; the path must be absolute or start with ~/.',
+  description: 'Uploads a file from the person\'s Mac to MUSE after they approve it on a card ("Upload … to MUSE?"). Images (JPEG, PNG, WebP, HEIC, up to 10 MB), videos (MP4, MOV, up to 500 MB) and sound (MP3, M4A, AAC, WAV, or an MP4 with sound only, up to 200 MB; the Mac reads the file to tell). Answers within 40 s: {status: "done", uploadId, kind: "image" | "clip" | "audio", url, durationSec?}, {status: "failed", error}, or, while the person hasn\'t approved yet or a big file is still going up, {status: "waiting_for_approval" | "uploading" | "confirming", uploadTicket, percent?, message}: then call upload_status {uploadTicket} (or this tool again with {uploadTicket}; each call waits up to 40 s) until it is done or failed, and tell the person what the message says. Then use the uploadId: suite_add_reference for an image in the shot, watch for a video; for a sound, apply_edit_ops {"op":"add_music","asset":{"upload":uploadId,"durationSec":durationSec}}, then auto_captions with that item\'s itemId to caption a song. Keys, passwords and tokens are never uploaded. Use it when the person names a file on their Mac; the path must be absolute or start with ~/.',
   inputSchema: { type: 'object', properties: { path: { type: 'string', maxLength: 1024, description: 'The file on the Mac (absolute, or ~/…)' },
-    purpose: { type: 'string', enum: ['reference', 'clip', 'audio', 'chat'], description: 'What it is for (default chat)' } }, required: ['path'], additionalProperties: false },
+    purpose: { type: 'string', enum: ['reference', 'clip', 'audio', 'chat'], description: 'What it is for (default chat)' },
+    uploadTicket: { type: 'string', maxLength: 120, description: 'To follow an upload already asked for (same as upload_status)' } }, additionalProperties: false },
   run: async (env: { ctx: Ctx; user: AuthUser }, a: Record<string, unknown>) => {
+    // Works like upload_status when given a ticket: a Claude Code turn that started before upload_status existed (its
+    // tool list is fixed at launch) can still follow the upload (ci_0d51716eb13a).
+    const ticket = typeof a.uploadTicket === 'string' ? a.uploadTicket.trim() : '';
+    if (ticket) return { mcpContent: [{ type: 'text', text: JSON.stringify(await permissionsOf(env.ctx).uploadStatus(env.user, ticket)) }] };
     const path = typeof a.path === 'string' ? a.path.trim() : '';
-    if (!path || !(path.startsWith('/') || path.startsWith('~/')) || path.length > 1024) throw badRequest('path: an absolute path on the Mac, or ~/…');
+    if (!path || !(path.startsWith('/') || path.startsWith('~/')) || path.length > 1024) throw badRequest('path: an absolute path on the Mac, or ~/… (or uploadTicket to follow an upload already asked for)');
     const purpose = a.purpose === 'reference' || a.purpose === 'clip' || a.purpose === 'audio' ? a.purpose : 'chat';
     const out = await permissionsOf(env.ctx).upload(env.user, path, purpose);
     return { mcpContent: [{ type: 'text', text: JSON.stringify(out) }] };

@@ -306,6 +306,12 @@ describe('upload_local_file (a Mac file into MUSE, after the person says yes)', 
       expect(text(await status(ask.id))).toMatchObject({ status: 'uploading', percent: 50, sentMB: 56, totalMB: 112, attempt: 2, message: expect.stringMatching(/50% \(56 of 112 MB\) \(try 2\)/) });
       await owner.req('POST', `/v1/claude/permissions/${ask.id}/progress`, { phase: 'confirming' });
       expect(text(await status(ask.id))).toMatchObject({ status: 'confirming' });
+      // A Claude Code turn without upload_status (its tool list predates it, ci_0d51716eb13a): upload_local_file follows
+      // the ticket; the same path asked again follows the upload in flight (no second card).
+      expect(text(await rpc('tools/call', { name: 'upload_local_file', arguments: { uploadTicket: ask.id } }))).toMatchObject({ status: 'confirming', uploadTicket: ask.id });
+      expect(text(await rpc('tools/call', { name: 'upload_local_file', arguments: { path: '/Users/me/Edit/lyrics_prores.mov', purpose: 'clip' } }))).toMatchObject({ status: 'confirming', uploadTicket: ask.id });
+      expect((await owner.req('GET', '/v1/claude/permissions')).body.asks).toHaveLength(1);
+      expect(first.next).toMatch(/or upload_local_file with the same uploadTicket/);
       // upload_status waiting when it lands: answers with the upload at once.
       hub.uploadAnswerMs = 5_000;
       const waiting = status(ask.id);

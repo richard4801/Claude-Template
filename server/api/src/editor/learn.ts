@@ -29,6 +29,32 @@ export const AREAS = ['captions', 'text', 'transition', 'look', 'motion', 'speed
 export const MEMORY_AREAS = ['figure', 'style', 'models', 'rejected'] as const;
 export type Area = (typeof AREAS)[number];
 
+const AREA_SYNONYMS: Record<string, string> = {
+  caption: 'captions', subtitle: 'captions', subtitles: 'captions', subs: 'captions',
+  font: 'text', fonts: 'text', typography: 'text', type: 'text', title: 'text', titles: 'text', overlay: 'text', overlays: 'text',
+  transitions: 'transition', effect: 'look', effects: 'look', fx: 'look', vfx: 'look', color: 'look', colour: 'look', colors: 'look', colours: 'look',
+  grade: 'look', grading: 'look', 'color grading': 'look', 'colour grading': 'look', filter: 'look', filters: 'look', lut: 'look', luts: 'look', style: 'style',
+  music: 'audio', sound: 'audio', sounds: 'audio', sfx: 'audio', voice: 'audio', song: 'audio', songs: 'audio',
+  edit: 'pacing', edits: 'pacing', editing: 'pacing', cut: 'pacing', cuts: 'pacing', cutting: 'pacing', rhythm: 'pacing', pace: 'pacing', structure: 'pacing',
+  beat: 'timing', beats: 'timing', sync: 'timing', 'beat sync': 'timing', duration: 'timing', length: 'timing',
+  camera: 'motion', movement: 'motion', zoom: 'motion', zooms: 'motion', animation: 'motion', keyframes: 'motion',
+  speeds: 'speed', 'slow motion': 'speed', slowmo: 'speed', ramp: 'speed', ramps: 'speed',
+  aspect: 'ratio', 'aspect ratio': 'ratio', format: 'ratio', crop: 'ratio', framing: 'ratio',
+  model: 'models', body: 'figure', reject: 'rejected',
+};
+/** An area as given (any case, plural, a near word) → one MUSE files under; an unknown word → "other", with `given` kept. */
+export function normalizeArea(raw: string): { area: string; given?: string } {
+  const known: readonly string[] = [...MEMORY_AREAS, ...AREAS];
+  const w = raw.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  if (!w) return { area: 'other' };
+  if (known.includes(w)) return { area: w };
+  if (AREA_SYNONYMS[w]) return { area: AREA_SYNONYMS[w]! };
+  const single = w.endsWith('ies') ? w.slice(0, -3) + 'y' : w.endsWith('es') && known.includes(w.slice(0, -2)) ? w.slice(0, -2) : w.endsWith('s') ? w.slice(0, -1) : w;
+  if (known.includes(single)) return { area: single };
+  if (AREA_SYNONYMS[single]) return { area: AREA_SYNONYMS[single]! };
+  return { area: 'other', given: raw.trim().slice(0, 40) };
+}
+
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 const owner = (u: AuthUser) => { if (u.role !== 'owner') throw new ApiError(403, 'owner_only', 'The editing playbook and library are for the studio owner'); };
 
@@ -499,10 +525,12 @@ export class Learning {
       if (b.text.length > LEARN_LIMITS.ruleChars) throw badRequest(`text: at most ${LEARN_LIMITS.ruleChars} characters`);
       out.text = b.text.trim();
     }
+    let unknownArea: string | undefined;
     if (b.area !== undefined) {
-      const areas: readonly string[] = [...MEMORY_AREAS, ...AREAS];
-      if (typeof b.area !== 'string' || !areas.includes(b.area)) throw badRequest(`area: one of ${areas.join(', ')}`);
-      out.area = b.area;
+      if (typeof b.area !== 'string') throw badRequest(`area: one of ${[...MEMORY_AREAS, ...AREAS].join(', ')}`);
+      const n = normalizeArea(b.area);
+      out.area = n.area;
+      unknownArea = n.given;
     }
     if (b.evidence !== undefined) {
       if (!Array.isArray(b.evidence) || b.evidence.length > 50) throw badRequest('evidence: up to 50 items');
@@ -511,6 +539,8 @@ export class Learning {
         return { kind: String(e.kind), ...(typeof e.id === 'string' || typeof e.id === 'number' ? { id: e.id } : {}), note: String(e.note ?? '').slice(0, 300), at: Date.now() };
       });
     }
+    // An area MUSE has no name for is filed under "other", its own word kept with the rule (ci_df48bab446d1).
+    if (unknownArea) out.evidence = [...(out.evidence ?? []).slice(0, 49), { kind: 'note', note: `Area given: ${unknownArea}`, at: Date.now() }];
     return out;
   }
   async addRule(u: AuthUser, b: { text?: unknown; area?: unknown; evidence?: unknown; pinned?: unknown }, source: 'owner' | 'claude' | 'learned' = 'owner') {
