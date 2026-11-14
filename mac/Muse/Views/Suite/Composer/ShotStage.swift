@@ -39,6 +39,10 @@ struct ShotStageTake: View {
                            onStep: list.count > 1 ? { step($0, count: list.count) } : nil, sharedPlayback: playback)
                     .id(take.id)
                     .frame(maxHeight: .infinity)
+                if !take.isVideo && list.count > 1 {
+                    // The Photo tab (owner 2026-11-14): every photo of the run as a strip, the shown one marked.
+                    StagePhotoStrip(takes: list, at: at) { i in page = ((i - start) % list.count + list.count) % list.count }
+                }
                 if take.isVideo {
                     StageTimeline(playback: playback, video: take.videoUrl.flatMap(URL.init(string:)), poster: take.thumb,
                                   length: take.durationSec)
@@ -62,12 +66,12 @@ struct ShotStageTake: View {
 
     private func header(_ take: Take, at: Int, count: Int) -> some View {
         let actions = TakeViewerActions.list(.suite, isVideo: take.isVideo, canRedo: true, canExtend: ExtendSource.take(take) != nil,
-                                             canUpscale: take.canUpscale)
+                                             canUpscale: take.canUpscale, canUseInShot: job.isPhoto)
         return HStack(alignment: .center, spacing: Space.s4) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(job.title).font(t.body(15, .semibold)).foregroundStyle(t.roles.ink).lineLimit(1)
                 HStack(spacing: 10) {
-                    ForEach(Self.meta(take, at: at, count: count), id: \.self) { Text($0) }
+                    ForEach(Self.meta(take, at: at, count: count, noun: job.isPhoto ? "Photo" : "Take"), id: \.self) { Text($0) }
                 }
                 .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
             }
@@ -85,9 +89,9 @@ struct ShotStageTake: View {
     }
 
     /// "Take 2 of 4", "8 s", "9:16", "1080p": the take's own values (its real length, never the request's).
-    static func meta(_ take: Take, at: Int, count: Int) -> [String] {
+    static func meta(_ take: Take, at: Int, count: Int, noun: String = "Take") -> [String] {
         var out: [String] = []
-        if count > 1 { out.append("Take \(at + 1) of \(count)") }
+        if count > 1 { out.append("\(noun) \(at + 1) of \(count)") }
         if let s = take.durationSec, s > 0 { out.append(s < 10 && s.rounded() != s ? String(format: "%.1f s", s) : "\(Int(s.rounded())) s") }
         if let w = take.width, let h = take.height, w > 0, h > 0 {
             if let shape = shape(w, h) { out.append(shape) }
@@ -102,6 +106,35 @@ struct ShotStageTake: View {
         let shapes: [(String, Double)] = [("9:16", 0.5625), ("16:9", 1.7778), ("1:1", 1.0), ("4:5", 0.8), ("3:4", 0.75), ("2:3", 0.6667), ("21:9", 2.3333)]
         for (label, v) in shapes where abs(r - v) < 0.02 { return label }
         return nil
+    }
+}
+
+/// The Photo tab's run under the photo: each still small, the shown one outlined, "2 of 4". Clicking one shows it.
+struct StagePhotoStrip: View {
+    @Environment(\.theme) private var t
+    var takes: [Take]
+    var at: Int
+    var pick: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: Space.s2) {
+            ForEach(Array(takes.enumerated()), id: \.element.id) { i, take in
+                let on = i == at
+                Button { pick(i) } label: {
+                    MuseImage(ref: take.thumb).frame(width: 40, height: 50).clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
+                        .overlay(RoundedRectangle(cornerRadius: t.radii.chip + 2).strokeBorder(on ? t.roles.ink : .clear, lineWidth: 2).padding(-3))
+                        .opacity(on ? 1 : 0.7)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Photo \(i + 1) of \(takes.count)\(on ? ", shown" : "")")
+            }
+            Text("\(at + 1) of \(takes.count)").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                .padding(.leading, Space.s2).fixedSize()
+        }
+        .padding(.top, 3)
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage photo strip") } }
     }
 }
 

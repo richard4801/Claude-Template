@@ -7,7 +7,8 @@ import MuseCore
 //   photo_queue_live  that job is in the Queue's active list while it runs
 //   photo_carousel    the four stills land on the stage as a carousel (four dots)
 //   photo_return      leaving the page and coming back shows the same result
-//   photo_restart     with the session's memory gone (a restart), the stage still finds it
+//   photo_restart     with the session's memory gone (a restart), the Photo stage starts empty (owner 2026-11-14: never an
+//                     old result on the stage; the run stays in the Queue and the Library)
 //   photo_queue_row   the Queue draws its row
 //   shot_*            the same for a video mode (Shot): generating, back after leaving, its Queue row
 extension SnapshotRunner {
@@ -63,12 +64,14 @@ extension SnapshotRunner {
         let back = await until(5) { carousel(4) }
         line(back && store.stageJob(.photo)?.id == pj?.id, "photo_return", "carousel \(back) · stage job \(store.stageJob(.photo)?.id ?? "none")")
 
-        // A restart: the session's memory is gone; the stage finds the job from what was kept.
-        let session = store.suite.stageJobs
+        // A restart: the session's memory is gone; the Photo stage starts empty (the Photo tab, owner 2026-11-14).
+        let session = store.suite.stageJobs, photoRuns = store.suite.photoSessionJobs
         store.suite.stageJobs = [:]
+        store.suite.photoSessionJobs = []
         let found = store.stageJob(.photo)?.id
         store.suite.stageJobs = session
-        line(found != nil && found == pj?.id, "photo_restart", "found \(found ?? "none")")
+        store.suite.photoSessionJobs = photoRuns
+        line(found == nil, "photo_restart", "empty after a restart \(found == nil) · found \(found ?? "none")")
 
         if let id = pj?.id {
             store.go(.queue)

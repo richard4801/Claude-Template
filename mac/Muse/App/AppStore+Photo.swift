@@ -65,6 +65,8 @@ extension AppStore {
             suite.photoEstimate = e
             suite.photoError = nil
             suite.rig = e.rig
+            if !e.aspects.isEmpty { suite.photoAspectsSeen = e.aspects }
+            suite.photoModelSeen = e.model?.name
         } catch let e as ApiError {
             guard !Task.isCancelled else { return }
             suite.photoEstimate = nil
@@ -99,6 +101,7 @@ extension AppStore {
             // WS19: the run is a job: the stage and the Queue follow it, and the stills land on the stage (and the Library).
             let j = try await api.suiteStartPhotos(req)
             upsert(j)
+            suite.photoSessionJobs.insert(j.id) // the Photo stage shows this session's runs only
             rememberStage(j.id, tool: .photo)
             balance = try await api.balance()
             showToast("Making \(PhotoEstimate.photos(max(1, j.request.takes))) · \(Pricing.money(j.cost))", action: "Open queue") { [weak self] in self?.go(.queue) }

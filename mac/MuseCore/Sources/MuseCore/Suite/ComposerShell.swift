@@ -119,7 +119,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
         case .talking: return "What does she say? · type @ for your characters"
         case .ugc: return "Describe the ad · type @ for your characters, # for a camera move"
         case .swap: return "Anything to change? · type # for a camera move"
-        case .photo: return "Describe the scene and what she does · type @ for your characters"
+        case .photo: return "Describe the photo: the place, the pose, the mood · type @ for a model" // owner 2026-11-14: no "she"
         default: return "Describe the scene · type @ for your characters, # for a camera move"
         }
     }

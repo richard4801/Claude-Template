@@ -152,7 +152,7 @@ struct ComposerView: View {
     private var hasPresets: Bool {
         switch store.suite.composer.tool {
         case .shot: return !store.suite.camera.presets.isEmpty
-        case .photo: return true
+        case .photo: return false // the Photo tab (owner 2026-11-14): presets are the bar's Preset chip, never a whole row
         default: return false
         }
     }
@@ -166,11 +166,7 @@ struct ComposerView: View {
             SuitePageHeader { headerTools(width: width) }
                 .layoutPriority(1)
             if presetsOpen && hasPresets {
-                if store.suite.composer.tool == .photo {
-                    PhotoPresetsRow() // Photo tool (workstream 3): the photo templates
-                } else {
-                    PresetsRow()
-                }
+                PresetsRow()
             }
             if store.isNewSwap {
                 // New Swap's own screen (plans/swap-viewer-design.md §A; redesign frames "New Swap"): the clip and its
@@ -190,9 +186,15 @@ struct ComposerView: View {
                     }
                     if !strip {
                         ScrollView(.vertical, showsIndicators: false) {
-                            ComposerRail(narrow: narrow)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(Space.s4)
+                            Group {
+                                if store.suite.composer.tool == .photo {
+                                    PhotoRail() // the Photo tab (owner 2026-11-14): Inputs, then the Rig for a still
+                                } else {
+                                    ComposerRail(narrow: narrow)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Space.s4)
                         }
                         .frame(width: narrow ? 272 : 294)
                         .frame(maxHeight: .infinity, alignment: .top)
@@ -407,7 +409,8 @@ struct ComposerMediaPane: View {
 
     /// "16:9" → 16/9; anything unreadable is 16:9.
     private var aspectRatio: CGFloat {
-        let parts = store.suite.composer.aspect.split(separator: ":").compactMap { Double($0) }
+        let shape = tool == .photo ? store.suite.photo.shownAspect : store.suite.composer.aspect // Photo: the Size pill's shape
+        let parts = shape.split(separator: ":").compactMap { Double($0) }
         guard parts.count == 2, parts[0] > 0, parts[1] > 0 else { return 16.0 / 9.0 }
         return CGFloat(parts[0] / parts[1])
     }
@@ -432,7 +435,8 @@ struct ComposerMediaPane: View {
     private var tag: String? {
         let d = store.suite.composer
         switch tool {
-        case .photo, .swap, .recast: return nil
+        case .photo: return "\(store.suite.photo.shownAspect) · \(PhotoEstimate.photos(store.suite.photo.count))"
+        case .swap, .recast: return nil
         case .extend: return "+\(d.duration) s"
         default: return "\(d.aspect) · \(d.duration) s"
         }
@@ -441,7 +445,8 @@ struct ComposerMediaPane: View {
     private var tagLabel: String? {
         let d = store.suite.composer
         switch tool {
-        case .photo, .swap, .recast: return nil
+        case .photo: return "Shape \(store.suite.photo.shownAspect), \(PhotoEstimate.photos(store.suite.photo.count))"
+        case .swap, .recast: return nil
         case .extend: return "Adds \(d.duration) seconds"
         default: return "Shape \(d.aspect), \(d.duration) seconds"
         }
@@ -916,7 +921,7 @@ struct ComposerPromptBar: View {
         case .swap, .recast:
             if store.clip == nil { return "Choose a clip first" }
             return store.suite.swapEstimate?.problem ?? store.suite.swapError
-        case .photo: return store.suite.photoError // Photo tool (workstream 3)
+        case .photo: return nil // the Photo tab: why Generate can't go sits beside it (ComposerBottomBar)
         default: return store.suite.estimate?.problem ?? store.suite.estimateError
         }
     }

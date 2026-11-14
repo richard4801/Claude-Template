@@ -402,6 +402,7 @@ struct ViewerActionButton: View {
         case .extend: return "arrow-line-right"
         case .upscale: return "arrows-out-simple"
         case .split: return "scissors"
+        case .useInShot: return "video-camera"
         case .share: return "export"
         }
     }
@@ -449,6 +450,7 @@ private struct ViewerActionRunner {
         case .extend: store.openExtend(take)
         case .upscale: break // the Upscale button opens its own picker
         case .split: store.openEdit(takeId: take.id, at: time()) // owner 2026-11-12: Edit at this moment
+        case .useInShot: store.useAsStartFrame(take) // Photo tab (owner 2026-11-14): the still opens Shot as its start frame
         case .share: store.openPostSheet(take)
         }
     }
