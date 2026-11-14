@@ -183,6 +183,8 @@ interface MuseService {
     @POST("v1/suite/shots/estimate") suspend fun suiteEstimate(@Body r: SuiteShotRequest): SuiteEstimate
     @POST("v1/suite/rig-check") suspend fun suiteRigCheck(@Body r: SuiteShotRequest): SuiteRigCheck
     @POST("v1/suite/shots") suspend fun createSuiteShot(@Body r: SuiteShotRequest): Job
+    @POST("v1/suite/remix/models") suspend fun suiteRemixModels(@Body r: RemixModelsRequest): kotlinx.serialization.json.JsonElement
+    @POST("v1/clips/from-take") suspend fun clipFromTake(@Body r: ClipFromTakeRequest): Clip
     @GET("v1/suite/shots/{id}") suspend fun suiteShot(@Path("id") id: String): SuiteShot
     @POST("v1/suite/camera/compile") suspend fun suiteCompile(@Body r: SuiteCompileRequest): SuiteCompiled
     @GET("v1/suite/settings") suspend fun suiteSettings(): SuiteSettings
@@ -757,6 +759,9 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     private fun ids(takeIds: List<String>) = buildJsonObject { put("takeIds", kotlinx.serialization.json.JsonArray(takeIds.map { kotlinx.serialization.json.JsonPrimitive(it) })) }
     override suspend fun queueSuiteShot(req: SuiteShotRequest) = call { queueSuiteShot(req) }
     override suspend fun suiteQueue() = call { suiteQueue() }
+    // New Swap (Remix.kt): a bad model row is left out alone (RemixModels.parse), never the whole list.
+    override suspend fun suiteRemixModels(req: RemixModelsRequest) = RemixModels.parse(call { suiteRemixModels(req) })
+    override suspend fun clipFromTake(takeId: String) = call { clipFromTake(ClipFromTakeRequest(takeId)) }.let { it.copy(thumb = it.thumb?.abs()) }
     override suspend fun estimateQueuedShot(id: String) = call { estimateQueuedShot(id, buildJsonObject { }) }
     override suspend fun runQueuedShot(id: String) = call { runQueuedShot(id, buildJsonObject { put("confirm", kotlinx.serialization.json.JsonPrimitive(true)) }) }
     override suspend fun deleteQueuedShot(id: String) { call { deleteQueuedShot(id) } }

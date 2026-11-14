@@ -41,6 +41,8 @@ class SuiteStore(private val c: AppContainer) {
     val photo = studio.muse.app.ui.screens.suite.composer.PhotoStore(c)
     /** The clip and people of Character swap and Recast (the composer's quality and takes are used). */
     val recast = MutableStateFlow(RecastDraft())
+    /** New Swap (NewSwapState.kt): the Swap tab's second variant, owner-approved 2026-11-14. */
+    val newSwap = NewSwapState(c, this)
     val board = MutableStateFlow<Storyboard?>(null)
     /** The request of each composer render (by job id), for Retake on the result. */
     val requests = MutableStateFlow<Map<String, SuiteShotRequest>>(emptyMap())

@@ -391,6 +391,9 @@ interface MuseApi {
     /** Queue a shot to run later: checked and priced, nothing held. [req] is the body of POST /v1/suite/shots. */
     suspend fun queueSuiteShot(req: SuiteShotRequest): QueuedShot = throw ApiException("not_found", "This server can't queue shots yet")
     suspend fun suiteQueue(): List<QueuedShot> = emptyList()
+    // New Swap (Remix.kt): the model list for these toggles and this clip, and a Library take as the source clip.
+    suspend fun suiteRemixModels(req: RemixModelsRequest): RemixModels = throw ApiException("unavailable", "The model list needs the MUSE server")
+    suspend fun clipFromTake(takeId: String): Clip = throw ApiException("unavailable", "Picking from the Library needs the MUSE server")
     /** Today's price for a queued shot (shown, then confirmed). */
     suspend fun estimateQueuedShot(id: String): QueuedEstimate = throw ApiException("not_found", "This server can't queue shots yet")
     /** Runs it, as POST /v1/suite/shots would (held and charged); the caller confirmed the price. */

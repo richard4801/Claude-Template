@@ -1654,6 +1654,13 @@ class FakeMuseApi(
     }
     private val queuedReqs = HashMap<String, SuiteShotRequest>()
     override suspend fun suiteQueue() = lock.withLock { queue.toList() }
+    override suspend fun suiteRemixModels(req: RemixModelsRequest) = lock.withLock { suiteOn(); suite.remixModels(req, suiteClipSeconds(req.clipId)) }
+    /** A Library take as New Swap's clip (demo: the sample clip's size and length, under the take's name). */
+    override suspend fun clipFromTake(takeId: String): Clip = lock.withLock {
+        val t = takes.firstOrNull { it.id == takeId } ?: throw ApiException("not_found", "Take not found")
+        val m = SampleData.sampleMeta
+        Clip("clip_" + uid(), t.title, t.durationSec ?: m.durationSec, m.width, m.height, m.fps, emptyList(), t.thumb).also { clips[it.id] = it }
+    }
     override suspend fun estimateQueuedShot(id: String): QueuedEstimate {
         val q = lock.withLock { queue.firstOrNull { it.id == id } } ?: throw ApiException("not_found", "That queued shot is gone")
         val e = suiteEstimate(queuedReqs.getValue(id))

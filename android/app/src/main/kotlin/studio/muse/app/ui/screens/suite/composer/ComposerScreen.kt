@@ -371,6 +371,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
     LaunchedEffect(d, req, screenInputs, screenSettings, assist?.id) {
         if (assist != null) { delay(600); store.pushComposerToAssist { at -> studio.muse.app.ui.screens.suite.SuiteScreen.json(d.tool.id, req, screenInputs, at, screenSettings) } }
     }
+    val newSwapOn by store.newSwap.on.collectAsState()
     studio.muse.app.ui.screens.suite.SuiteTokens {
     ScreenBox {
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -389,13 +390,16 @@ fun SuiteComposerScreen(toolId: String? = null) {
                         if (live && problem == null && photo == null && addon == null && d.tool in ComposerDraft.PROMPT_TOOLS)
                             MenuItem("clock", "Queue this shot") { scope.launch { store.queueShot(req) } } else null,
                         MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
+                        // New Swap (beta, owner-approved for Android 2026-11-14) and the classic Swap: the Swap tab's two versions.
+                        if (d.tool == ComposerTool.SWAP) MenuItem("arrows-left-right", if (newSwapOn) "Use the classic Swap" else "Use New Swap (beta)") { store.newSwap.on.value = !newSwapOn } else null,
                         if (owner) MenuItem("quality", "Models and prices (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                     ))
                 }
                 if (!wide && !showFeed) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
                     studio.muse.app.ui.screens.suite.SuiteTabs(studio.muse.app.ui.screens.suite.SuiteTab.ofTool(d.tool.id)) { nav.go(it) }
                 }
-                if (showFeed) SuiteFeedView(photo = d.tool == ComposerTool.PHOTO, wide = wide, onOpen = { j -> nav.go(Routes.suiteTake(j)) }, modifier = Modifier.weight(1f))
+                if (d.tool == ComposerTool.SWAP && newSwapOn && !showFeed) studio.muse.app.ui.screens.suite.NewSwapScreen(wide, Modifier.weight(1f))
+                else if (showFeed) SuiteFeedView(photo = d.tool == ComposerTool.PHOTO, wide = wide, onOpen = { j -> nav.go(Routes.suiteTake(j)) }, modifier = Modifier.weight(1f))
                 else if (wide) WideComposer(ui, job, recent, st.takes) { j -> nav.go(Routes.suiteTake(j)) }
                 else PhoneComposer(ui, job, recent, st.takes, { j -> nav.go(Routes.suiteTake(j)) }, { r -> scope.launch { store.generate(r, store.shotJobs) } })
             }

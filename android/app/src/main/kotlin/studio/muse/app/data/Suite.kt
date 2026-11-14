@@ -397,6 +397,9 @@ data class SuiteShotRequest(
     val resolution: String? = null,
     /** AI suite (build step 2): the composer's full draft, stored with the job and its takes for "Reuse settings". Estimates ignore it. */
     val draft: SuiteDraft? = null,
+    /** New Swap (mode "remix", Remix.kt): the changes (only the toggles that are on) and the trimmer's part [from, to] in seconds. */
+    val remix: RemixToggles? = null,
+    val range: List<Double>? = null,
 )
 
 // ---------------------------------------------------------------- the answers
@@ -492,6 +495,8 @@ data class SuiteEstimate(
     val engine: SuiteEngine? = null,
     /** owner */
     val tried: List<SuiteTried>? = null,
+    /** New Swap: the part used, the trimmer's limits, Auto's reason (Remix.kt). */
+    val remix: RemixEstimate? = null,
 )
 
 /** GET /v1/suite/shots/{id}. */

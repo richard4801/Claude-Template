@@ -104,6 +104,7 @@ class FakeSuite {
      */
     fun estimate(r: SuiteShotRequest, owner: Boolean, characters: List<Model>, clipSeconds: Double?, extendSource: Double? = null): SuiteEstimate {
         if (r.mode == ExtendRules.MODE || r.extend != null) return extendEstimate(r, owner, extendSource)
+        if (r.mode == RemixDraft.MODE) return remixEstimate(r, clipSeconds)
         val tier = r.quality ?: "draft"
         val recast = r.mode == "recast" || !r.cast.isNullOrEmpty()
         if (recast) {
@@ -154,6 +155,40 @@ class FakeSuite {
         if (!owner) return base
         val (m, resId) = engineFor(tier, recast)
         return base.copy(engine = m?.let { SuiteEngine(it.id, it.name, it.provider, it.ref, resId, it.perSec(resId), seconds, it.licence, it.licence.notice) })
+    }
+
+    /** New Swap in demo mode (server suite/remix.ts, simplified): the part of the clip used, at most 10 s, $0.099 a second, a test render. */
+    fun remixEstimate(r: SuiteShotRequest, clipSeconds: Double?): SuiteEstimate {
+        val clip = r.clipId ?: throw ApiException("bad_request", "New Swap needs the source clip (clipId)")
+        val x = r.remix ?: RemixToggles()
+        if (x.background == null && x.outfit == null && x.character == null && x.look == null) throw ApiException("bad_request", "Turn on a change: Background, Outfit, Character or Look & light")
+        val of = clipSeconds ?: 9.4
+        val from = r.range?.getOrNull(0) ?: 0.0; val to = r.range?.getOrNull(1) ?: of
+        val maxS = 10.0
+        val seconds = minOf(to - from, maxS)
+        val perSec = 0.099
+        val estimate = round2(perSec * seconds)
+        val secs = trimNum(seconds)
+        val toggles = listOfNotNull(x.background?.let { "background" }, x.outfit?.let { "outfit" }, x.character?.let { "character" }, x.look?.let { "look" })
+        val caps = caps(estimate)
+        return SuiteEstimate(
+            quality = "standard", label = "New Swap · 1080p", resolution = "1080p", seconds = seconds, takes = 1, mode = RemixDraft.MODE, estimate = estimate,
+            priceLine = "$secs s at ${Pricing.money(perSec)} per second", buttonLabel = "Generate · ${Pricing.money(estimate)}",
+            ok = caps.ok, code = caps.code, message = caps.message, caps = caps, camera = SuiteEstimateCamera(), test = true, keepAudio = r.keepAudio ?: true,
+            remix = RemixEstimate(toggles, why = "Demo: one model edits the clip in place", tested = true, keepAudio = r.keepAudio ?: true,
+                uses = RemixEstimate.Uses(from, from + seconds, of), trim = RemixEstimate.Trim(needed = to - from > maxS + 0.05 && r.range == null, minSeconds = 1.0, maxSeconds = maxS)),
+        ).also { if (clip.isBlank()) throw ApiException("bad_request", "New Swap needs the source clip (clipId)") }
+    }
+
+    /** New Swap's model list in demo mode: Auto's pick and one more, priced for this clip. */
+    fun remixModels(req: RemixModelsRequest, clipSeconds: Double?): RemixModels {
+        val s = minOf(req.range?.let { it[1] - it[0] } ?: clipSeconds ?: 9.4, 10.0)
+        fun row(id: String, label: String, auto: Boolean, group: String, perSec: Double) = RemixModels.Row(id, label, support = "yes", tested = true, auto = auto,
+            group = group, limits = RemixModels.Limits(1.0, 10.0, listOf("1080p"), 4, true, "keeps the clip's sound"),
+            price = RemixModels.Price("1080p", perSec, s, false, round2(perSec * s), "output"))
+        return RemixModels(toggles = listOfNotNull(req.remix.background?.let { "background" }, req.remix.outfit?.let { "outfit" }, req.remix.character?.let { "character" }, req.remix.look?.let { "look" }),
+            auto = RemixModels.Auto("demo-edit", "Demo: one model edits the clip in place"),
+            models = listOf(row("demo-edit", "Demo edit · Demo", true, "auto", 0.099), row("demo-reference", "Demo reference · Demo", false, "reference", 0.14)))
     }
 
     /**
