@@ -79,25 +79,23 @@ const P = {
 };
 
 const TPL = [
-  { id: 'soft-rgb-glitch', name: 'Soft RGB glitch', len: '0.3 s', kind: 'Effect', p: 'glitch', live: true },
-  { id: 'white-flash', name: 'White flash', len: '0.1 s', kind: 'Transition', p: 'flash', live: true },
-  { id: 'beat-punch-in', name: 'Beat punch-in', len: '0.3 s', kind: 'Effect', p: 'punch', live: true },
-  { id: 'negative-hit', name: 'Negative hit', len: '0.1 s', kind: 'Effect', p: 'neg', live: true },
-  { id: 'strip-preview', name: 'Strip into next shot', len: '0.7 s', kind: 'Transition', p: 'strip', live: true },
-  { id: 'window-preview', name: 'Window into next shot', len: '0.3 s', kind: 'Transition', p: 'window', live: true },
-  { id: 'page-turn', name: 'Page turn', len: '0.4 s', kind: 'Transition', p: 'page', baked: true },
-  { id: 'split-beat', name: 'Split on the beat', len: '2.1 s', kind: 'Transition', p: 'split', live: true },
-  { id: 'freeze-cutout', name: 'Freeze cut-out', len: '1.8 s', kind: 'Effect', p: 'freeze', baked: true },
-  { id: 'glass-lyrics', name: 'Glass lyrics', len: 'fits clip', kind: 'Text', p: 'words', baked: true },
-  { id: 'title-behind', name: 'Title behind subject', len: '1.8 s', kind: 'Text', p: 'behind', baked: true },
-  { id: 'storm-end-card', name: 'Storm end card', len: '4.0 s', kind: 'Text', p: 'endcard', baked: true },
-  { id: 'shatter', name: 'Shatter', len: '0.5 s', kind: 'Transition', p: 'shatter', baked: true },
-  { id: 'stripes-wipe', name: 'Stripes wipe', len: '0.4 s', kind: 'Transition', p: 'stripes', update: true },
+  { id: 'window-open-next', name: 'Window opens the next shot', len: '0.3 s before the cut', p: 'window' },
+  { id: 'hit-rgb-split', name: 'RGB split hit', len: '3 frames', p: 'glitch' },
+  { id: 'flash-white', name: 'White flash', len: '3 frames', p: 'flash' },
+  { id: 'hit-negative', name: 'Negative hit', len: '3 frames', p: 'neg', update: true },
+  { id: 'punch-in', name: 'Punch-in', len: 'fits the clip', p: 'punch' },
+  { id: 'diagonal-stripe', name: 'Diagonal stripes', len: 'one per note', p: 'stripes' },
+  { id: 'panel-pile', name: 'Panel pile', len: 'one per note', p: 'covers' },
+  { id: 'band-behind-subject', name: 'Band behind the subject', len: '0.3 s', p: 'strip' },
+  { id: 'glass-shatter', name: 'Glass shatter', len: '14 frames', p: 'shatter', notReady: true },
+  { id: 'white-out', name: 'White-out', len: 'peaks on the hit', p: 'flash' },
+  { id: 'multi-hit-split', name: 'Multi-hit split', len: 'one per cut', p: 'split' },
+  { id: 'contained-sound-ending', name: 'Contained sound ending', len: '3.6 s', p: 'sound', update: true },
 ];
 
 const tile = (t, o = {}) => `<div class="col" style="gap:6px;min-width:0">
   <div class="media ${o.sel ? 'sel' : ''}" style="aspect-ratio:${o.ratio || '16/10'}">${P[t.p]()}
-    ${o.badges !== false && t.update ? `<span class="micro" style="position:absolute;left:6px;bottom:6px;background:var(--raised);color:var(--ink);padding:2px 6px;border-radius:var(--rP)">Needs update</span>` : ''}</div>
+    ${o.badges !== false && (t.update || t.notReady) ? `<span class="micro" style="position:absolute;left:6px;bottom:6px;background:var(--raised);color:var(--ink);padding:2px 6px;border-radius:var(--rP)">${t.notReady ? 'Not ready' : 'Needs update'}</span>` : ''}</div>
   <div class="label" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.name}</div>
   ${o.sub !== false ? `<div class="caption" style="margin-top:-6px">${t.len}</div>` : ''}</div>`;
 
@@ -140,10 +138,11 @@ const timeline = (o) => {
 
 const library = (o) => `<div class="col" style="width:340px;border-right:1px solid var(--hair);padding:20px 20px 0;gap:14px;overflow:hidden">
   <div class="row"><div class="title grow">Templates</div>${icon('caret-double-left', 20)}</div>
-  <div class="field">${icon('magnifying-glass', 16)}Search 27 templates</div>
-  <div class="row" style="gap:6px;flex-wrap:wrap">${['All', 'Transitions', 'Effects', 'Text'].map(f => `<span class="chip ${f === o.filter ? 'on' : ''}">${f}</span>`).join('')}</div>
+  <div class="field">${icon('magnifying-glass', 16)}Search templates</div>
+  <div class="row" style="gap:4px;flex-wrap:nowrap">${['All', 'Transitions', 'Effects', 'Captions'].map(f => `<span class="chip ${f === o.filter ? 'on' : ''}" style="padding:0 10px">${f}</span>`).join('')}</div>
   <div class="row" style="justify-content:space-between"><div class="heading">Made by Claude</div><div class="caption">${o.count}</div></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 12px">${o.items.map(t => tile(t, { sel: t.id === o.sel })).join('')}</div></div>`;
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 12px">${o.items.map(t => tile(t, { sel: t.id === o.sel })).join('')}</div>
+  ${o.captions ? `<div class="heading" style="margin-top:8px">Caption styles</div><div class="row" style="gap:6px;flex-wrap:wrap">${['Word pop', 'Karaoke', 'Clean', 'Boxed'].map(c => `<span class="chip">${c}</span>`).join('')}</div>` : ''}</div>`;
 
 const viewer = (o) => `<div class="col grow" style="padding:16px 24px 12px;gap:12px;min-width:0">
   <div class="row" style="gap:12px"><div class="seg"><span class="on">Clean</span><span>TikTok</span><span>Reels</span></div><div class="grow"></div>
@@ -177,25 +176,26 @@ const pages = {};
 const byId = Object.fromEntries(TPL.map(t => [t.id, t]));
 
 pages['1-mac-library-effect-light'] = mac('A', {
-  lib: { filter: 'All', count: '27', sel: 'soft-rgb-glitch', items: TPL.slice(0, 12) },
-  view: { p: 'glitch', note: 'Preview, not applied yet', time: '0:21.8 / 1:08.6', target: 'clip 12' },
-  insp: { name: 'Soft RGB glitch', desc: 'A short colour split with a flicker. Works on any clip, any length.',
-    targetIcon: 'film-strip', target: 'Clip 12', targetSub: '0:21.7 to 0:22.0',
-    params: param('Strength', '30%', 30) + param('Length', '0.3 s', 22) + `<div class="row"><span class="label grow">Add the glitch sound</span><span class="toggle on"></span></div>`,
-    howIcon: 'check-circle', how: 'Live effect', howSub: 'Plays the same on Mac, Android and in the export. You can change it after applying.',
-    primary: 'Apply to clip 12', secondary: 'Apply on every beat cut', source: 'Saved by Claude from the Icon edit, 14 Nov' },
-  tl: { clip: 6, head: 420, overlay: null },
+  lib: { filter: 'All', count: '27', sel: 'window-open-next', items: TPL.slice(0, 4), captions: true },
+  view: { p: 'window', note: 'Preview, not applied yet', time: '0:21.4 / 1:08.6', target: 'the cut at 0:21.7' },
+  insp: { name: 'Window opens the next shot', desc: 'The next shot shows early through a band, a column, slats or a box, in place and unscaled, then the cut lands.',
+    targetIcon: 'square-split-horizontal', target: 'Cut at 0:21.7', targetSub: 'Between clip 11 and clip 12',
+    params: `<div class="col" style="gap:10px"><span class="label">Shape</span><div class="seg"><span class="">Band</span><span class="">Column</span><span class="">Slats</span><span class="on">Box</span></div></div>` + param('Opens before the cut', '0.3 s', 30)
+      + `<div class="row"><span class="label grow">White line</span><span class="toggle on"></span></div><div class="row"><span class="label grow">Entrance wash</span><div class="seg"><span class="on">White</span><span class="">Blue</span><span class="">Off</span></div></div>`,
+    howIcon: 'check-circle', how: 'Live transition', howSub: 'Uses the next clip itself, so it works on any video. Plays the same on Mac, Android and in the export.',
+    primary: 'Apply to cut at 0:21.7', secondary: 'Apply on every cut that falls on a note', source: 'Made by Claude for the Icon edit, 14 Nov' },
+  tl: { cut: 6, head: 380, overlay: [300, 64, 'Window'] },
 });
 
 pages['2-mac-library-transition-dark'] = mac('B', {
-  lib: { filter: 'Transitions', count: '11', sel: 'page-turn', items: [byId['white-flash'], byId['page-turn'], byId['split-beat'], byId['strip-preview'], byId['stripes-wipe'], byId['shatter'], byId['window-preview']] },
-  view: { p: 'page', note: 'Preview, not applied yet', time: '0:18.0 / 1:08.6', target: 'the cut at 0:18.0' },
-  insp: { name: 'Page turn', desc: 'The shot curls away from the corner and shows the next one.',
+  lib: { filter: 'Transitions', count: '14', sel: 'glass-shatter', items: [byId['window-open-next'], byId['diagonal-stripe'], byId['band-behind-subject'], byId['panel-pile'], byId['glass-shatter'], byId['white-out']] },
+  view: { p: 'shatter', note: 'Reference clip from the Icon edit', time: '0:56.1 / 1:08.6', target: 'the Icon edit' },
+  insp: { name: 'Glass shatter', desc: 'The frame breaks like glass on an impact and falls away to the next shot.',
     targetIcon: 'square-split-horizontal', target: 'Cut at 0:18.0', targetSub: 'Between clip 4 and clip 5',
-    params: param('Length', '0.4 s, fixed', null) + `<div class="caption" style="margin-top:-14px">This template is a finished clip, so its length and look stay as made.</div>`,
-    howIcon: 'film-strip', how: 'Finished overlay clip', howSub: 'Placed over the cut on the Overlay track, 1080 × 1920. Delete or move it like any clip.',
-    primary: 'Apply to cut at 0:18.0', secondary: 'Choose another cut', source: 'Saved by Claude from the Icon edit, 14 Nov' },
-  tl: { cut: 4, head: 0 + 222, overlay: [196, 52, 'Page turn'] },
+    params: `<div class="col" style="gap:8px"><div class="row" style="gap:8px">${icon('info', 16)}<span class="label">Not ready to apply in Edit</span></div><div class="caption">The finished clip is made from the Icon edit's own frames, so it can't go on another video. Edit needs a shatter transition first.</div></div>`,
+    howIcon: 'chat-circle', how: 'Claude can make it for this cut', howSub: 'Claude rebuilds it on your Mac from the template script and your two shots, then adds it as an overlay clip. Free.',
+    primary: 'Ask Claude to make it for this cut', secondary: 'Play the reference clip', source: 'Made by Claude for the Icon edit, 14 Nov' },
+  tl: { cut: 4, head: 222, overlay: null },
 });
 
 // ---------- Android ----------
@@ -209,16 +209,16 @@ const androidEdit = (sheet) => `
 const androidSheet = `<div class="col" style="position:absolute;left:0;right:0;bottom:0;height:420px;background:var(--raised);border-radius:16px 16px 0 0;box-shadow:0 -8px 24px rgba(0,0,0,.12);padding:8px 16px 16px;gap:14px">
   <i style="align-self:center;width:36px;height:4px;border-radius:2px;background:var(--hair)"></i>
   <div class="row"><div class="title grow">Templates</div>${icon('magnifying-glass', 24)}</div>
-  <div class="row" style="gap:8px;overflow:hidden;flex:none;height:32px">${['All', 'Transitions', 'Effects', 'Text', 'Sound'].map(f => `<span class="chip ${f === 'Effects' ? 'on' : ''}">${f}</span>`).join('')}</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px 10px">${[byId['soft-rgb-glitch'], byId['beat-punch-in'], byId['negative-hit'], byId['freeze-cutout'], byId['glass-lyrics'], byId['title-behind']].map(t => tile(t, { sel: t.id === 'soft-rgb-glitch', ratio: '1/1' })).join('')}</div></div>`;
+  <div class="row" style="gap:8px;overflow:hidden;flex:none;height:32px">${['All', 'Transitions', 'Effects', 'Captions'].map(f => `<span class="chip ${f === 'Effects' ? 'on' : ''}">${f}</span>`).join('')}</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px 10px">${[byId['hit-rgb-split'], byId['punch-in'], byId['flash-white'], byId['hit-negative'], byId['multi-hit-split'], byId['contained-sound-ending']].map(t => tile(t, { sel: t.id === 'hit-rgb-split', ratio: '1/1' })).join('')}</div></div>`;
 const androidDetail = `<div class="col" style="position:absolute;left:0;right:0;bottom:0;height:420px;background:var(--raised);border-radius:16px 16px 0 0;box-shadow:0 -8px 24px rgba(0,0,0,.12);padding:8px 16px 16px;gap:18px">
   <i style="align-self:center;width:36px;height:4px;border-radius:2px;background:var(--hair)"></i>
-  <div class="row" style="gap:12px">${icon('caret-left', 24)}<div class="col grow"><div class="title">Soft RGB glitch</div><div class="caption">On clip 3, 0:21.7 to 0:22.0</div></div></div>
-  ${param('Strength', '30%', 30)}${param('Length', '0.3 s', 22)}
-  <div class="row"><span class="label grow">Add the glitch sound</span><span class="toggle on"></span></div>
-  <div class="caption">Live effect. Plays the same on Mac, Android and in the export.</div>
+  <div class="row" style="gap:12px">${icon('caret-left', 24)}<div class="col grow"><div class="title">RGB split hit</div><div class="caption">On the cut into clip 3, 0:21.7</div></div></div>
+  ${param('Length', '3 frames', 20)}${param('Split', '28 px, fading', 45)}
+  <div class="row"><span class="label grow">White lift</span><span class="toggle on"></span></div>
+  <div class="caption">Live effect on the clip's own first frames. Plays the same on Mac, Android and in the export.</div>
   <div class="grow"></div>
-  <span class="btn primary big" style="justify-content:center;height:48px">Apply to clip 3</span></div>`;
+  <span class="btn primary big" style="justify-content:center;height:48px">Apply to the cut into clip 3</span></div>`;
 pages['3-android-sheet-light'] = `<!doctype html><html><head><meta charset="utf-8"><style>${css(THEMES.A)}</style></head><body style="background:#D9D3C8">
 <div class="row" style="width:1000px;height:940px;justify-content:center;gap:80px">
 ${phone('A', androidEdit(androidSheet))}${phone('A', androidEdit(androidDetail))}</div></body></html>`;
@@ -226,19 +226,19 @@ ${phone('A', androidEdit(androidSheet))}${phone('A', androidEdit(androidDetail))
 // ---------- Saving and states board (light) ----------
 const panel = (title, body, w = 400) => `<div class="col" style="width:${w}px;gap:12px"><div class="label muted">${title}</div><div style="background:var(--raised);border-radius:var(--rC);padding:20px;border:1px solid var(--hair)">${body}</div></div>`;
 const saveSheet = `<div class="col" style="gap:18px"><div class="title">Save as template</div>
-  <div class="col" style="gap:6px"><span class="label muted">Name</span><div class="field" style="color:var(--ink)">Soft RGB glitch</div></div>
+  <div class="col" style="gap:6px"><span class="label muted">Name</span><div class="field" style="color:var(--ink)">Punch-in</div></div>
   <div class="col" style="gap:10px"><span class="label muted">Keep from clip 12</span>
-  ${[['Effect: glitch, 30%', 1], ['Scale keyframes (punch-in)', 1], ['Glitch sound on the Sound track', 1], ['The clip itself', 0]].map(([l, on]) => `<div class="row" style="gap:10px">${icon(on ? 'check-square' : 'square', 20)}<span class="label" style="${on ? '' : 'color:var(--ink2)'}">${l}</span></div>`).join('')}</div>
-  <div class="col" style="gap:6px"><span class="label muted">Applies to</span><div class="seg"><span class="on">A clip</span><span>A cut</span><span>The whole edit</span></div></div>
+  ${[['Scale keyframes, 1.35 to 1.0', 1], ['White lift on the first 3 frames', 1], ['Swoosh on the Sound track', 0], ['The clip itself', 0]].map(([l, on]) => `<div class="row" style="gap:10px">${icon(on ? 'check-square' : 'square', 20)}<span class="label" style="${on ? '' : 'color:var(--ink2)'}">${l}</span></div>`).join('')}</div>
+  <div class="col" style="gap:6px"><span class="label muted">Applies to</span><div class="seg"><span class="on">Each selected clip</span><span>A cut</span><span>The whole edit</span></div></div>
   <div class="row" style="gap:10px;justify-content:flex-end"><span class="btn ghost">Cancel</span><span class="btn primary">Save template</span></div></div>`;
 const chatCard = `<div class="col" style="gap:12px"><div class="row" style="gap:8px">${icon('chat-circle', 16)}<span class="label">Claude</span></div>
-  <div style="font:400 15px/21px Archivo">I saved the soft colour split from clip 12 as a template, so you can put it on any clip.</div>
-  <div class="row" style="gap:12px;padding:10px;background:var(--field);border-radius:var(--rK)"><div class="media" style="width:48px;height:60px">${P.glitch()}</div>
-    <div class="col grow"><span class="label">Soft RGB glitch</span><span class="caption">Effect, live, 0.3 s</span></div></div>
+  <div style="font:400 15px/21px Archivo">I saved the punch-in from clip 12 as a template, so you can put it on any clip in one click.</div>
+  <div class="row" style="gap:12px;padding:10px;background:var(--field);border-radius:var(--rK)"><div class="media" style="width:48px;height:60px">${P.punch()}</div>
+    <div class="col grow"><span class="label">Punch-in</span><span class="caption">Effect, live, fits the clip</span></div></div>
   <div class="row" style="gap:8px"><span class="btn">Open in Templates</span><span class="btn ghost">Undo</span></div></div>`;
 const loading = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px 10px">${Array.from({ length: 6 }, () => `<div class="col" style="gap:6px"><div style="aspect-ratio:4/5;background:var(--field);border-radius:var(--rC)"></div><div style="height:12px;width:80%;background:var(--field);border-radius:2px"></div><div style="height:10px;width:40%;background:var(--field);border-radius:2px"></div></div>`).join('')}</div>`;
 const empty = `<div class="col" style="gap:12px"><div class="heading">No templates yet</div><div class="caption">A template keeps an effect, a transition or a text look so you can put it on any clip. Select a clip and press Save as template, or ask Claude to save one.</div><span class="btn" style="align-self:flex-start">${icon('stack', 20)}Save clip 12 as template</span></div>`;
-const update = `<div class="row" style="gap:14px;align-items:flex-start"><div style="width:96px">${tile(byId['stripes-wipe'], { sub: false })}</div><div class="col" style="gap:8px;flex:1"><div class="heading">Needs the next MUSE update</div><div class="caption">Stripes wipe uses a new mask shape. Update MUSE on this Mac to apply it here.</div></div></div>`;
+const update = `<div class="row" style="gap:14px;align-items:flex-start"><div style="width:96px">${tile(byId['hit-negative'], { sub: false })}</div><div class="col" style="gap:8px;flex:1"><div class="heading">Needs the next MUSE update</div><div class="caption">Negative hit uses a new invert effect. Update MUSE on this Mac to apply it here.</div></div></div>`;
 const error = `<div class="col" style="gap:10px"><div class="row" style="gap:8px;color:var(--caution)">${icon('wifi-slash', 20)}<span class="heading" style="color:var(--ink)">Templates didn't load</span></div><div class="caption">MUSE can't reach the server. Templates you used on this Mac still work. Check the connection, then try again.</div><span class="btn" style="align-self:flex-start">Try again</span></div>`;
 pages['4-saving-and-states-light'] = `<!doctype html><html><head><meta charset="utf-8"><style>${css(THEMES.A)}</style></head><body>
 <div style="width:1440px;height:900px;padding:40px 48px;display:flex;flex-direction:column;gap:28px">

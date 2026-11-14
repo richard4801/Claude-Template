@@ -1,286 +1,286 @@
 # Edit templates: effects and transitions in one click (plan + design)
 
-_Planning worker, 2026-11-14. Owner-approved goal: a template library in Edit for effects and transitions (not photo
-presets, not caption/look kits). It works on any clip in one click on the Mac and Android. MUSE Claude can save new
-templates into it. It starts with the 27 templates MUSE Claude already made (report ci_d4cc38758998).
-This file is the plan and design only. The one piece of code is the intake in §1, on branch
-`claude/template-pack-intake`._
+_Planning worker, 2026-11-14 (revised the same day once the pack arrived). Owner-approved goal:_
+- _A template library in Edit for effects and transitions. It is not photo presets and not caption/look kits._
+- _A template goes on any clip in one click, on the Mac and on Android._
+- _MUSE Claude can save new templates into it._
+- _It is seeded with the 27 templates MUSE Claude made (report ci_d4cc38758998)._
 
-Mockups are in `plans/design/edit-templates/` (built from `src/build.mjs` with the repo's fonts and Phosphor icons):
-- `1-mac-library-effect-light.png`: Mac, theme A. The Templates panel, a live effect previewed on the selected clip, its settings, and "Apply to clip 12".
-- `2-mac-library-transition-dark.png`: Mac, theme B. A finished-clip transition aimed at a cut, with its overlay shown on the timeline.
-- `3-android-sheet-light.png`: Android. The bottom sheet grid, then the settings and "Apply to clip 3".
-- `4-saving-and-states-light.png`: Save as template, Claude's "saved" chat card, and the loading, empty, older-app and offline states.
+_This is a plan and design only. The one piece of code is the intake in §1, which is live on prod._
 
-## 0. What I found
+## Mockups
+In `plans/design/edit-templates/`, rebuilt with `src/build.mjs` (the repo's fonts, Phosphor icons, no network).
+- `1-mac-library-effect-light.png`: Mac, theme A. The library, with caption styles kept as one section, and **Window opens the next shot** previewed on the cut at 0:21.7. The panel shows shape, lead, white line and entrance wash, then "Apply to cut at 0:21.7".
+- `2-mac-library-transition-dark.png`: Mac, theme B. A template that is **not ready** (Glass shatter): the reference clip plays, with the reason, and offers "Ask Claude to make it for this cut".
+- `3-android-sheet-light.png`: Android. The bottom-sheet grid (Effects), then **RGB split hit** settings, then "Apply to the cut into clip 3".
+- `4-saving-and-states-light.png`:
+  - "Save as template" (Punch-in) and Claude's "saved" chat card.
+  - Loading, empty, older app ("Negative hit needs the next MUSE update") and offline.
 
-### Where the 27 live today
-- **Edit `es_90f88fe3b4a9` ("Icon", revision 166)**, read through the owner MCP `get_edit`. It has 60 baked assets in
-  the project, for example `glitchv4`, `fxwhite`, `fxneg06`, `cut6`, `strip227v4`, `band247v2`, `panels250v2`,
-  `window457v4`, `split287`, `eye309v3`, `punch327`, `boom361`, `drop417b7`, `page340v3`, `frz08v27`, `stripes497v4`,
-  `glass521v2`, `shatter561v1`, `covers561`, `white587`, `quiet589`, `big607v4`, `sigA`, `endcard2a/2b`, the
-  `words*glass/frost/glitch` lyric sets and `glitchsfx1`.
-  - They sit as plain video items on the extra tracks `video1`, `words1` and `mark1`. One uses `blend: add`.
-  - The main track also has 7 live scale punch-ins (keyframes 1.35 → 1 over 0.27 s) and one `alphaMatte`.
-  - In short, everything except the punch-ins was **baked into media** on the owner's Mac and dropped on top.
-- **The pack itself** is only on the owner's Mac ("Icon storyboard/templates": README, templates.json, scripts,
-  finals, previews). The server has never seen it.
+## Owner decisions
+Pending owner confirmation: these are the coordinator's proposed defaults, not answers yet.
+1. The new **Templates library replaces Edit's current Templates bin tab** (Mac `EditSuiteBin.swift:319`, caption styles today). Caption styles stay in it as one section, and as the "Captions" filter.
+2. **Templates that can't be applied yet show from day one**, as "Not ready" with their reference clip and the reason.
+   - This is a revision. The coordinator's default was "show finished-clip templates from day one".
+   - The pack's README says the finished clips **contain the Icon edit's own film pixels and are for reference only**, so they can't be dropped on another video.
+   - So those tiles play the reference, and Apply is replaced by "Ask Claude to make it for this cut". That button is on the Mac only, where the pack's scripts live.
+3. **Owner only for now**, like the rest of Edit with Claude.
 
-### Gaps
-- `report_gap` writes to `edit_gaps` (`src/editor/learnSchema.ts`, `Learning.addGap` in `src/editor/learn.ts`).
-- The owner reads gaps through `GET /v1/learn/gaps`. A personal token can't reach `/v1`, and on MCP the only way in
-  was `playbook_read`, which shows the **top 5**. So most of the 27 were unreadable.
-- The 5 visible ones:
-  - `other:local-subject-matte`
-  - `other:audio-keyframes` (pack id `contained-sound-ending`)
-  - `text:write-on-signature-end-card` (`storm-end-card`, `corner-signature`)
-  - `other:voice-onsets`
-  - `text:placed-lyrics` (`lyric-placed-art`, `title-behind-subject`)
-- Example notes are cut to 200 characters, so the gaps can't carry the specs. The pack has to come over.
+## 0. What the pack is
+The coordinator confirmed it arrived. I read it with `template_pack_read` and `gaps_list` through the owner MCP; there were no DB reads.
 
-### Existing "templates" don't fit
-| Thing | Table | What it holds | Why it can't hold these |
-|---|---|---|---|
-| `templates_manage` / `templates_list` | `templates` | AI photo prompt layers | Not Edit at all |
-| `edit_kits` (StyleKit v1, `editor/kit.ts`) | `edit_kits` | One look, filter, adjust, transition, caption and text style, applied to the whole edit | No effects, keyframes, masks, blends, overlays, timing or per-clip use |
-| Recipes (`learn.ts`, `recreate/assemble.ts`) | `edit_recipes` | A whole edit's structure | Builds a whole edit, not one effect on one clip |
-| Content packs (`contentPacks.ts`) | catalog JSON | Looks, captions and transition presets (kind + length) | No effect kind, no multi-item preset |
+**Pack `icon-storyboard` (`tp_42b9a9bc8571`):**
+- **Manifest:** 27 templates.
+- **Files:** 75 (README and scripts).
+- **Media:** 54, of which 40 are previews and 14 are finals.
+- **Missing previews:** `punch-in` and `contained-sound-ending`. Their tiles will use a live render.
 
-### What the edit model can already do (shared `model.ts`; Kotlin and Swift ports)
-- **Effects (one per item):** `glitch, vhs, film, blur, zoomBlur, mirror, pixelate, posterize, duotone, shake, flash, rain`.
-- **18 transitions:** `fade, black, white, slide×4, zoom, zoomOut, whip, whipRight, spin, glitch, cover×4, splitFade`.
-  - Each is just a kind and a length (0.1–2 s).
-  - There is no mask or luma wipe.
-- **Keyframes:**
-  - Transform, opacity, volume.
-  - Colour: exposure, contrast, saturation, temperature, tint.
-  - Mask box.
-  - Look: vignette, grain, leak.
-  - Not keyframeable: effect amount, blur, chroma.
-- **8 blends** on all renderers. Difference and exclusion are gated off; the apps don't have them.
-- **Masks:** linear, mirror, circle, rect, heart, star, with feather and invert, and they can be keyframed.
-- **Other:** chroma key, alphaMatte, layers and `text_behind`, freeze (`holdSec`), speed curves, adjustment layers
-  (colour only), video and image overlay tracks.
-- **Audio:**
-  - Volume keyframes and ducking.
-  - **No keyframeable filter.** Low-pass exists only inside the fixed radio and phone voice presets.
-- **Where it renders:** Mac (Core Image kernels) and Android (one GLSL effect shader) draw all 12 effects.
-  **The server ffmpeg render draws no `effect` at all, and drops it silently** (`test/render-coverage.test.ts` lists it
-  as "the render follows (WS16)").
-- **New values break old apps.** Kotlin and Swift decode effect ids, transition kinds and blends as closed enums, so an
-  unknown value makes an older app refuse the whole project. That is why new values ship behind server gates.
+**Each template's entry has:**
+- what it does and its kind;
+- its status, one of:
+  - `generic`: the script works on any shot;
+  - `native`: possible in MUSE by patch;
+  - `bespoke`: works, but with this video's frames written into the script;
+- the timing rule, the params a real template must expose, the layers from back to front, the scripts, the clip, the previews, and a "native" note saying what MUSE would need.
 
-## 1. Intake (built: branch `claude/template-pack-intake`)
-New owner-only tools in one file, `src/editor/templatePacks.ts`. They are in the chat registry with `members: false`,
-so they are also on MCP. They are free and render nothing.
+**Shared rules from the README:**
+- Timing comes from the song: one stage per note, from `song_notes`.
+- A window shows the shot it opens into, in place and unscaled, playing the 0.3 s before that shot's in-point.
+- Every new layer enters washed toward white or deep blue for 2–3 frames: k 0.6, 0.3 (thin layers 0.9, 0.65, 0.35).
+- Nine templates need a subject matte. The free Apple Vision lift was better than the paid run.
 
-| Tool | What it does |
-|---|---|
-| `gaps_list {kind?, query?, limit?}` | Every gap, most requested first, with all its examples. `query` matches key, what and notes. |
-| `template_pack_send {pack, manifest?, files?, removeFiles?, media?}` | Stores the pack in parts that merge under the pack name. **Manifest:** templates.json, up to 256 KB. **Files:** `[{path, text}]` for the README, scripts and notes; text only; up to 40 per call, 300 per pack, 3 M characters. **Media:** `[{templateId, uploadId, role: preview\|final\|source\|overlay}]` for clips sent first with the existing `upload_local_file`; they must be finished uploads of this studio. Credential-looking values are replaced with `[redacted]`. Binary text and `..` paths are refused. The answer lists templates still missing a preview. |
-| `template_pack_read {pack?, path?}` | Every pack's summary; or one pack's manifest, file list and media; or one file's text. |
+**The README's build order:**
+1. The template store.
+2. `window-open-next` with a shape list (covers 7 entries).
+3. Text styles (frosted glass first).
+4. Hit effects.
+5. Local subject matte.
+6. Audio keyframes.
 
-- **Storage:** table `edit_template_packs`, migration `0037_template_packs.sql`. It is additive and uses `IF NOT EXISTS`.
-- **Naming:** the tool is "send", not "submit": the MCP test bans names matching `generate|submit|run_job` (nothing that spends).
-- **Tests:** `test/template-packs.test.ts` covers owner-only access, merging, previews, redaction, refusals, gaps_list
-  past 5, and that the tools are on MCP.
-- **After deploy, the owner says to MUSE Claude on the Mac:**
-  > "Send the Icon storyboard template pack to the MUSE team with template_pack_send: the manifest, README and
-  > scripts as files, then each preview and final with upload_local_file and add them as media."
+**`gaps_list`:** 32 gaps, each asked for once. They match the pack. Extra ones not covered here:
+- preview clip for Claude
+- free track order
+- edit-ops reference
+- generative frame extend
+- rounded-rect mask
+- chroma key on images
+- VFX overlays
 
-  Then the coordinator reads it with `template_pack_read` and `gaps_list`. **The table in §4 is provisional until then.**
+**What the edit model already has** (shared `model.ts`, Kotlin and Swift ports):
+- 12 effects, one per item.
+- 18 transitions (kind + length only, no shapes).
+- Keyframes on transform, opacity, volume, exposure/contrast/saturation/temperature/tint, the mask box (x, y, w, h, rotation, feather), vignette, grain and leak.
+- 8 blends.
+- Masks: linear, mirror, circle, rect, heart, star.
+- `alphaMatte` (paid `remove_background`) and `text_behind` (paid).
+- Freeze (`holdSec`).
+- Video and image overlay tracks (16 tracks).
+- `minItemSec` 0.05.
+
+**What it lacks:**
+- Keyframeable effect amount.
+- Invert or difference in the apps.
+- Text as a mask.
+- Audio filter keyframes.
+- Shape transitions.
+
+**Two constraints:**
+- **Server render.** The server's ffmpeg render **does not draw the `effect` field** and drops it silently.
+- **Old apps.** Old apps decode effects, transitions and blends as closed enums, so new values need gates.
+
+## 1. Intake (live on prod: `claude/template-pack-intake` 8f64eb1)
+**Tools (owner only, free, MCP and chat):**
+- `gaps_list {kind?, query?, limit?}`: every gap.
+- `template_pack_send {pack, manifest?, files?, removeFiles?, media?}`: parts merge. Text files have credentials redacted. Media must be finished uploads of the studio.
+- `template_pack_read {pack?, path?}`.
+
+**Storage and tests:**
+- Table `edit_template_packs`, migration 0037.
+- Tests in `test/template-packs.test.ts`. The full suite passed: 1062 tests.
 
 ## 2. How a template is represented
-A template is **one JSON spec** (`EditTemplate v1`) that the **server expands into ordinary edit ops** for a target:
-a clip, a cut, or every beat cut.
+A template is **one JSON spec** (`EditTemplate v1`). The **server expands it into ordinary edit ops** for a target: a clip, a cut, or each selected clip/cut/note.
 
-### Why expand on the server
-- The apps only ever receive normal project items, so a template needs **no new model code in Kotlin or Swift** unless
-  it uses a new primitive.
-- Undo is one history entry ("Applied Soft RGB glitch").
+**Why expand on the server:**
+- The apps receive normal project items, so a template needs **no Kotlin or Swift model code** unless it uses a new primitive.
+- Applying is one undoable change.
 - Claude and both apps share one implementation.
 
-There are three tiers, and the spec says which one it is.
+**Levels**, which the spec states:
 
-| Tier | Template holds | Fits any clip and length? | App work |
-|---|---|---|---|
-| **1 Live** | Changes to the target (effect, look, adjust, filter, blend, mask, transform) plus keyframes in **normalised time** (0–1 of the target, or seconds from an anchor), plus added items (overlay copies of the next or previous clip with masks, a sound, text, a freeze), plus a transition | Yes. Times scale to the clip, settings come from sliders | None beyond the library UI |
-| **2 Live + new primitive** | The same, but it uses a value the model lacks (an `invert` effect, a `stripes` mask shape, an audio low-pass keyframe…) | Yes | The primitive goes into model.ts, the fixtures, Kotlin, Swift, both shaders and ffmpeg, behind a gate. Older apps show "Needs update" |
-| **3 Finished clip** | One or more media assets (uploads) plus placement: anchor (cut, in, out), offset, blend, fit, length fixed or stretched | Placement yes; the look is fixed (made at 16:9 1080p, fit or crop to the canvas) | None |
-
-Tier 3 is how all 27 exist today. Each template can be promoted later, from tier 3 to tier 1 or 2, by saving a new
-version under the same id.
+| Level | What it is | On any video? |
+|---|---|---|
+| **Live** | Changes to the target, plus keyframes in normalised time, plus added items. Added items can be **copies of the target's neighbours** (`$next`, `$prev`, with in-point maths), stills or sounds owned by the template, or text. Plus a transition. | Yes |
+| **Live, paid matte** | Live, but it needs a subject matte. Today that is `remove_background` (priced on the Apply button). It becomes free once a local matte exists (P4). | Yes, at the matte's price |
+| **Needs a new primitive** | Live once a missing value exists in model.ts and all three renderers, behind a gate. Older apps show "Needs update". | Yes, after the primitive |
+| **Not ready (reference)** | Only the pack's reference clip. "Ask Claude to make it for this cut" has MUSE Claude on the Mac adapt the bespoke script to the person's shots and add the result as an overlay clip. That costs Claude time, not money. | Mac, per video, by Claude |
 
 ### Spec sketch
-Server type in `src/editor/templates.ts`; this is not an app contract.
+Server type in `src/editor/templates.ts`; it is not an app contract. This example is `window-open-next`.
 
 ```jsonc
-{ "v": 1, "id": "soft-rgb-glitch", "name": "Soft RGB glitch", "kind": "effect", // effect | transition | text | sound
-  "target": "clip",                     // clip | cut | edit
-  "tier": 1, "requires": [],            // e.g. ["effect:invert"]: hidden or marked "Needs update" for apps without it
-  "length": { "mode": "fixed", "sec": 0.3, "anchor": "in" },   // fit | fixed | stretch; anchor in | out | cut
-  "params": [ { "key": "strength", "label": "Strength", "type": "number", "min": 0, "max": 1, "default": 0.3 },
-              { "key": "sound", "label": "Add the glitch sound", "type": "bool", "default": true } ],
-  "self": { "effect": { "id": "glitch", "amount": "$strength", "speed": 1.5 },
-            "keyframes": { "scale": [ { "t": 0, "v": 1.08 }, { "t": 1, "v": 1, "ease": "easeOut" } ] } },
-  "add": [ { "when": "$sound", "track": "sfx", "asset": { "upload": "up_d7376fe4514c" }, "at": { "anchor": "in" } } ],
-  "preview": { "uploadId": "up_…", "poster": "up_…" },
-  "source": { "pack": "icon-storyboard", "templateId": "glitch-soft", "by": "claude" } }
+{ "v": 1, "id": "window-open-next", "name": "Window opens the next shot", "kind": "transition", "target": "cut",
+  "level": "live", "requires": [],                       // e.g. ["effect:invert"] → "Needs update" on older apps
+  "params": [
+    { "key": "shape", "type": "enum", "options": ["band", "column", "slats", "box"], "default": "box" },
+    { "key": "lead", "label": "Opens before the cut", "type": "number", "unit": "s", "min": 0.1, "max": 1, "default": 0.3 },
+    { "key": "line", "label": "White line", "type": "bool", "default": true },        // needs mask stroke (N2); hidden until then
+    { "key": "wash", "label": "Entrance wash", "type": "enum", "options": ["white", "blue", "off"], "default": "white" } ],
+  "add": [ { "track": "overlay", "asset": "$next", "in": "$next.in - $lead", "start": "$cut - $lead", "length": "$lead",
+             "maskFrom": "shapes.$shape", "wash": "$wash" } ],
+  "shapes": { "box": [ { "t": 0, "rect": [0.3, 0.24, 0.4, 0.3] } ], "band": [ … ], "slats": [ [ … ], [ … ], [ … ] ] },
+  "preview": { "uploadId": "up_…" },
+  "source": { "pack": "icon-storyboard", "templateId": "window-open-next", "by": "claude" } }
 ```
 
-- **Clip copies.** `add` items can name the target's neighbours (`"asset": "$next"`, `"in": "$next.in - 0.3"`). This
-  covers the playbook rule: a window, strip or panel previews the shot it opens into, in place and unscaled.
-- **Time.** Keyframe `t` is normalised unless `"unit": "sec"`.
-- **Storage.** Table `edit_templates`: id, studio, name, kind, target, tier, spec jsonb, preview upload, source, by,
-  timestamps. Limit 500 per studio.
-- **Media.** Assets inside a template are uploads. Applying one adds `{kind: video|audio, upload}` to the project's assets.
+- **Shapes.** `.rects` files (`frame x y w h`) become hold-eased mask keyframes.
+- **Slats.** One copy per slat, each on its own overlay track.
+- **Entrance wash** is an expansion helper. It sets exposure keyframes (or temperature for blue) on an added item's first 2–3 frames with the README's k values.
+- **Note times** come from `song_notes` / `detect_beats`, which already exist.
+- **Storage.** Table `edit_templates`, migration 0038: id, studio, name, kind, target, level, spec jsonb, preview upload, source, by, version, timestamps.
 
 ## 3. Tools for Claude, routes for the apps
-Tool names avoid `templates_*`, which means photo presets. Each description says "Edit effects and transitions; for
-photo presets use templates_manage" so Claude stops picking the wrong one, which is the confusion in ci_d4cc38758998.
+The names avoid `templates_*`, which means photo presets. Every description says "Edit effects and transitions; photo presets are templates_manage".
 
 | Tool | Does |
 |---|---|
-| `edit_templates {query?, kind?, target?}` | Lists the library, with tier, params, "needs update" and preview URLs. |
-| `edit_template_save {name, kind, target, from?: {sessionId, itemIds, cutAt?}, spec?, previewUpload?}` | Saves from a selection or from a spec. From a selection, it takes the target's effect, look, adjust, blend, mask and keyframes (normalised) and the overlapping overlay and sfx items (as uploads, or as `$next`/`$prev` copies when they reuse a neighbour). It returns the spec, so Claude can add params. Saving the same name makes a new version. |
-| `edit_template_apply {sessionId, templateId, target: {itemId} \| {cutAfter} \| {each: "beat-cut" \| "cut" \| "clip"}, params?, dryRun?}` | Expands to ops and applies them as one undoable change. With `dryRun` it returns the ops and a preview project patch without saving. |
-| `edit_template_delete {templateId}` | Removes a template. Projects keep their items. |
+| `edit_templates {query?, kind?, target?}` | The library, with level, params, "needs update" and previews. |
+| `edit_template_save {name, kind, target, from?: {sessionId, itemIds, cutAt?}, spec?, previewUpload?}` | Saves from a selection or from a spec. From a selection it takes the target's effect, look, adjust, blend, mask and normalised keyframes, and the overlapping overlay and sfx items. Items that reuse a neighbour become `$next`/`$prev`. It returns the spec, so Claude can add params. Saving the same id makes a new version. |
+| `edit_template_apply {sessionId, templateId, target: {itemId} \| {cutAfter} \| {each: "selected" \| "cut" \| "note-cut"}, params?, dryRun?}` | Expands and applies the template as one undoable change. `dryRun` returns ops plus a preview patch. Paid-matte templates go through the existing spend gate, with the price on the button. |
+| `edit_template_delete {templateId}` | Removes a template. Edits keep their items. |
 
-- **Routes:** `GET/POST /v1/editor/templates`, `POST /v1/editor/templates/:id/apply` (`dryRun` for preview), and
-  `DELETE /v1/editor/templates/:id`.
-- **Who:** owner tools (Edit is the owner's). Members can list and apply only if the owner turns that on later.
-- **Seeding:** once the pack is in, Claude converts each template with `template_pack_read` then `edit_template_save`.
-  - It starts as tier 3 with the pack's final clip, then a tier 1 spec wherever §4 says one is possible now.
-  - The owner checks each in the app. This costs Claude tokens, nothing else.
+- **Routes:** `GET/POST /v1/editor/templates`, `POST /v1/editor/templates/:id/apply` (`dryRun` for the preview), `DELETE /v1/editor/templates/:id`.
+- **Not-ready Ask Claude:** the Mac button opens the Claude chat with a prepared request (template id, the cut, the two shots). Claude reads the script with `template_pack_read`, adapts it, runs it locally, uploads, and adds the overlay.
+- **Seeding:** Claude converts each pack template with `template_pack_read` → `edit_template_save`. Live specs go first (table below), the rest as "not ready" entries carrying their preview and reference clip.
 
-## 4. The 27 (provisional: matched from the Icon edit's assets and the visible gaps; confirm against templates.json)
-Tier 1 = possible now with expansion, tier 2 = needs the primitive named, tier 3 = finished clip only.
+## 4. The 27
+Effort: **S** about a day (spec only), **M** 2–3 days (spec plus expansion logic), **L** a primitive across model + Kotlin + Swift + both shaders + ffmpeg + gate (about a week, one Mac CI run), **XL** a new subsystem.
 
-| # | Template (asset in the Icon edit) | Today | Plan | Needs |
-|---|---|---|---|---|
-| 1 | Soft RGB glitch + sound (`glitchv4`, `glitchsfx1`) | baked | **1** | effect `glitch` at 0.3, sfx item |
-| 2 | White flash (`fxwhite`, add blend) | baked | **1** | transition `white` 0.1 s, or an exposure keyframe |
-| 3 | Negative hit (`fxneg06`) | baked | 2 | effect `invert` |
-| 4 | Beat punch-in (scale 1.35 → 1, 0.27 s) | live | **1** | keyframes, already used |
-| 5 | Cut-out hit (`cut6`) | baked | 3, then 1 | subject matte; free Mac lift (gap `local-subject-matte`) |
-| 6 | Strip into next shot (`strip227/377`) | baked | **1** | `$next` overlay copy + rect mask |
-| 7 | Band preview (`band247`) | baked | **1** | same as 6 |
-| 8 | Window into next shot (`window457`) | baked | **1** | same as 6 |
-| 9 | Panels (`panels250`) | baked | **1** | 3 overlay copies with rect masks |
-| 10 | Split on the beat (`split287/441/460/470`) | baked | **1** | overlay copies, rect masks, transform |
-| 11 | Eye reveal (`eye309/587`) | baked | 1 if a circle or ellipse | keyframed circle mask; confirm the shape |
-| 12 | Boom (`boom361`) | baked | 1, provisional | zoomBlur + shake + scale keyframes; confirm |
-| 13 | Drop hit (`drop417`) | baked | 1, provisional | flash + scale; confirm |
-| 14 | Page turn (`page340/521`) | baked | 3 | a page curl needs a mesh warp (not planned) |
-| 15 | Freeze cut-out (`frz08` + alphaMatte `bg19`) | baked | 3, then 1 | freeze + matte (same gap as 5) |
-| 16 | Stripes wipe (`stripes497`) | baked | 2 | mask shape `stripes` (count, angle, progress) |
-| 17 | Glass panel (`glass521`) | baked | 1, approximate | overlay copy with blur effect + rect mask + exposure |
-| 18 | Shatter (`shatter561`) | baked | 3 | needs a shard mesh |
-| 19 | Album covers (`covers561`, 3×) | baked | **1** | freeze-frame overlay items + rotation keyframes + pop |
-| 20 | White-out (`white587`) | baked | **1** | transition `white` / exposure keyframes |
-| 21 | Quiet beat (`quiet589`) | baked | 1, provisional | saturation + vignette keyframes; confirm |
-| 22 | Big type (`big607`) | baked | 1, provisional | text item + pop and zoom anim; confirm the font |
-| 23 | Corner signature, auto-hide (`sigA`) | baked | **1** | image item (the mark) on chosen ranges |
-| 24 | Storm end card, write-on (`endcard2a/2b`) | baked | 3, then 2 | text `writeOn` anim (stroke reveal); gap `write-on-signature-end-card` |
-| 25 | Glass, frost and glitch lyrics (`words*`) | baked per song | 3 per song; the style becomes 2 | caption style `glass`; word times (gap `voice-onsets`) |
-| 26 | Title behind subject (`words269`) | baked | **1** (paid matte) | existing `text_behind`; free with the Mac matte |
-| 27 | Contained sound ending (low-pass 1500 → 240 Hz, 3.6 s sink) | ffmpeg | 2 | audio `lowpass` keyframes in all three renderers |
+**New primitives:**
+- **N1:** `invert` and `rgbSplit {shiftPx}` effects, plus keyframeable effect amount.
+- **N2:** mask stroke (white line).
+- **N3:** free local subject matte with smoothing through time.
+- **N4:** text as a mask over an overlay copy (frosted / negative letters).
+- **N5:** `writeOn` text reveal.
+- **N6:** audio `lowpassHz` keyframes.
+- **N7:** image items down to 1 frame.
+- **N8:** shatter transition.
+- **N9:** tracked mask and anchors.
 
-The count: 15 can be live now (tier 1, 5 of them provisional), 5 need a new primitive, and 7 stay finished clips at
-first. **Every one can be in the library on day one as tier 3**, because each has a final clip.
+| # | id (pack status) | What it does | Level | Ops / primitive | Effort |
+|---|---|---|---|---|---|
+| 1 | `cutout-carry-over` (bespoke) | The subject keeps moving as a cut-out over the next shot for 9–15 frames | Live, paid matte | `$prev` overlay copy continuing past the cut, with `alphaMatte` (remove_background on that range), blue wash; free with N3 | M (+N3) |
+| 2 | `flash-white` (generic) | 3-frame white flash on a hit | **Live** | Template-owned white still on an overlay, blend `add`, opacity keyframes 0.6 / 0.3 / 0.1 (hold) | S |
+| 3 | `hit-negative` (generic) | First 3 frames as a negative with a colour split | Needs N1 | Split at in + 3 frames; `invert` + `rgbSplit` on the head piece | M after N1 |
+| 4 | `hit-rgb-split` (generic) | Red/blue split, 28/16/8 px over 3 frames, on a cut | **Live** (close match), exact with N1 | Now: transition `glitch` 0.1 s at the cut. Exact: `rgbSplit` with amount keyframes | S / M |
+| 5 | `multi-hit-split` (bespoke) | Split plus white lift on every cut of a burst | **Live** | #4 on each selected cut, plus exposure keyframes 0.6 / 0.3 / 0.1 | S |
+| 6 | `punch-in` (native) | Scale 1.35 → 1.0 over a short shot | **Live** | Scale keyframes 0 → 1 normalised on each selected clip (the pack's `patch`) | S |
+| 7 | `punch-split` (bespoke) | Punch plus split on a hit inside one shot | **Live** | `split` at the hit, #6 on the second piece, #4 on the new cut | S |
+| 8 | `cover-freeze` (bespoke) | The cut-out moves over a flicking comic-page wall, title behind, panels open at the end | Live, paid matte (partial) | Freeze (`holdSec`); page stills as image items every 3 frames; title text; subject copy with `alphaMatte` graded by adjust + grain; end panels = #9. Light wrap is missing | L (+N3) |
+| 9 | `window-open-next` (generic) | The next shot opens early as a band, column, slats or box, then cuts | **Live** | `$next` overlay copy, in = next.in − 0.3, rect mask keyframes from the shape (one copy per slat), wash; white line needs N2 | M (+N2 S) |
+| 10 | `burst-out-card` (bespoke) | A card of the next shot arrives, the subject breaks out, the card opens | Live, paid matte | #9 card + the current subject (copy with `alphaMatte`) on a higher track; one stage per note | M |
+| 11 | `band-behind-subject` (bespoke) | A band of the next shot opens behind the current subject | Live, paid matte | #9 band + the current subject copy above it | M |
+| 12 | `panel-pile` (bespoke) | Tilted panels land one per note; the last is the next shot | **Live** | Overlay copies or stills, scale + rotation keyframes settling in 3 frames, one per note time; one track per panel (≤ 16) | M |
+| 13 | `eye-window-zoom` (bespoke) | Pictures inside the mask's eye lens, then a zoom through it | Not ready | Needs N9 (tracked lens matte); the zoom itself is scale keyframes | XL |
+| 14 | `comic-page-fly-in` (bespoke) | A page of live panels; the camera flies into one, which is the next shot | **Live** (heavy) | N overlay items in a grid; expansion computes identical camera keyframes so the target cell lands at native size | L |
+| 15 | `subject-first-drop` (bespoke) | The next shot's subject arrives first, then its background as a band | Live, paid matte | Next subject copy with `alphaMatte` on the hit, then #9 band on the next note | M |
+| 16 | `diagonal-stripe` (bespoke) | Tilted stripes with the next scene playing in them | **Live** | #9 with `maskRotation`, one stripe per note | S after #9 |
+| 17 | `glass-shatter` (bespoke) | The frame breaks like glass and falls away | Not ready, then N8 | Ask Claude now; native shatter transition later | L |
+| 18 | `one-frame-art` (bespoke) | One frame of art on each fast cut | Needs N7 | The person's stills as 1-frame image items at the hit times | S + gate |
+| 19 | `white-out` (bespoke) | Lift to white, the next shot comes out of it | **Live** | Transition `white`; for different in and out frame counts, exposure keyframes on both sides | S |
+| 20 | `background-glitch` (bespoke) | Only the background glitches; the subject stays clean; own sound | Live, paid matte | `glitch` effect on a 4–6 frame split piece + subject copy with `alphaMatte` above + the pack's sound on the sfx track. **Needs the server render to draw `effect`** | M |
+| 21 | `title-behind-subject` (bespoke) | A big title behind the subject that glitches on the hit | Live, paid matte | Existing `text_behind` op + x/opacity jitter keyframes on the syllables; free with N3 | S |
+| 22 | `lyric-negative-window` (bespoke) | Letters are windows showing the picture as a negative | Needs N4 + N1 | Overlay copy with `invert`, masked by the words; word times from voice onsets (gap) | L |
+| 23 | `lyric-placed-art` (bespoke) | Lyrics placed by the shot: behind the head, on the road, down a tower | Not ready | Behind-subject parts work like #21; perspective and tracked anchors need N9. Per song, by Claude | XL |
+| 24 | `lyric-frosted-glass-glitch` (bespoke) | Frosted-glass letters that break into a colour split on each syllable | Needs N4 + N1 | Overlay copy with `blur` + exposure lift, masked by the words; ring = text stroke; the glitch is N1 amount keyframes. **README: first text style to build** | L |
+| 25 | `corner-signature` (bespoke) | A small signature mark, hidden over lettering | **Live** | Image item (the mark, from the pack) bottom right across the edit, split around the `hideOn` ranges | S |
+| 26 | `storm-end-card` (bespoke) | Storm cloud, the mark signed on, a line, TM pops, lightning glitch | Live (close match), exact with N5 | Cloud as a template-owned background clip (generated, no film pixels: check the final); the mark image revealed by linear mask keyframes; line and TM as image items with pop; true pen write-on needs N5 | M (+N5 L) |
+| 27 | `contained-sound-ending` (bespoke) | The song closes like a door: low-pass 1500 → 600 → 240 Hz, then a 3.6 s sink | Needs N6 | `lowpassHz` keyframes on the music item + squared volume keyframes | M after N6 |
+
+**Count:**
+- **Live now, free: 11.** #2, 4, 5, 6, 7, 9, 12, 14, 16, 19, 25.
+- **Live now with the paid matte: 7.** #1, 8, 10, 11, 15, 20, 21. All 7 become free with N3.
+- **Needs a primitive: 7.** #3, 17, 18, 22, 24, 26 (exact), 27.
+- **Not ready, made by Claude per video: 2.** #13, 23.
+
+Any one primitive unlocks several templates:
+- **N1** unlocks #3, exact #4, #22 and #24.
+- **N3** unlocks 7 templates for free (the README's #5).
+- **N4** unlocks #22 and #24.
 
 ## 5. The Edit UI (mockups 1–4)
-
 ### Mac
-- **Where it opens.** "Templates" in Edit's left rail opens the library panel.
-- **Panel contents:**
-  - Search and filters: All, Transitions, Effects, Text. Sound templates show under Effects.
-  - A "Made by Claude" group, plus "Yours" for ones the owner saved.
-  - 16:10 tiles with name and length.
+- **Where it opens.** "Templates" in Edit's left rail opens the library.
+- **What the library shows:**
+  - Search, and the filters All, Transitions, Effects, Captions.
+  - "Made by Claude", "Yours", and "Caption styles" (today's chips).
+  - 16:10 tiles with name and timing.
+  - Tiles that can't apply carry "Needs update" or "Not ready".
 - **Selecting a tile:**
-  - Hovering a tile plays its muted preview.
-  - Selecting one plays a **preview on the real selection** in the viewer ("Preview, not applied yet"). This uses
-    `dryRun` ops on an in-memory copy, so nothing is saved.
-  - The inspector shows the name, where it came from, an "Applies to" row (clip or cut, with Change), its settings
-    (sliders and toggles from `params`), and what kind it is ("Live effect…" or "Finished overlay clip…").
-  - The one primary button names the target: "Apply to clip 12" or "Apply to cut at 0:18.0". The secondary is
-    "Apply on every beat cut".
-- **Picking a target.** Transitions aim at a cut. Clicking a cut on the timeline selects it, and the accent box marks it.
-- **Saving.** "Save as template" sits in the timeline toolbar. It opens a sheet: name, what to keep (checkboxes built
-  from the selection), and Applies to (a clip, a cut, the whole edit).
-- **Older app.** Tiles a build can't play are marked "Needs update", and the inspector explains why.
+  - Hovering a tile plays its preview.
+  - Selecting one previews it **on the real selection** (`dryRun`, nothing saved).
+  - The inspector shows the description and origin, an "Applies to" row (clip or cut, with Change), the params (segmented controls, sliders, toggles) and the level line ("Live transition: uses the next clip itself, so it works on any video").
+  - One primary button names the target ("Apply to cut at 0:21.7"). The secondary applies to every selected cut, or every cut on a note.
+- **Paid-matte templates** carry the price on Apply ("Apply · $0.82") and go through the existing spend gate.
+- **Not-ready templates** play the reference clip, say why, and offer "Ask Claude to make it for this cut".
+- **Save as template** sits in the timeline toolbar. It opens a sheet with: name, what to keep (checkboxes from the selection), and Applies to (each selected clip, a cut, the whole edit).
 
 ### Android
-- The same library as a bottom sheet over Edit: filters, a 3-column grid.
-- Tapping a tile previews it in the viewer and opens its settings with a full-width "Apply to clip 3".
-- Saving is from the clip's long-press menu.
+- The same library as a bottom sheet: filters, then a 3-column grid.
+- Tapping a tile previews it and opens its settings, with a full-width Apply.
+- Not-ready templates show the reference only, without the Claude button.
+- Save is in the clip's long-press menu.
 
-### Copy and states (mockup 4)
-- **Loading:** skeleton tiles.
-- **Empty:** what a template is, plus one action, "Save clip 12 as template".
-- **Offline:** "Templates didn't load", with Try again; templates used on this device still work.
+### States
+- **Loading:** skeletons.
+- **Empty:** what a template is, plus "Save clip 12 as template".
+- **Offline:** "Templates didn't load", with Try again.
 - **Older app:** "Needs the next MUSE update".
-- **Claude's card:** "I saved … as a template", with "Open in Templates" and "Undo".
+- **Claude's card:** "Saved … as a template", with Open in Templates and Undo.
 
-### Design review against muse-design-review
-- One action fill per screen.
-- Accent is used only for the selection: the tile outline and the cut box.
-- No icons on rows, one Phosphor family, sentence case.
-- Prices are not involved (templates are free; a template that uses `text_behind` shows its matte price on its Apply
-  button: "Apply · $0.82").
-- Known flaws to fix in the build:
-  - The viewer's preview badge should be quieter.
-  - The page-turn tile art is a placeholder for the real preview clip.
-  - The Android sheet hides the timeline. It should stop at half height so the selected clip stays visible.
+### Design review (muse-design-review)
+- One action fill per screen; accent marks only the selection; one icon family; sentence case. There are no prices except paid-matte Apply buttons.
+- Fix in the build:
+  - The overlay label on the timeline must not truncate.
+  - The Android sheet should stop at half height so the selected clip stays visible.
+  - The tile art in the PNGs is a stand-in for the pack's real preview stills.
 
-## 6. Phases
-- **P0 (built, waiting to deploy).** Intake (§1), then the owner asks MUSE Claude to send the pack. The coordinator
-  replaces §4 with the real list.
-- **P1 server.**
-  - `edit_templates` table (migration 0038).
-  - Spec validation and expansion to ops (`src/editor/templates.ts`, pure and unit-tested against the fixtures).
-  - The 4 tools and the routes, `dryRun`, and the "needs update" check from `requires` against the app build the
-    request sends.
-  - Seed the 27 as tier 3, with tier 1 specs where §4 allows.
-  - **Also fix the server render dropping `effect`.** Otherwise a server export of a templated edit loses its effects.
-    If the apps export locally, this only affects server renders, but it still has to be fixed before tier 1 ships.
-- **P2 apps (one Mac bundle, one Android bundle).**
-  - The Templates panel or sheet, hover and tap previews, preview-before-apply (apply the `dryRun` patch to the local
-    copy), Apply, Save as template, and the states.
-  - There are no model changes, so no contract change.
-- **P3 primitives, one at a time, in order of gap count.**
-  - `invert` effect, `stripes` mask shape, audio `lowpass` keyframes, the `glass` caption style, `writeOn` text anim.
-  - Each one touches model.ts + fixtures + Kotlin + Swift + GLSL + Core Image + ffmpeg + a gate, and merges only after
-    the Mac CI is green.
-  - The matching templates then move from tier 3 to tier 2.
-- **P4.** Free on-device subject matte (Mac Vision, Android ML Kit) turns templates 5, 15 and 26 into free tier 1.
-  That is a separate plan.
+## 6. Phases (revised from the pack)
+- **P0 (done).** Intake is live, and the pack is in.
+- **P1, server only, no app update:**
+  - The `edit_templates` table (0038), the spec, the expansion (`$next`/`$prev` copies, normalised keyframes, shapes, wash, note times, each-selected), `dryRun`, the 4 tools and the routes.
+  - Seed the 11 free live templates and the 7 paid-matte ones; the rest as not-ready entries with previews.
+  - **Fix the server render to draw `effect`.** Needed for #20 and every N1 template in server exports.
+  - Claude can apply templates from chat as soon as P1 is live.
+- **P2, apps:**
+  - Templates library replacing the bin tab (caption styles inside), previews, `dryRun` preview, Apply, Save as template, states, and Ask Claude on the Mac.
+  - One Mac bundle and one Android bundle. There is no contract change.
+- **P3, primitives, one per Mac CI run, in this order:**
+  1. N1: invert, rgbSplit, effect amount keyframes.
+  2. N4: text as a mask.
+  3. N2: mask stroke.
+  4. N7: 1-frame image items.
+  5. N6: audio low-pass keyframes.
+  6. N5: write-on.
+  7. N8: shatter.
+
+  Each one is model.ts + fixtures + Kotlin + Swift + GLSL + Core Image + ffmpeg + a gate. Each moves its templates to Live.
+- **P4.** Free local subject matte (Mac Vision, the pack's `subject_matte.swift` and `cutout_finish.swift` as reference; Android ML Kit), with smoothing through time. This makes the 7 paid-matte templates free. Separate plan.
+- **P5, maybe.** Tracking and anchors (N9) for #13 and #23. Until then they stay as Claude-made per video.
 
 ## 7. Risks
-- **Old apps refuse unknown enum values.** Tier 2 has to be gated. The server never puts a primitive into a project
-  unless every app the studio uses can read it (same pattern as `BLEND_NEXT_LIVE`).
-- **Tier 3 looks fixed.**
-  - The clips are 16:9 1080p. On 9:16 they are cropped (fit rules in the spec), and lengths can't stretch without
-    looking wrong. The UI says so.
-  - The library is the first step, not the end state.
-- **Server render gap on `effect`.** See P1.
-- **Name confusion with photo `templates_*`.** Handled with distinct names and descriptions, and the sidebar
-  "Templates" (photo) stays separate. See question 1.
+- **Finished clips contain film pixels.** They are reference only. Shipping them as appliable overlays would put the Icon edit's footage into other videos. Hence "Not ready" plus "Ask Claude".
+- **Bespoke scripts have this video's frames and coordinates written in.**
+  - "Ask Claude to make it" is Claude adapting the script each time, so results vary.
+  - It costs Claude time and tokens, and only works on the Mac.
+  - The native primitives are the real fix.
+- **Old apps refuse unknown values.** N1–N8 ship gated (pattern: `BLEND_NEXT_LIVE`). The server never puts a primitive into a project that an app in use can't read.
+- **Server render drops `effect`.** Fix it in P1.
+- **Track limit of 16.** Slats, panel piles and page fly-ins use one overlay track per simultaneous copy. Expansion refuses with a clear count ("Needs 6 free tracks; this edit has 3").
+- **Paid matte.** It is priced and gated per apply. The README notes the free Mac lift beat the paid one, so P4 is worth doing early.
+- **Word timing** for the lyric templates needs voice onsets (gap `voice-onsets`). Today it is a per-song analysis done by Claude.
+- **Naming.** Photo `templates_*` stays separate, and the tool descriptions say so.
 - **Pack content.**
-  - Scripts are stored as text with credentials redacted. They are never run on the server.
-  - The pack's Python and headless-Chrome scripts are the team's reference for building the primitives, not runtime code.
-- **Storage.** Previews and finals are uploads (R2), not Railway disk. The 512 MB RAM is not touched: no rendering at
-  apply time.
-- **Expansion edge cases.**
-  - Clips shorter than a fixed-length template: refused, with "Clip 3 is 0.2 s; this needs 0.3 s".
-  - Cuts that already have a transition: it is replaced, and Undo brings it back.
-  - A missing `$next`, at the last clip: refused with a clear error.
-
-## 8. Questions for the owner
-1. Edit's left rail already has a "Templates" item (Mac `EditSuiteBin.swift:319`; today it holds caption styles). Should the new
-   library **replace it**, with kits as a filter? (Recommended: yes, one place.) Or should it sit beside it as
-   "Effects"?
-2. Should finished-clip (tier 3) templates show in the library from day one? They fit placement but not the look of
-   every clip. (Recommended: yes, marked "Finished clip".)
-3. Should members see and apply templates, or only the owner? (Recommended: owner only for now, like the rest of Edit
-   with Claude.)
+  - Scripts are stored as text (credentials redacted) and never run on the server.
+  - Media stays in uploads (R2).
+  - Railway RAM is untouched: no rendering at apply time.
