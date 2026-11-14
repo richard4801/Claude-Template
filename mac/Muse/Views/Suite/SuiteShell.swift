@@ -188,7 +188,7 @@ struct SuiteMoreMenu: View {
 
 extension View {
     /// The stage: media on the field tone (the frame is the hero, no border).
-    func suiteStage(_ t: Theme) -> some View {
+    func suiteStagePanel(_ t: Theme) -> some View {
         background(RoundedRectangle(cornerRadius: t.radii.container).fill(t.roles.field))
     }
 

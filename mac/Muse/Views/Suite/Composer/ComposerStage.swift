@@ -66,7 +66,7 @@ struct ComposerStage: View {
         }
         .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .suiteStage(t)
+        .suiteStagePanel(t)
     }
 }
 

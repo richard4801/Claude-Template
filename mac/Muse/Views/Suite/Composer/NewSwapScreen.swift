@@ -26,7 +26,7 @@ struct NewSwapScreen: View {
                     } else {
                         NewSwapStage()
                             .padding(Space.s4)
-                            .suiteStage(t)
+                            .suiteStagePanel(t)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

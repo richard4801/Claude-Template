@@ -92,8 +92,8 @@ struct ShotStageTake: View {
     /// "9:16", "16:9", "1:1", "4:5", "3:4" when the size is one of them.
     static func shape(_ w: Int, _ h: Int) -> String? {
         let r = Double(w) / Double(h)
-        for (label, v) in [("9:16", 9.0 / 16), ("16:9", 16.0 / 9), ("1:1", 1.0), ("4:5", 0.8), ("3:4", 0.75), ("2:3", 2.0 / 3), ("21:9", 21.0 / 9)]
-        where abs(r - v) < 0.02 { return label }
+        let shapes: [(String, Double)] = [("9:16", 0.5625), ("16:9", 1.7778), ("1:1", 1.0), ("4:5", 0.8), ("3:4", 0.75), ("2:3", 0.6667), ("21:9", 2.3333)]
+        for (label, v) in shapes where abs(r - v) < 0.02 { return label }
         return nil
     }
 }
