@@ -131,6 +131,8 @@ extension EditV2 {
     /// Wave 1: how a picture on an overlay track combines with the layers below it (`blendPixel`).
     public enum BlendMode: String, Codable, Hashable, Sendable, CaseIterable {
         case normal, multiply, screen, overlay, softLight, darken, lighten, add
+        /// Live-negative overlays (the server refuses them until this build ships: BLEND_NEXT_LIVE in model.ts).
+        case difference, exclusion
     }
 
     /// Wave 1: what shows where a contain-fitted main clip leaves the frame empty.

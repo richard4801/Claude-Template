@@ -19,6 +19,8 @@ extension EditV2 {
         case .darken: return min(b, s)
         case .lighten: return max(b, s)
         case .add: return min(1, b + s)
+        case .difference: return abs(b - s)
+        case .exclusion: return b + s - 2 * b * s
         }
     }
 

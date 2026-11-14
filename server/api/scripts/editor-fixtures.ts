@@ -447,7 +447,7 @@ const opsFixture = OP_NAMES.map(name => {
 
 // Wave 1 reference functions.
 const RGB = (r: number, g: number, b: number) => [r, g, b] as [number, number, number];
-const blendCases = M.BLEND_MODES.flatMap(mode => [
+const blendCases = M.ALL_BLEND_MODES.flatMap(mode => [
   { mode, top: RGB(0.2, 0.5, 0.9), below: RGB(0.6, 0.3, 0.1), a: 1 },
   { mode, top: RGB(0.8, 0.1, 0.45), below: RGB(0.2, 0.7, 0.5), a: 1 },
   { mode, top: RGB(0.6, 0.6, 0.6), below: RGB(0.1, 0.24, 0.9), a: 0.5 },
