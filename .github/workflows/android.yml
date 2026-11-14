@@ -49,6 +49,7 @@ jobs:
           --tests '*EditSuiteScreenshotTest*home*' --tests '*EditSuiteScreenshotTest*tiktok*'
           --tests '*ClaudeChatScreenshotTest*model_effort*'
           --tests '*SuiteRedesignScreenshotTest*' --tests '*SuiteNewSwapScreenshotTest*'
+          --tests '*SuitePhotoScreenshotTest*'
 
       # Release key from repository secrets when they exist (decoded to a temp file, never printed); otherwise the
       # build falls back to the debug key (android/app/build.gradle.kts).
@@ -122,5 +123,6 @@ jobs:
             android/app/build/outputs/roborazzi/claude_*_model_effort_*.png
             android/app/build/outputs/roborazzi/suite_redesign_*.png
             android/app/build/outputs/roborazzi/suite_newswap_*.png
+            android/app/build/outputs/roborazzi/suite_photo_*.png
           if-no-files-found: ignore
           retention-days: 14
