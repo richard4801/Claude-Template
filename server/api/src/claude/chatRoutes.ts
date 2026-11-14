@@ -180,6 +180,14 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
     return reply.status(204).send();
   });
 
+  /** The Mac says what it does with a question: shows its card, uploads (bytes so far, try n), checks the file. */
+  app.post<P>('/v1/claude/permissions/:id/progress', async (req, reply) => {
+    const b = parse(z.object({ phase: z.enum(['asking', 'uploading', 'confirming']), sentBytes: z.number().int().min(0).max(4 * 1024 ** 3).optional(),
+      totalBytes: z.number().int().min(0).max(4 * 1024 ** 3).optional(), attempt: z.number().int().min(1).max(10).optional() }).strict(), req.body);
+    permissionsOf(ctx).progress(req.user, req.params.id, b);
+    return reply.status(204).send();
+  });
+
   /** Claude operating the MUSE window (claude/uiControl.ts): calls waiting for this person's Mac; one Mac claims, acts, answers. */
   app.get('/v1/claude/ui', async req => ({ calls: uiOf(ctx).pending(req.user) }));
   app.post<P>('/v1/claude/ui/:id/claim', async req => {

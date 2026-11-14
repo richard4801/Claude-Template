@@ -27,6 +27,8 @@ const str = (d?: string, max?: number) => ({ type: 'string', ...(d ? { descripti
 const bool = (d: string) => ({ type: 'boolean', description: d });
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const SID = str('Edit session id (es_…), from open_edit');
+/** get_frame answers within this (Claude Code ends MCP calls it waits on for 60 s unless MCP_TOOL_TIMEOUT is raised). */
+export const GET_FRAME_BUDGET_MS = 45_000;
 const t2 = (s: number) => { const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`; };
 
 /**
@@ -429,10 +431,10 @@ const TOOLS: EditTool[] = [
     inputSchema: obj({ sessionId: SID, t: num('Seconds from the start', 0), width: num('Width in px (default 540)', 64, 1080) }, ['sessionId', 't']),
     run: async (env, a) => {
       const svc = editSessionsOf(env.ctx), s = await svc.row(env.user, sessionId(env, a));
-      const t = Number(a.t), width = Number(a.width) || 540;
+      const t = Number(a.t), width = Number(a.width) || 540, started = Date.now();
       if (!Number.isFinite(t) || t < 0) throw badRequest('t: seconds from the start');
       const exact = await svc.requestFrame(s, t, width);
-      if (exact) {
+      if ('uploadId' in exact) {
         const [up] = await env.ctx.db.select().from(uploads).where(eq(uploads.id, exact.uploadId));
         const obj = up ? await env.ctx.storage.get(up.storageKey) : null;
         if (obj) {
@@ -441,9 +443,19 @@ const TOOLS: EditTool[] = [
           return withImage(Buffer.concat(chunks), { t, revision: s.revision, approximate: false, renderedBy: exact.device });
         }
       }
-      const f = await approximateFrame(env.ctx, s.studioId, s.project as M.EditProject, t, width);
+      const why = 'missed' in exact ? exact.missed : 'The app\'s frame could not be read back.';
+      // Claude Code ends a tool call it has waited on too long ("The operation timed out."): the server's own render
+      // (behind other media work on the box) gets what is left of GET_FRAME_BUDGET_MS, then says so instead.
+      const left = Math.max(5_000, GET_FRAME_BUDGET_MS - (Date.now() - started));
+      let timer: NodeJS.Timeout | undefined;
+      const f = await Promise.race([approximateFrame(env.ctx, s.studioId, s.project as M.EditProject, t, width),
+        new Promise<null>(r => { timer = setTimeout(() => r(null), left); timer.unref?.(); })]).finally(() => clearTimeout(timer));
+      if (!f) {
+        await svc.log(s, `Couldn't look at ${t2(t)} in time`);
+        return { t, revision: s.revision, approximate: true, error: `No frame: ${why} The server's approximate render is busy (other media work is running); try again in a moment.`, exactMissed: why };
+      }
       await svc.log(s, `Looked at ${t2(t)} (approximate)`);
-      return withImage(f.png, { t, revision: s.revision, approximate: true, note: f.note, width: f.width, height: f.height });
+      return withImage(f.png, { t, revision: s.revision, approximate: true, note: f.note, exactMissed: why, width: f.width, height: f.height });
     },
   },
   {

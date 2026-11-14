@@ -197,7 +197,8 @@ describe('edit sessions API and Claude tools', () => {
     const svc = editSessionsOf(a.ctx);
     const sid = (await owner.req('POST', '/v1/edit-sessions', { takeId })).body.id;
     const approx = await tool('get_frame').run(env(), { sessionId: sid, t: 1.5, width: 120 }) as any;
-    expect(approx.structuredContent).toMatchObject({ approximate: true, t: 1.5, label: 'Looked at 0:01.5 (approximate)' });
+    expect(approx.structuredContent).toMatchObject({ approximate: true, t: 1.5, label: 'Looked at 0:01.5 (approximate)',
+      exactMissed: expect.stringMatching(/No MUSE app has this edit open/) });
     expect(approx.mcpContent[0]).toMatchObject({ type: 'image', mimeType: 'image/png' });
     const meta = await sharp(Buffer.from(approx.mcpContent[0].data, 'base64')).metadata();
     expect(meta.width).toBe(120);

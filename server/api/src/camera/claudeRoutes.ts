@@ -16,7 +16,7 @@ import { assistOf } from '../suite/assist.js';
 import { CHAT_REGISTRY } from '../claude/registry.js';
 import { ACTION_TOOLS, SETTINGS_TOOLS, registerActionRoutes } from '../claude/actions.js';
 import { ISSUE_ADMIN_TOOLS, ISSUE_TOOLS, registerIssueRoutes } from '../claude/issues.js';
-import { PERMISSION_TOOL, UPLOAD_TOOL, permissionsOf } from '../claude/permissions.js';
+import { PERMISSION_TOOL, UPLOAD_STATUS_TOOL, UPLOAD_TOOL, permissionsOf } from '../claude/permissions.js';
 import { uiOf } from '../claude/uiControl.js';
 import * as mcpTools from '../mcp/tools.js';
 
@@ -96,7 +96,7 @@ export async function registerClaudeRoutes(app: FastifyInstance, ctx: Ctx, camer
   registerSuggestionRoutes(app, ctx);
   // Every tool of the one registry is on the MCP server too (Claude Code on the Mac): members see those members may use
   // (mcp/server.ts memberOk). Listing the registry, not each set, so a new set can't be left off the MCP list again.
-  (mcpTools as { registerMcpTools: (tools: unknown[]) => void }).registerMcpTools([...CHAT_REGISTRY, ...CHAT_TOOLS, ...ISSUE_TOOLS, ...ISSUE_ADMIN_TOOLS, ...APP_TOOLS, ...ACTION_TOOLS, ...SETTINGS_TOOLS, PERMISSION_TOOL, UPLOAD_TOOL]);
+  (mcpTools as { registerMcpTools: (tools: unknown[]) => void }).registerMcpTools([...CHAT_REGISTRY, ...CHAT_TOOLS, ...ISSUE_TOOLS, ...ISSUE_ADMIN_TOOLS, ...APP_TOOLS, ...ACTION_TOOLS, ...SETTINGS_TOOLS, PERMISSION_TOOL, UPLOAD_TOOL, UPLOAD_STATUS_TOOL]);
   app.addHook('onClose', async () => permissionsOf(ctx).close());
   app.addHook('onClose', async () => uiOf(ctx).close());
   return claude;

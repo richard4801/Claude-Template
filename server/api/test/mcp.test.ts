@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { repairHistory } from '../src/camera/director.js';
 import { uploads } from '../src/db/schema.js';
+import { permissionsOf } from '../src/claude/permissions.js';
 import { sql } from 'drizzle-orm';
 import { makeApp, people, demoModel, type Client } from './helpers.js';
 
@@ -210,9 +211,27 @@ describe('render_camera_guides (Claude Code renders guides through the Mac relay
 describe('permission_prompt (files on the person\'s Mac ask first)', () => {
   it('waits for the person: allow, deny; credentials are refused outright; members have it too', async () => {
     const ask = (tool_name: string, input: Record<string, unknown>) => rpc('tools/call', { name: 'permission_prompt', arguments: { tool_name, input, tool_use_id: 'toolu_1' } });
-    // An older Mac app (no X-Muse-Caps: files): answered at once, never left waiting.
+    // No Mac has checked in (closed, or the server just restarted): a short wait for one, then it says so plainly. It is
+    // NOT "update MUSE" unless a Mac without file cards really talked to the server (ci_1d271380f0de).
+    const hub = permissionsOf(a.ctx);
+    hub.appWaitMs = 40;
+    expect(JSON.parse((await ask('Read', { file_path: '/Users/me/a.txt' })).body.result.content[0].text)).toEqual({ behavior: 'deny', message: expect.stringMatching(/isn't connected right now/) });
+    // A Mac checking in while the call waits: the question goes through (no refusal).
+    hub.appWaitMs = 5_000;
+    const waiting = ask('Read', { file_path: '/Users/me/b.txt' });
+    await new Promise(r => setTimeout(r, 30));
+    hub.sawApp(owner.id);
+    let w: any;
+    for (let i = 0; i < 50 && !w; i++) { w = (await owner.req('GET', '/v1/claude/permissions')).body.asks[0]; if (!w) await new Promise(r => setTimeout(r, 20)); }
+    expect(w).toMatchObject({ toolName: 'Read', input: { file_path: '/Users/me/b.txt' } });
+    await owner.req('POST', `/v1/claude/permissions/${w.id}`, { allow: true });
+    expect(JSON.parse((await waiting).body.result.content[0].text)).toEqual({ behavior: 'allow' });
+    (hub as any).caps.clear();
+    hub.appWaitMs = 40;
+    // An older Mac app (its requests carry no X-Muse-Caps at all): "update MUSE".
+    await a.app.inject({ method: 'GET', url: '/v1/claude/permissions', headers: { authorization: `Bearer ${owner.token}`, 'user-agent': 'MUSE/510 CFNetwork/1568 Darwin/24.0.0' } });
     expect(JSON.parse((await ask('Read', { file_path: '/Users/me/a.txt' })).body.result.content[0].text)).toEqual({ behavior: 'deny', message: expect.stringMatching(/newer MUSE app/) });
-    expect(JSON.parse((await rpc('tools/call', { name: 'upload_local_file', arguments: { path: '/Users/me/a.png' } })).body.result.content[0].text).error).toMatch(/newer MUSE app/);
+    expect(JSON.parse((await rpc('tools/call', { name: 'upload_local_file', arguments: { path: '/Users/me/a.png' } })).body.result.content[0].text)).toMatchObject({ status: 'failed', error: expect.stringMatching(/newer MUSE app/) });
     await a.app.inject({ method: 'GET', url: '/v1/claude/permissions', headers: { authorization: `Bearer ${owner.token}`, 'x-muse-caps': 'files,results' } });
     const pending = ask('Read', { file_path: '/Users/me/Movies/clip.mov' });
     let asks: any[] = [];
@@ -259,12 +278,59 @@ describe('upload_local_file (a Mac file into MUSE, after the person says yes)', 
     const studioId = ((await a.ctx.db.execute(sql`select studio_id from users where id = ${owner.id}`)) as any).rows[0].studio_id;
     await a.ctx.db.insert(uploads).values({ id: 'up_layout', studioId, kind: 'image', storageKey: 'u/layout.png', contentType: 'image/png', bytes: 10, state: 'ready', createdAt: Date.now() });
     expect((await owner.req('POST', `/v1/claude/permissions/${a1.id}`, { allow: true, result: { uploadId: 'up_layout', kind: 'image', url: '/uploads/u/layout.png' } })).status).toBe(204);
-    expect(JSON.parse((await p1).body.result.content[0].text)).toEqual({ uploadId: 'up_layout', kind: 'image', url: '/uploads/u/layout.png' });
+    expect(JSON.parse((await p1).body.result.content[0].text)).toEqual({ status: 'done', uploadId: 'up_layout', kind: 'image', url: '/uploads/u/layout.png' });
 
     const p2 = up('/Users/me/Shoot/b.mov', 'clip');
     const a2 = await next();
     await owner.req('POST', `/v1/claude/permissions/${a2.id}`, { allow: false });
-    expect(JSON.parse((await p2).body.result.content[0].text).error).toMatch(/said no/);
+    expect(JSON.parse((await p2).body.result.content[0].text)).toMatchObject({ status: 'failed', error: expect.stringMatching(/said no/) });
+  });
+
+  it('never holds Claude past its timeout: answers with where the upload stands, upload_status follows it to the end (ci_5c0e35ee5488, ci_9c7fc3adb445)', async () => {
+    const hub = permissionsOf(a.ctx);
+    hub.uploadAnswerMs = 60;
+    const text = (r: any) => JSON.parse(r.body.result.content[0].text);
+    const next = async () => { let x: any; for (let i = 0; i < 50 && !x; i++) { x = (await owner.req('GET', '/v1/claude/permissions')).body.asks[0]; if (!x) await new Promise(r => setTimeout(r, 20)); } return x; };
+    const status = (uploadTicket: string) => rpc('tools/call', { name: 'upload_status', arguments: { uploadTicket } });
+    try {
+      // A Mac that acks (X-Muse-Caps: files,acks): no card yet → "sent", then the card → waiting for approval.
+      await a.app.inject({ method: 'GET', url: '/v1/claude/permissions', headers: { authorization: `Bearer ${owner.token}`, 'x-muse-caps': 'files,results,ui,acks' } });
+      const first = text(await rpc('tools/call', { name: 'upload_local_file', arguments: { path: '/Users/me/Edit/lyrics_prores.mov', purpose: 'clip' } }));
+      expect(first).toMatchObject({ status: 'waiting_for_approval', uploadTicket: expect.stringMatching(/^perm/), message: expect.stringMatching(/hasn't shown/) });
+      const ask = await next();
+      expect(ask.id).toBe(first.uploadTicket);
+      expect((await owner.req('POST', `/v1/claude/permissions/${ask.id}/progress`, { phase: 'asking' })).status).toBe(204);
+      expect(text(await status(ask.id))).toMatchObject({ status: 'waiting_for_approval', message: expect.stringMatching(/approve the "Upload lyrics_prores\.mov to MUSE\?" card/) });
+      // Approved: the bytes go up (try 2 after a dropped connection), then MUSE checks the file.
+      await owner.req('POST', `/v1/claude/permissions/${ask.id}/progress`, { phase: 'uploading', sentBytes: 56 * 1024 * 1024, totalBytes: 112 * 1024 * 1024, attempt: 2 });
+      expect(text(await status(ask.id))).toMatchObject({ status: 'uploading', percent: 50, sentMB: 56, totalMB: 112, attempt: 2, message: expect.stringMatching(/50% \(56 of 112 MB\) \(try 2\)/) });
+      await owner.req('POST', `/v1/claude/permissions/${ask.id}/progress`, { phase: 'confirming' });
+      expect(text(await status(ask.id))).toMatchObject({ status: 'confirming' });
+      // upload_status waiting when it lands: answers with the upload at once.
+      hub.uploadAnswerMs = 5_000;
+      const waiting = status(ask.id);
+      await new Promise(r => setTimeout(r, 30));
+      const studioId = ((await a.ctx.db.execute(sql`select studio_id from users where id = ${owner.id}`)) as any).rows[0].studio_id;
+      await a.ctx.db.insert(uploads).values({ id: 'up_prores', studioId, kind: 'clip', storageKey: 'c/up_prores.mov', contentType: 'video/quicktime', bytes: 10, state: 'ready', createdBy: owner.id, createdAt: Date.now() });
+      expect((await owner.req('POST', `/v1/claude/permissions/${ask.id}`, { allow: true, result: { uploadId: 'up_prores', kind: 'clip', name: 'lyrics_prores.mov' } })).status).toBe(204);
+      expect(text(await waiting)).toEqual({ status: 'done', uploadId: 'up_prores', kind: 'clip', name: 'lyrics_prores.mov' });
+      // Asked again later: the same answer (kept an hour). Progress after the end: gone.
+      expect(text(await status(ask.id))).toMatchObject({ status: 'done', uploadId: 'up_prores' });
+      expect((await owner.req('POST', `/v1/claude/permissions/${ask.id}/progress`, { phase: 'uploading' })).status).toBe(410);
+      // Someone else's ticket, or one from before a restart: unknown, with what to do.
+      expect(text(await rpc('tools/call', { name: 'upload_status', arguments: { uploadTicket: 'perm_gone' } }))).toMatchObject({ status: 'unknown', error: expect.stringMatching(/restarted/) });
+
+      // A Mac that acks but never shows the card (no turn of this person running there): ends with why, not silence.
+      hub.ackWaitMs = 40;
+      hub.uploadAnswerMs = 2_000;
+      const lost = text(await rpc('tools/call', { name: 'upload_local_file', arguments: { path: '/Users/me/Edit/b.mov', purpose: 'clip' } }));
+      expect(lost).toMatchObject({ status: 'failed', error: expect.stringMatching(/didn't show its card/) });
+      const bash = rpc('tools/call', { name: 'permission_prompt', arguments: { tool_name: 'Bash', input: { command: 'ls /tmp' } } });
+      expect(text(await bash)).toEqual({ behavior: 'deny', message: expect.stringMatching(/didn't show a card/) });
+    } finally {
+      hub.uploadAnswerMs = 40_000; hub.ackWaitMs = 20_000; hub.appWaitMs = 25_000;
+      (hub as any).acks.clear();
+    }
   });
 
   it('takes a sound as an editor audio upload (ci_de89873ab1de): checks the file arrived, marks it ready, fills its link', async () => {
