@@ -254,7 +254,7 @@ public enum GeneratePrice: Equatable, Sendable {
     public var buttonText: String {
         switch self {
         case .unknown, .problem: return "Generate · —"
-        case .free: return "Generate · Free"
+        case .free: return "Test render · Free" // owner decision 5 (suite redesign): the free test render says so
         case .price(let l): return l
         }
     }

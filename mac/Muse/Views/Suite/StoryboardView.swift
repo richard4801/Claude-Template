@@ -11,6 +11,9 @@ struct StoryboardView: View {
     var body: some View {
         @Bindable var suite = store.suite
         VStack(spacing: 0) {
+            // The Suite redesign: the shared header and tabs (Storyboard selected); the board's own header under it.
+            SuitePageHeader()
+                .padding(.horizontal, Space.s5).padding(.top, 20).padding(.bottom, Space.s3)
             header
             Rectangle().fill(t.line).frame(height: 1)
             HStack(spacing: 0) {
@@ -60,14 +63,10 @@ struct StoryboardView: View {
         @Bindable var suite = store.suite
         return HStack(alignment: .bottom, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Button { store.openSuite(.hub) } label: {
-                    Text("Video suite").font(t.scale.caption.font).foregroundStyle(t.muted)
-                }
-                .buttonStyle(.plain)
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     TextField("Name the storyboard", text: $suite.board.title).textFieldStyle(.plain)
-                        .font(t.isA ? Fonts.font("Instrument Serif", 42, .regular) : t.display(32)).fixedSize()
-                    Text("· \(suite.board.totalSeconds) s").font(t.isA ? Fonts.font("Instrument Serif", 42, .regular) : t.display(32)).foregroundStyle(t.muted)
+                        .font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(26)).fixedSize()
+                    Text("· \(suite.board.totalSeconds) s").font(t.isA ? Fonts.font("Instrument Serif", 30, .regular) : t.display(26)).foregroundStyle(t.muted)
                 }
             }
             Spacer(minLength: 12)

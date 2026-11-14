@@ -92,7 +92,7 @@ final class SuiteComposerShellTests: XCTestCase {
         XCTAssertTrue(GeneratePrice.of(e).canGenerate)
         var test = e
         test.test = true
-        XCTAssertEqual(GeneratePrice.of(test).buttonText, "Generate · Free")
+        XCTAssertEqual(GeneratePrice.of(test).buttonText, "Test render · Free")
         var capped = e
         capped.ok = false
         capped.message = "Over the studio's $5.00 per-shot limit"

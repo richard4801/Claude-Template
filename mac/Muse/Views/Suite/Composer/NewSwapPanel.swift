@@ -41,35 +41,131 @@ struct NewSwapPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s4) {
-            if onScreen {
-                VStack(alignment: .leading, spacing: Space.s1) {
-                    Text("Changes").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
-                    Text("Switch on what should change. Write only the change.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } else {
-                source
-                if let c = store.clip { trimmer(c) }
-            }
-            VStack(alignment: .leading, spacing: Space.s3) {
-                toggleRow("Background", isOn: bind(\.backgroundOn), state: d.backgroundMode == .describe ? "Describe the new place" : "A new place from a picture",
-                          help: "A new place: describe it, or a location or photo") { backgroundField }
-                toggleRow("Outfit", isOn: bind(\.outfitOn), state: "New clothes", help: "New clothes: one of her outfits, a product photo, or words") { outfitField }
-                toggleRow("Character", isOn: bind(\.characterOn), state: d.characterKind == .model ? "Her, with the figure lock" : "Face swap from a photo",
-                          help: "Who the person becomes: her, or a face swap from a photo") { characterField }
-                toggleRow("Look & light", isOn: bind(\.lookOn), state: "Time of day, light, grade", help: "Time of day, light and colour grade") { lookField }
-            }
-            Text(d.keptLine).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
-                .fixedSize(horizontal: false, vertical: true)
-            if !onScreen, d.engineModel == nil, let why = store.suite.remixEstimate?.remix?.why ?? store.suite.remixModels?.auto?.why {
-                Text("Auto: \(why)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        Group {
+            if onScreen { screenPanel } else { railPanel }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { preselectHer() }
         .onChange(of: d.characterOn) { _, on in if on && d.characterKind == .model && d.modelId == nil { store.suite.remix.modelId = defaultHer } }
+    }
+
+    /// The composer's right rail (the older layout): the video, the trimmer, then the changes.
+    private var railPanel: some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            source
+            if let c = store.clip { trimmer(c) }
+            VStack(alignment: .leading, spacing: Space.s3) { changes }
+            Text(d.keptLine).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+            if d.engineModel == nil, let why = store.suite.remixEstimate?.remix?.why ?? store.suite.remixModels?.auto?.why {
+                Text("Auto: \(why)").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// New Swap's own screen (redesign frames "New Swap"): the title with Beta and its menu, then the three-step guide
+    /// until the first swap (owner decision 3), or the changes, the sound and the price.
+    private var screenPanel: some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            SuitePanelTitle(title: "New Swap", tag: "Beta", subtitle: store.clip == nil && showGuide ? nil : "Pick what changes. Everything else stays from the clip.") {
+                panelMenu
+            }
+            if store.clip == nil && showGuide {
+                guide
+            } else {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    SuitePanelSection(title: "Changes")
+                    changes
+                }
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    SuitePanelSection(title: "Sound")
+                    switchHeader("Keep clip sound", icon: "speaker-high", isOn: bind(\.keepAudio),
+                                 help: d.keepAudio ? "The clip's own sound goes back on the take" : "No sound from the clip")
+                }
+                Spacer(minLength: Space.s2)
+                summary
+            }
+        }
+        .frame(minHeight: 0, alignment: .top)
+    }
+
+    /// The guide shows until the studio's first swap (owner decision 3).
+    private var showGuide: Bool {
+        !store.jobs.contains { ["swap", "remix", "recast"].contains($0.suiteTool ?? "") }
+    }
+
+    private var guide: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle().fill(t.roles.hairline).frame(height: 1)
+            guideStep(1, "Add a clip", "The motion, timing and camera come from it.", on: true)
+            guideStep(2, "Pick what changes", "Background, outfit, character, look and light.", on: false)
+            guideStep(3, "Generate", "You see the price before anything runs.", on: false)
+        }
+    }
+
+    private func guideStep(_ n: Int, _ title: String, _ line: String, on: Bool) -> some View {
+        HStack(alignment: .top, spacing: Space.s3) {
+            Text("\(n)").font(t.scale.caption.font).monospacedDigit().foregroundStyle(on ? t.roles.ink : t.roles.ink2)
+                .frame(width: 22, height: 22)
+                .overlay(Circle().strokeBorder(on ? t.roles.ink : t.roles.hairline, lineWidth: 1))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(t.body(13.5, .semibold)).foregroundStyle(t.roles.ink)
+                Text(line).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, Space.s3)
+        .overlay(alignment: .bottom) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Step \(n): \(title). \(line)")
+    }
+
+    /// The panel's menu: the classic Swap (the screen before New Swap) and a link as the clip.
+    private var panelMenu: some View {
+        Menu {
+            Button("Use the classic Swap") { store.setSwapVariant(.classic) }
+            Button("Paste a link as the clip…") { store.openLinkImport(.swap) }
+        } label: {
+            Image(nsImage: Ph.menuImage("dots-three", 15))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .frame(width: 28, height: 28)
+        .foregroundStyle(t.roles.ink2)
+        .help("More: the classic Swap, a link as the clip")
+        .accessibilityLabel("New Swap options")
+    }
+
+    /// The price, as the server worked it out for this clip, and when it is charged.
+    @ViewBuilder private var summary: some View {
+        if let e = store.suite.remixEstimate, e.problem == nil {
+            VStack(alignment: .leading, spacing: Space.s1) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(e.priceLine).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink).lineLimit(2)
+                    Spacer(minLength: Space.s2)
+                    Text(e.test ? "Free" : Pricing.money(e.estimate)).font(t.body(13.5, .semibold)).monospacedDigit().foregroundStyle(t.roles.ink).fixedSize()
+                }
+                Text(e.test ? "A test render: nothing is charged" : "Charged when the take finishes. A failed take is refunded.")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(Space.s3)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.canvas))
+            .accessibilityElement(children: .combine)
+        } else {
+            Text(d.keptLine).font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private var changes: some View {
+        toggleRow("Background", icon: "image", isOn: bind(\.backgroundOn), state: d.backgroundMode == .describe ? "Describe the new place" : "A new place from a picture",
+                  help: "A new place: describe it, or a location or photo") { backgroundField }
+        toggleRow("Outfit", icon: "t-shirt", isOn: bind(\.outfitOn), state: "New clothes", help: "New clothes: one of her outfits, a product photo, or words") { outfitField }
+        toggleRow("Character", icon: "user", isOn: bind(\.characterOn), state: d.characterKind == .model ? "Her, with the figure lock" : "Face swap from a photo",
+                  help: "Who the person becomes: her, or a face swap from a photo") { characterField }
+        toggleRow("Look & light", icon: "sun", isOn: bind(\.lookOn), state: "Time of day, light, grade", help: "Time of day, light and colour grade") { lookField }
     }
 
     /// Owner's rule: her, with the strict figure lock, is the default Character.
@@ -166,23 +262,31 @@ struct NewSwapPanel: View {
 
     // MARK: Toggles
 
-    /// One change (approved mockup): its name and a state line on the left, the switch on the right; when on, its one
-    /// field under it.
-    @ViewBuilder private func toggleRow<F: View>(_ title: String, isOn: Binding<Bool>, state: String, help: String, @ViewBuilder field: () -> F) -> some View {
+    /// One change (redesign): its icon and name, "Keep from clip" while off, the switch; when on, its field under it.
+    @ViewBuilder private func toggleRow<F: View>(_ title: String, icon: String, isOn: Binding<Bool>, state: String, help: String, @ViewBuilder field: () -> F) -> some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            HStack(alignment: .center, spacing: Space.s3) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink)
-                    Text(isOn.wrappedValue ? state : "Kept from the clip").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
-                }
-                Spacer(minLength: Space.s2)
-                Toggle(title, isOn: isOn).toggleStyle(.switch).labelsHidden().controlSize(.small)
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-            .help(help)
+            switchHeader(title, icon: icon, isOn: isOn, help: "\(help). \(isOn.wrappedValue ? state : "Kept from the clip").")
             if isOn.wrappedValue { field().padding(.bottom, Space.s1) }
         }
+        .padding(.bottom, Space.s2)
+        .overlay(alignment: .bottom) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
+    }
+
+    /// Icon, name, "Keep from clip" while off, and the switch.
+    private func switchHeader(_ title: String, icon: String, isOn: Binding<Bool>, help: String) -> some View {
+        HStack(alignment: .center, spacing: Space.s2) {
+            Ph(icon, 15).frame(width: 18, height: 18).foregroundStyle(isOn.wrappedValue ? t.roles.ink : t.roles.ink2)
+            Text(title).font(t.body(13.5, isOn.wrappedValue ? .semibold : .regular)).foregroundStyle(isOn.wrappedValue ? t.roles.ink : t.roles.ink2)
+                .lineLimit(1)
+            Spacer(minLength: Space.s2)
+            if !isOn.wrappedValue {
+                Text("Keep from clip").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
+            }
+            Toggle(title, isOn: isOn).toggleStyle(.switch).labelsHidden().controlSize(.small).tint(t.roles.action)
+        }
+        .frame(minHeight: 34)
+        .contentShape(Rectangle())
+        .help(help)
     }
 
     /// A text field on the field tone (the mockup's fields), 1–3 lines.
@@ -194,7 +298,8 @@ struct NewSwapPanel: View {
             .foregroundStyle(t.roles.ink)
             .padding(.horizontal, Space.s3).padding(.vertical, Space.s2)
             .frame(minHeight: 36)
-            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.canvas))
+            .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
     }
 
     @ViewBuilder private var backgroundField: some View {
@@ -279,7 +384,8 @@ struct NewSwapPanel: View {
                     .popover(isPresented: $pickHer, arrowEdge: .bottom) { herList }
             }
             .padding(.vertical, 6).padding(.leading, 6).padding(.trailing, Space.s3)
-            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.canvas))
+            .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
             Button("Face swap from a photo instead") { store.suite.remix.characterKind = .face }
                 .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.ink2).fixedSize()
                 .help("Only the face changes; their hair, body and figure stay as in the video")
@@ -295,7 +401,8 @@ struct NewSwapPanel: View {
                     .buttonStyle(.plain).font(t.scale.label.font).foregroundStyle(t.roles.link).fixedSize()
             }
             .padding(.vertical, 6).padding(.leading, 6).padding(.trailing, Space.s3)
-            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.canvas))
+            .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
             Text("Face swap: only the face changes. Their hair, body and figure stay as in the video. Use a photo of someone who agreed to this.")
                 .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
             Button("Use her instead") { store.suite.remix.characterKind = .model }

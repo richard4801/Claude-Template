@@ -29,7 +29,16 @@ struct EditSuiteView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.recreate.open {
-                RecreateView()
+                VStack(spacing: 0) {
+                    // The Suite redesign: Recreate is a Video suite tab; its start page carries the shared header and tabs
+                    // (a reference open keeps the whole height for the recipe, as before).
+                    if store.recreate.reference == nil {
+                        SuitePageHeader()
+                            .padding(.horizontal, Space.s5).padding(.top, Space.s4).padding(.bottom, Space.s2)
+                            .suiteTokens()
+                    }
+                    RecreateView()
+                }
             } else if let page = store.learn.page {
                 // The learning editor (plans/learning-editor-ui.md): Playbook and Recipes, owner only.
                 switch page {

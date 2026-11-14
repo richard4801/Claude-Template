@@ -196,7 +196,7 @@ struct TitleBar: View {
                 }
                 .foregroundStyle(t.roles.ink2)
                 .padding(.horizontal, Space.s3)
-                .frame(width: 420, height: 28)
+                .frame(minWidth: 200, idealWidth: 420, maxWidth: 420, minHeight: 28, maxHeight: 28) // gives way first in narrow windows
                 .background(RoundedRectangle(cornerRadius: t.radii.control, style: .continuous).fill(t.roles.field))
                 .contentShape(Rectangle())
             }
@@ -208,12 +208,20 @@ struct TitleBar: View {
             HStack(spacing: 10) {
                 if store.user != nil {
                     let on = store.oneClaude.open
+                    // The Suite redesign: "Ask Claude", a labelled outline button (the frames' title bar).
                     Button { store.toggleOneClaude() } label: {
-                        Ph("chat-circle-text", 16).frame(width: 28, height: 28).contentShape(Rectangle())
-                            .overlay(alignment: .topTrailing) { ClaudeResultDot() }
+                        HStack(spacing: 6) {
+                            Ph("chat-circle-text", 14)
+                            Text(on ? "Hide Claude" : "Ask Claude").font(t.scale.label.font).lineLimit(1).fixedSize()
+                        }
+                        .padding(.horizontal, 10).frame(height: 30)
+                        .background(RoundedRectangle(cornerRadius: t.radii.control).fill(on ? t.roles.field : t.roles.raised))
+                        .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+                        .overlay(alignment: .topTrailing) { ClaudeResultDot() }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(on ? t.roles.ink : t.roles.ink2)
+                    .foregroundStyle(t.roles.ink)
                     .keyboardShortcut("c", modifiers: [.command, .shift])
                     .help(on ? "Hide Claude (⌘⇧C)" : "Claude, on every page (⌘⇧C)")
                     .accessibilityLabel(on ? "Hide Claude" : "Show Claude")

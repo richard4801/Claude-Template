@@ -16,8 +16,8 @@ struct NewSwapScreen: View {
     var narrow: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: Space.s6) {
+        VStack(spacing: Space.s4) {
+            HStack(alignment: .top, spacing: 20) {
                 Group {
                     if store.suite.claude.open && store.isOwner {
                         SuiteClaudePanel()
@@ -25,20 +25,23 @@ struct NewSwapScreen: View {
                         ComposerFeed()
                     } else {
                         NewSwapStage()
+                            .padding(Space.s4)
+                            .suiteStage(t)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 ScrollView(.vertical, showsIndicators: false) {
-                    NewSwapPanel(onScreen: true).frame(maxWidth: .infinity, alignment: .leading)
+                    NewSwapPanel(onScreen: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Space.s4)
                 }
-                .frame(width: narrow ? 320 : 352)
+                .frame(width: narrow ? 272 : 294)
                 .frame(maxHeight: .infinity, alignment: .top)
+                .suitePanel(t)
             }
             .frame(minHeight: 0, maxHeight: .infinity)
-            .padding(.bottom, Space.s4)
-            Rectangle().fill(t.roles.hairline).frame(height: 1)
             NewSwapBar()
-                .frame(height: 64)
+                .frame(height: 48)
                 .accessibilityIdentifier("newSwap.bottomBar")
         }
     }
@@ -54,6 +57,8 @@ struct NewSwapStage: View {
     @State private var dropping = false
     @State private var replaceLibrary = false
     @State private var replaceOpen = false
+    /// The clip's player, shared by the viewer, the play button and the trimmer's playhead.
+    @State private var playback = ViewerPlayback()
 
     private func replaceItem(_ title: String, _ run: @escaping () -> Void) -> some View {
         Button {
@@ -107,20 +112,24 @@ struct NewSwapStage: View {
 
     private func filled(_ c: Clip) -> some View {
         VStack(spacing: Space.s3) {
-            HStack(spacing: Space.s3) {
-                Text(c.name).font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.middle)
+            HStack(alignment: .top, spacing: Space.s3) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(c.name).font(t.body(15, .semibold)).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.middle)
+                    // "0:09 · 9:16 · 1080 × 1920": the clip's own length, shape and size.
+                    Text([Take.clock(c.durationSec), ShotStageTake.shape(c.width, c.height), "\(c.width) × \(c.height)"].compactMap { $0 }.joined(separator: " · "))
+                        .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
+                }
                 Spacer(minLength: Space.s2)
-                Text("\(Take.clock(c.durationSec)), \(c.width) × \(c.height)").font(t.scale.caption.font).monospacedDigit()
-                    .foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
                 // A button with a popover, not a Menu (a menu label draws its icon unsized).
                 Button { replaceOpen.toggle() } label: {
-                    HStack(spacing: Space.s1) {
-                        Text("Replace").font(t.scale.label.font)
-                        Ph("caret-down", 12).frame(width: 14, height: 14)
+                    HStack(spacing: Space.s2) {
+                        Ph("upload-simple", 14).frame(width: 16, height: 16)
+                        Text("Replace clip").font(t.scale.label.font)
                     }
                     .foregroundStyle(t.roles.ink)
-                    .padding(.horizontal, Space.s3).frame(height: 32)
-                    .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+                    .padding(.horizontal, Space.s3).frame(height: 34)
+                    .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.raised))
+                    .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).fixedSize()
@@ -136,49 +145,83 @@ struct NewSwapStage: View {
                 }
                 .sheet(isPresented: $replaceLibrary) { NewSwapLibrarySheet { replaceLibrary = false }.environment(store).environment(\.theme, t) }
             }
-            .frame(maxWidth: 600)
-            .frame(height: 32)
-            .padding(.top, Space.s2)
             TakeViewer(media: ViewerMedia(id: c.id, videoURL: store.clipVideo, poster: store.clipPoster, width: c.width, height: c.height, label: c.name),
-                       context: .source, autoplay: false, startMuted: true)
+                       context: .source, autoplay: false, startMuted: true, sharedPlayback: playback)
                 .id(c.id)
                 .frame(maxHeight: .infinity)
-            NewSwapTrimmer(clip: c)
-                .frame(maxWidth: 600)
+            HStack(alignment: .top, spacing: Space.s3) {
+                StagePlayButton(playback: playback)
+                NewSwapTrimmer(clip: c, playback: playback)
+            }
+            .frame(maxWidth: 520)
         }
     }
 }
 
 // MARK: The source (empty state)
 
-/// Before a video (approved mockup newswap-mac-empty): a centred drop zone with one line of what this is and the three
-/// ways in. Library opens a picker sheet; it never fills the stage.
+/// Before a video (redesign frame "New Swap, empty"): a dashed drop zone with the film icon, what to drop, and the ways in
+/// (Library, a file, a link); then the newest finished videos as "Recent clips", one click uses one.
 struct NewSwapSourcePicker: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     @State private var libraryOpen = false
 
     var body: some View {
-        VStack(spacing: Space.s4) {
-            VStack(spacing: Space.s1) {
-                Text("Add the video to remix").font(t.scale.heading.font).foregroundStyle(t.roles.ink)
-                Text("Drop a video here, or pick one. Then switch on what should change.")
-                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: Space.s5) {
+            VStack(spacing: Space.s3) {
+                Ph("film-strip", 22).foregroundStyle(t.roles.ink)
+                Text("Drop a clip to swap into").font(t.body(17, .semibold)).foregroundStyle(t.roles.ink)
+                Text("MP4 or MOV. Vertical clips work best.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                HStack(spacing: Space.s2) {
+                    source("Choose from Library", icon: "squares-four") { libraryOpen = true }
+                    source("Upload file", icon: "upload-simple") { store.pickClip() }
+                    source("Paste a link", icon: "link") { store.openLinkImport(.swap) }
+                }
+                .padding(.top, Space.s2)
             }
-            HStack(spacing: Space.s2) {
-                source("From the Library", icon: "squares-four") { libraryOpen = true }
-                source("Upload a file", icon: "upload-simple") { store.pickClip() }
-                source("Paste a link", icon: "link") { store.openLinkImport(.swap) }
-            }
-            Text("MP4 or MOV. MUSE checks the clip after it arrives.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+            .padding(Space.s6)
+            .frame(maxWidth: .infinity, minHeight: 200)
+            .overlay(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.ink2.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+            .frame(maxWidth: 600)
+            .frame(maxWidth: .infinity)
+            recent
         }
-        .padding(Space.s6)
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: t.radii.container).fill(t.roles.raised))
-        .overlay(RoundedRectangle(cornerRadius: t.radii.container).strokeBorder(t.roles.hairline, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+        .padding(.top, Space.s5)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $libraryOpen) { NewSwapLibrarySheet { libraryOpen = false }.environment(store).environment(\.theme, t) }
+    }
+
+    /// The newest finished videos (the Library's), as 9:16 tiles with their names and lengths.
+    @ViewBuilder private var recent: some View {
+        let list = Array(store.extendableTakes.prefix(5))
+        if !list.isEmpty {
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Recent clips").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+                HStack(alignment: .top, spacing: Space.s3) {
+                    ForEach(list) { item in
+                        Button { store.useTakeAsRemixSource(item.take) } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                MuseImage(ref: item.take.thumb)
+                                    .frame(width: 80, height: 142)
+                                    .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
+                                Text(item.take.caption).font(t.scale.caption.font).foregroundStyle(t.roles.ink).lineLimit(1)
+                                    .frame(width: 80, alignment: .leading)
+                                if let sec = item.source.seconds {
+                                    Text(Take.clock(sec)).font(t.scale.micro.font).monospacedDigit().foregroundStyle(t.roles.ink2)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Use \(item.take.caption)")
+                        .accessibilityLabel("Use \(item.take.caption)")
+                    }
+                }
+            }
+            .frame(maxWidth: 600, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
     }
 
     private func source(_ title: String, icon: String, _ run: @escaping () -> Void) -> some View {
@@ -188,12 +231,29 @@ struct NewSwapSourcePicker: View {
                 Text(title).font(t.scale.label.font).lineLimit(1).fixedSize()
             }
             .foregroundStyle(t.roles.ink)
-            .padding(.horizontal, Space.s3).frame(height: 36)
-            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
+            .padding(.horizontal, Space.s3).frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.raised))
+            .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(title)
+    }
+}
+
+/// Play and pause for a stage's player.
+struct StagePlayButton: View {
+    @Environment(\.theme) private var t
+    var playback: ViewerPlayback
+
+    var body: some View {
+        Button { playback.togglePlay() } label: {
+            Ph(playback.playing ? "pause" : "play", 14).foregroundStyle(t.roles.ink2)
+                .frame(width: 28, height: 40).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(playback.playing ? "Pause" : "Play")
+        .accessibilityLabel(playback.playing ? "Pause" : "Play")
     }
 }
 
@@ -294,34 +354,32 @@ struct NewSwapBar: View {
         return row?.adaptedLine ?? row?.detail ?? ""
     }
 
+    /// The part used, in seconds: the picked part, else what the model takes of the clip.
+    private var seconds: Double? {
+        guard let c = store.clip else { return nil }
+        return d.range.map { $0.to - $0.from } ?? min(c.durationSec, row?.limits.maxSeconds ?? c.durationSec)
+    }
+
     var body: some View {
-        HStack(spacing: Space.s3) {
-            Button { store.suite.remix.keepAudio.toggle() } label: {
-                HStack(spacing: Space.s2) {
-                    Ph(d.keepAudio ? "speaker-high" : "speaker-slash", 15).frame(width: 18, height: 18)
-                    Text("Clip sound").font(t.scale.label.font).lineLimit(1).fixedSize()
-                        .fitProbe("composer pill sound") // CI fit check: a wrapped or cut label is a CUT line
-                }
-                .foregroundStyle(d.keepAudio ? t.roles.ink : t.roles.ink2)
-                .padding(.horizontal, Space.s3).frame(height: 32)
-                .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).fixedSize()
-            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill sound") } } // CI fit check: the bar's pills
-            .help(d.keepAudio ? "The clip's own sound goes back on the take (click to turn off)" : "No sound from the clip (click to keep it)")
-            .accessibilityLabel(d.keepAudio ? "Clip sound on" : "Clip sound off")
-            RemixModelPill()
-                .padding(.horizontal, Space.s1)
-                .background(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
-                .fixedSize()
-                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill model") } }
+        // The redesign's bar (frame "New Swap"): the take's length, shape and resolution as read-outs, why the model was
+        // picked (or what's missing), the model, and Generate · $x. The clip's sound is in the panel (Sound).
+        HStack(spacing: Space.s2) {
+            info("length", icon: "clock", value: seconds.map { "\(Pricing.trimNum($0)) s" } ?? "—", help: "Length of the take: the part of the clip used")
+            info("shape", icon: "device-mobile", value: store.clip.flatMap { ShotStageTake.shape($0.width, $0.height) } ?? (store.clip == nil ? "9:16" : "Clip"),
+                 help: "Shape: the clip's own")
+            info("resolution", icon: "stack", value: row?.price.resolution ?? "—", help: "Resolution the model makes")
             Text(why).font(t.scale.caption.font).foregroundStyle(d.missing != nil ? t.roles.caution : t.roles.ink2)
                 .lineLimit(1).truncationMode(.tail)
                 .help(why)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, Space.s2)
                 .layoutPriority(-1)
-            if let spec { Text(spec).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize() }
+            RemixModelPill()
+                .padding(.horizontal, Space.s1)
+                .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+                .fixedSize()
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill model") } }
+            SuiteTestRenderSwitch()
             GenerateButton(label: label, accessibility: label, enabled: store.clip != nil && canGenerate, busy: store.suite.generating, height: 40) {
                 store.generateRemix()
             }
@@ -329,7 +387,16 @@ struct NewSwapBar: View {
             .fixedSize()
             .layoutPriority(2)
         }
-        .padding(.top, Space.s3)
+    }
+
+    private func info(_ id: String, icon: String, value: String, help: String) -> some View {
+        SuitePillLabel(icon: icon, value: value)
+            .fitProbe("composer pill \(id)") // CI fit check: a wrapped or cut label is a CUT line
+            .fixedSize()
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill \(id)") } }
+            .help(help)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(help): \(value)")
     }
 }
 
@@ -342,6 +409,8 @@ struct NewSwapTrimmer: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var clip: Clip
+    /// The clip's player (the stage's): its playhead on the strip and "0:03 / 0:09" beside it.
+    var playback: ViewerPlayback? = nil
     @State private var frames: [CGImage] = []
     /// The window while dragging (the store gets it when the drag ends, so the price is asked once).
     @State private var live: TrimWindow?
@@ -360,8 +429,16 @@ struct NewSwapTrimmer: View {
         let w = window
         let needed = !w.wholeClipFits && d.range == nil
         VStack(alignment: .leading, spacing: Space.s2) {
-            GeometryReader { g in strip(w, width: g.size.width) }
-                .frame(height: 56)
+            HStack(spacing: Space.s3) {
+                GeometryReader { g in strip(w, width: g.size.width) }
+                    .frame(height: 40)
+                if let playback {
+                    TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                        Text("\(Take.clock(min(playback.time, clip.durationSec))) / \(Take.clock(clip.durationSec))")
+                            .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
+                    }
+                }
+            }
             HStack(spacing: Space.s3) {
                 Text(needed ? "Pick the part to use: \(row?.label ?? "this model") takes up to \(Pricing.trimNum(maxS)) s." : w.line(model: row?.label))
                     .font(t.scale.caption.font).monospacedDigit()
@@ -398,34 +475,43 @@ struct NewSwapTrimmer: View {
                             MuseImage(ref: store.clipPoster)
                         }
                     }
-                    .frame(width: cell, height: 56).clipped()
+                    .frame(width: cell, height: 40).clipped()
                     .opacity(CGFloat(i) * cell + cell / 2 >= a && CGFloat(i) * cell + cell / 2 <= b ? 1 : 0.35)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
             // The window: drag to slide it.
             Rectangle().fill(Color.clear)
-                .frame(width: max(0, b - a), height: 56)
+                .frame(width: max(0, b - a), height: 40)
                 .overlay(alignment: .top) { Rectangle().fill(t.roles.accent).frame(height: 2) }
                 .overlay(alignment: .bottom) { Rectangle().fill(t.roles.accent).frame(height: 2) }
                 .contentShape(Rectangle())
                 .offset(x: a)
                 .gesture(drag { start, dx in var n = start; n.slide(by: dx); return n }, including: .all)
                 .help("Drag to slide the part used")
+            // The playhead (where the clip is playing).
+            if let playback {
+                TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                    let x = CGFloat(min(playback.time, dur) / dur) * width
+                    Rectangle().fill(t.roles.accent).frame(width: 2, height: 46)
+                        .offset(x: max(0, min(width - 2, x - 1)), y: -3)
+                }
+                .allowsHitTesting(false)
+            }
             handle(at: a) { start, dx in var n = start; n.moveStart(to: start.from + dx); return n }
                 .help("Drag to change where it starts")
             handle(at: b) { start, dx in var n = start; n.moveEnd(to: start.to + dx); return n }
                 .help("Drag to change where it ends")
         }
-        .frame(width: width, height: 56, alignment: .leading)
+        .frame(width: width, height: 40, alignment: .leading)
         .onAppear { stripWidth = width }
         .onChange(of: width) { _, v in stripWidth = v }
     }
 
     private func handle(at x: CGFloat, change: @escaping (TrimWindow, Double) -> TrimWindow) -> some View {
         RoundedRectangle(cornerRadius: 3).fill(t.roles.accent)
-            .frame(width: 8, height: 60)
-            .frame(width: 20, height: 60) // a wider target than it looks
+            .frame(width: 6, height: 44)
+            .frame(width: 20, height: 44) // a wider target than it looks
             .contentShape(Rectangle())
             .offset(x: x - 10, y: -2)
             .gesture(drag(change))

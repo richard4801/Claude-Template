@@ -266,6 +266,19 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The check stopped early"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # The Suite redesign (plans/design/suite-redesign): Home never draws Generate, its button opens Shot with the prompt
+      # and starts nothing, and Shot's and New Swap's Generate show their price (SnapshotRunner+SuiteDesign.swift). Its
+      # screenshots (mac_<a|b>_design_*_1152x720.png) are the side-by-side with the approved PNGs.
+      - name: Suite design check
+        working-directory: mac
+        run: |
+          f=snapshots/suite-design-check.txt
+          if [ ! -f "$f" ]; then echo "no suite-design-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          ls snapshots | grep '_design_' || true
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The check stopped early"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # When review mode stops early, the crash report says where (thread, frames, exception).
       - name: Crash report
         if: failure()

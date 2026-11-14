@@ -161,8 +161,9 @@ struct ComposerView: View {
         let narrow = width < composerNarrowWidth
         // Small windows (or Setup hidden): no right column; its rows become buttons above the prompt.
         let strip = width < composerCompactWidth || setupHidden
-        return VStack(alignment: .leading, spacing: Space.s3) {
-            header(width: width)
+        return VStack(alignment: .leading, spacing: Space.s4) {
+            // The redesign (plans/design/suite-redesign): "Video suite", the tabs, and this page's quiet tools.
+            SuitePageHeader { headerTools(width: width) }
                 .layoutPriority(1)
             if presetsOpen && hasPresets {
                 if store.suite.composer.tool == .photo {
@@ -172,13 +173,13 @@ struct ComposerView: View {
                 }
             }
             if store.isNewSwap {
-                // New Swap's own screen (plans/swap-viewer-design.md §A): the video and its trimmer, the changes, and a
-                // bottom bar with the model, the price and Generate. No prompt box.
+                // New Swap's own screen (plans/swap-viewer-design.md §A; redesign frames "New Swap"): the clip and its
+                // trimmer on the stage, the changes in the panel, and the bar with the model and Generate · $x.
                 NewSwapScreen(narrow: narrow)
                     .frame(minHeight: 0, maxHeight: .infinity)
             } else {
-                HStack(alignment: .top, spacing: Space.s4) {
-                    // The results feed takes the picture's place beside the rail (header "Takes"); so does Claude's panel,
+                HStack(alignment: .top, spacing: 20) {
+                    // The results feed takes the stage's place beside the panel (header "Takes"); so does Claude's panel,
                     // which keeps the rows it fills in view.
                     if store.suite.claude.open && store.isOwner {
                         SuiteClaudePanel()
@@ -189,13 +190,13 @@ struct ComposerView: View {
                     }
                     if !strip {
                         ScrollView(.vertical, showsIndicators: false) {
-                            Group {
-                                ComposerRail(narrow: narrow)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            ComposerRail(narrow: narrow)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(Space.s4)
                         }
-                        .frame(width: narrow ? 264 : 280)
+                        .frame(width: narrow ? 272 : 294)
                         .frame(maxHeight: .infinity, alignment: .top)
+                        .suitePanel(t)
                     }
                 }
                 .frame(minHeight: 0, maxHeight: .infinity)
@@ -216,83 +217,61 @@ struct ComposerView: View {
             }
         }
         .padding(.horizontal, Space.s5)
-        .padding(.top, Space.s4)
-        .padding(.bottom, 20)
+        .padding(.top, 20)
+        .padding(.bottom, Space.s4)
     }
 
-    private func header(width: CGFloat) -> some View {
+    /// The page's own tools beside the tabs, all quiet: the preset's name, Add to storyboard, Engines (owner), the panel
+    /// switch, Takes and Presets. Claude is the title bar's "Ask Claude".
+    @ViewBuilder private func headerTools(width: CGFloat) -> some View {
         let d = store.suite.composer
         let preset = d.collapsed.flatMap { id in store.suite.camera.presets.first { $0.id == id } }
         let photoPreset = d.tool == .photo ? store.photoPreset : nil // Photo tool (workstream 3)
-        return HStack(spacing: Space.s3) {
-            Button { store.suite.browserOpen.toggle() } label: {
-                HStack(spacing: Space.s2) {
-                    Text(d.tool.title).font(t.scale.title.font).foregroundStyle(t.roles.ink).lineLimit(1)
-                    Ph("caret-down", 14).foregroundStyle(t.roles.ink2)
-                }
-                .frame(minHeight: 32)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Change the mode")
-            .accessibilityLabel("\(d.tool.title), change mode")
-            if d.tool == .swap { SwapVariantSwitch() } // New Swap (beta): Swap | New Swap
+        HStack(spacing: Space.s2) {
             if let name = preset?.label ?? photoPreset?.name {
                 Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1)
             }
             if store.isComingSoon(d.tool) { SuiteTag(text: SuiteText.comingSoon) }
-            SuiteTestBadge()
-            Spacer(minLength: Space.s3)
+            // The classic Swap keeps its switch back to New Swap (New Swap's panel menu has the way here).
+            if d.tool == .swap && !store.isNewSwap { SwapVariantSwitch() }
             if d.tool == .shot && d.collapsed == nil && !d.tokens.isEmpty {
-                Button { store.addShotToStoryboard() } label: {
-                    Ph("rectangle.split.3x1", 16).frame(width: 32, height: 32).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).foregroundStyle(t.roles.ink2).help("Add to storyboard")
-                .accessibilityLabel("Add to storyboard")
+                headerIcon("rectangle.split.3x1", help: "Add to storyboard") { store.addShotToStoryboard() }
             }
             if store.isOwner && !store.isComingSoon(d.tool) && d.tool != .photo { // Photo (workstream 3) runs on the image steps, not the video engines
-                Button { store.suite.showEngines = true } label: {
-                    Ph("server.rack", 16).frame(width: 32, height: 32).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).foregroundStyle(t.roles.ink2).help("Engines")
-                .accessibilityLabel("Engines (owner)")
+                headerIcon("server.rack", help: "Engines (owner)") { store.suite.showEngines = true }
             }
-            if width >= composerCompactWidth {
-                Button { setupHidden.toggle() } label: {
-                    Ph("sidebar-simple", 16).frame(width: 32, height: 32).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).foregroundStyle(setupHidden ? t.roles.ink2 : t.roles.ink)
-                .help(setupHidden ? "Show Setup and Inputs on the right" : "Hide Setup and Inputs (they move above the prompt)")
-                .accessibilityLabel(setupHidden ? "Show Setup" : "Hide Setup")
+            if width >= composerCompactWidth && !store.isNewSwap {
+                headerIcon("sidebar-simple", help: setupHidden ? "Show the Rig panel on the right" : "Hide the Rig panel (its rows move above the prompt)",
+                           on: !setupHidden) { setupHidden.toggle() }
             }
-            if store.user != nil {
-                // One Claude (plans/one-claude.md): the panel on the right shares this composer with Claude (members too).
-                let on = store.oneClaude.open
-                SuiteToolButton(title: "Claude", icon: "chat-circle-text", filled: on, plain: !on) { store.toggleOneClaude() }
-                    .accessibilityLabel(on ? "Hide Claude" : "Show Claude")
-                    .help(on ? "Hide Claude" : "Claude fills in the composer from your idea. Nothing is generated until you confirm the price.")
-            }
-            Button {
+            headerText(store.suite.feedOpen ? "Hide takes" : (d.tool == .photo ? "Photos" : "Takes"),
+                       help: store.suite.feedOpen ? "Back to the picture" : "Everything you made with this tool, newest first") {
                 store.suite.feedOpen.toggle()
                 if store.suite.feedOpen { store.suite.claude.open = false }
-            } label: {
-                Text(store.suite.feedOpen ? "Hide takes" : (d.tool == .photo ? "Photos" : "Takes")).font(t.scale.label.font).foregroundStyle(t.roles.ink2)
-                    .lineLimit(1).fixedSize()
-                    .frame(minHeight: 32).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .help(store.suite.feedOpen ? "Back to the picture" : "Everything you made with this tool, newest first")
-            .accessibilityLabel(store.suite.feedOpen ? "Hide takes" : "Show takes")
             if hasPresets {
-                Button { presetsOpen.toggle() } label: {
-                    Text(presetsOpen ? "Hide presets" : "Presets").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
-                        .frame(minHeight: 32).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(presetsOpen ? "Hide the presets" : "Start from a preset")
+                headerText(presetsOpen ? "Hide presets" : "Presets", help: presetsOpen ? "Hide the presets" : "Start from a preset") { presetsOpen.toggle() }
             }
         }
-        .frame(height: 32)
+    }
+
+    private func headerIcon(_ icon: String, help: String, on: Bool = false, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            Ph(icon, 16).frame(width: 32, height: 32).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).foregroundStyle(on ? t.roles.ink : t.roles.ink2)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private func headerText(_ title: String, help: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            Text(title).font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                .lineLimit(1).fixedSize()
+                .frame(minHeight: 32).padding(.horizontal, Space.s1).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }
 
@@ -472,9 +451,12 @@ struct ComposerRail: View {
                 CollapsedComposer(presetId: pid, narrow: narrow)
             } else {
                 if hasSetup && showSetup {
-                    RailSection(title: "Setup", summary: setupSummary, open: $setupOpen,
-                                trailing: hasRig ? AnyView(SetupRigsRow(asMenuButton: true)) : nil)
-                    if setupOpen {
+                    // The redesign's Rig panel: its title, "Save rig" (saved rigs), and the rows always in view.
+                    SuitePanelTitle(title: "Rig", subtitle: "How the shot is filmed. Applies to every take.") {
+                        if hasRig { SetupRigsRow(asSaveButton: true) }
+                    }
+                    .padding(.bottom, Space.s3)
+                    VStack(spacing: 0) {
                         // Rows the tool uses; rows its input decides (the clip, the video) stay, greyed with the reason
                         // (plans/ai-suite-design.md principle 6, "Say why, not just no").
                         ForEach(Self.order.filter { d.tool.chips.contains($0) || Self.decidedBy($0, d.tool) != nil }, id: \.self) { chip in
@@ -482,9 +464,12 @@ struct ComposerRail: View {
                         }
                     }
                 }
-                RailSection(title: "Inputs", summary: inputsSummary, open: $inputsOpen, trailing: nil)
-                    .padding(.top, hasSetup && showSetup ? Space.s5 : 0)
-                if inputsOpen || !showSetup {
+                if showSetup {
+                    SuitePanelSection(title: inputsSummary.map { "Inputs, \($0) added" } ?? "Inputs")
+                        .padding(.top, hasSetup ? Space.s5 : 0)
+                        .padding(.bottom, Space.s1)
+                }
+                VStack(alignment: .leading, spacing: 0) {
                 Group {
                     if d.tool == .photo {
                         PhotoSlotRow(size: narrow ? 56 : 64, spacing: narrow ? Space.s2 : 10) // Photo tool (workstream 3)
@@ -584,21 +569,8 @@ struct ComposerSetupRow: View {
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: Space.s3) {
-                Ph(icon, 18).foregroundStyle(t.roles.ink2).frame(width: 24)
-                Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
-                Spacer(minLength: Space.s2)
-                Text(value).font(t.scale.label.font).foregroundStyle(auto ? t.roles.ink2 : t.roles.ink)
-                    .lineLimit(1).truncationMode(.tail)
-                Ph("caret-right", 12).foregroundStyle(t.roles.ink2)
-            }
-            .frame(height: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help ?? "\(name): \(value)")
-        .accessibilityLabel("\(name), \(value)")
+        // The redesign's row: icon, the name, the value (quiet while Auto) and a caret, a hairline under it.
+        SuiteRow(icon: icon, name: name, value: value, quiet: auto, help: help, action: action)
     }
 }
 
@@ -648,11 +620,11 @@ struct SetupChipRow: View {
 
     private var icon: String {
         switch chip {
-        case .camera: return "film-strip"
-        case .lighting: return "lightbulb-filament"
+        case .camera: return "camera"
+        case .lighting: return "sun"
         case .look: return "palette"
         case .style: return "sliders-horizontal"
-        case .references: return "image"
+        case .references: return "images"
         }
     }
 
@@ -710,12 +682,25 @@ struct SetupRigsRow: View {
     @State private var name = ""
     /// The "…" button in the Setup header (the redesign); false keeps the old row.
     var asMenuButton = false
+    /// The Rig panel's "+ Save rig" (suite redesign): the same panel (save this rig, apply or delete a saved one).
+    var asSaveButton = false
 
     var body: some View {
         let rigs = store.suite.savedRigs
         let value = rigs.isEmpty ? "None saved" : "\(rigs.count) saved"
         Group {
-            if asMenuButton {
+            if asSaveButton {
+                Button { open = true } label: {
+                    HStack(spacing: 4) {
+                        Ph("plus", 12)
+                        Text(rigs.isEmpty ? "Save rig" : "Rigs").font(t.scale.label.font).lineLimit(1).fixedSize()
+                    }
+                    .foregroundStyle(t.roles.ink2).frame(minHeight: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(rigs.isEmpty ? "Save this rig to use again" : "Saved rigs: \(value.lowercased()). Save this one, or apply one.")
+                .accessibilityLabel(rigs.isEmpty ? "Save rig" : "Saved rigs, \(value)")
+            } else if asMenuButton {
                 Button { open = true } label: {
                     Ph("dots-three", 16).foregroundStyle(t.roles.ink2).frame(width: 28, height: 28).contentShape(Rectangle())
                 }
@@ -878,23 +863,29 @@ struct ComposerPromptBar: View {
     private var draft: ComposerDraft { store.suite.composer }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s1) {
+        // The redesign: the prompt in its own raised box across the page, the bar under it on the canvas.
+        VStack(alignment: .leading, spacing: Space.s3) {
             if store.isComingSoon(draft.tool) {
                 comingSoon
+                    .padding(.horizontal, Space.s4).padding(.vertical, Space.s2)
+                    .suitePanel(t)
             } else {
-                // Claude's reference images, right over the prompt they go with, each removable.
-                if !store.suite.claude.references.isEmpty { SuiteClaudeReferenceChips() }
-                promptArea
-                if let p = currentProblem {
-                    Label(p, ph: "exclamationmark.triangle").font(t.scale.caption.font).foregroundStyle(t.warn)
-                        .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    // Claude's reference images, right over the prompt they go with, each removable.
+                    if !store.suite.claude.references.isEmpty { SuiteClaudeReferenceChips() }
+                    promptArea
+                    if let p = currentProblem {
+                        Label(p, ph: "exclamationmark.triangle").font(t.scale.caption.font).foregroundStyle(t.roles.caution)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                ComposerBottomBar() // Shape, Length and Takes sit here, next to Generate (owner, 2026-11-11)
+                .padding(.leading, Space.s4).padding(.trailing, Space.s3).padding(.vertical, Space.s3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .suitePanel(t)
+                ComposerBottomBar() // Length, Shape, Quality and Takes, then the model, Test render and Generate · $x
             }
         }
-        .padding(.leading, Space.s4).padding(.trailing, Space.s3).padding(.top, Space.s3).padding(.bottom, Space.s2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.raised))
     }
 
     private var currentProblem: String? {

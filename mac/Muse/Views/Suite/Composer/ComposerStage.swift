@@ -35,27 +35,38 @@ struct ComposerStage: View {
         return false
     }
 
+    /// The job on the stage: a take picked in the strip, else this tool's latest.
+    private var stageJob: Job? {
+        pinned.flatMap { id in store.jobs.first { $0.id == id } } ?? store.stageJob(store.suite.composer.tool)
+    }
+
     var body: some View {
         let width = showsTake ? nil : ratio.map { maxPictureHeight * $0 }
-        VStack(spacing: Space.s3) {
-            Spacer(minLength: 0)
-            Group {
-                if showsTake {
-                    ComposerMediaPane(pinned: pinned)
-                        .frame(maxHeight: maxPictureHeight + ViewerActionRow.height + Space.s3 + 40)
-                } else if let r = ratio {
-                    ComposerMediaPane(pinned: pinned).aspectRatio(r, contentMode: .fit)
-                } else {
-                    ComposerMediaPane(pinned: pinned)
+        Group {
+            if showsTake, let job = stageJob {
+                // The redesign's Shot stage: title and actions above the take, the timeline under it.
+                ShotStageTake(job: job)
+            } else {
+                VStack(spacing: Space.s3) {
+                    Spacer(minLength: 0)
+                    Group {
+                        if let r = ratio {
+                            ComposerMediaPane(pinned: pinned).aspectRatio(r, contentMode: .fit)
+                        } else {
+                            ComposerMediaPane(pinned: pinned)
+                        }
+                    }
+                    .frame(maxWidth: width ?? .infinity, maxHeight: maxPictureHeight)
+                    // The strip of this tool's takes: never narrower than its thumbnails need (build 582 cut it at the 9:16 width).
+                    ComposerTakesStrip(pinned: $pinned)
+                        .frame(maxWidth: max(width ?? .infinity, 560), alignment: .center)
+                    Spacer(minLength: 0)
                 }
             }
-            .frame(maxWidth: width ?? .infinity, maxHeight: showsTake ? maxPictureHeight + ViewerActionRow.height + Space.s3 + 40 : maxPictureHeight)
-            // The strip of this tool's takes: never narrower than its thumbnails need (build 582 cut it at the 9:16 width).
-            ComposerTakesStrip(pinned: $pinned)
-                .frame(maxWidth: max(width ?? .infinity, 560), alignment: .center)
-            Spacer(minLength: 0)
         }
+        .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .suiteStage(t)
     }
 }
 

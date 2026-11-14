@@ -385,6 +385,8 @@ struct TakeViewer: View {
 /// One take action: icon and label, or the icon alone with the label as its tooltip.
 struct ViewerActionButton: View {
     @Environment(\.theme) private var t
+    /// The Suite stage (redesign): Keep outlined on the raised tone, the rest plain (Generate is the one filled button).
+    @Environment(\.viewerStageStyle) private var stageStyle
     var action: TakeViewerAction
     var title: String? = nil
     var iconOnly = false
@@ -415,9 +417,13 @@ struct ViewerActionButton: View {
             .padding(.horizontal, iconOnly ? 0 : Space.s3)
             .frame(width: iconOnly ? 36 : nil, height: primary ? 40 : 36)
             .frame(maxWidth: fullWidth ? .infinity : nil, alignment: primary ? .center : .leading)
-            .foregroundStyle(primary ? t.roles.onAction : t.roles.ink)
-            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(primary ? t.roles.action : .clear))
-            .overlay { if !primary { RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1) } }
+            .foregroundStyle(primary && !stageStyle ? t.roles.onAction : t.roles.ink)
+            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(primary ? (stageStyle ? t.roles.raised : t.roles.action) : .clear))
+            .overlay {
+                if !primary && !stageStyle || primary && stageStyle {
+                    RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(stageStyle ? t.roles.ink.opacity(0.35) : t.roles.hairline, lineWidth: 1)
+                }
+            }
             .contentShape(Rectangle())
             .opacity(off ? 0.55 : 1)
         }
@@ -591,6 +597,8 @@ struct ViewerActionRow: View {
     var actions: [TakeViewerAction]
     var more = true
     var time: () -> Double
+    /// Where the row sits in its frame (the Suite stage puts it on the right of the title).
+    var alignment: Alignment = .center
 
     var body: some View {
         let steps = TakeViewerActions.steps(actions)
@@ -604,7 +612,7 @@ struct ViewerActionRow: View {
             if steps.count > 4 { row(iconOnly: steps[4]).fixedSize() }
             narrowest.fixedSize()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
     }
 
     private func row(iconOnly: Set<TakeViewerAction>) -> some View {

@@ -29,28 +29,36 @@ struct ComposerBottomBar: View {
             HStack(spacing: Space.s2) {
                 pills(spacing: Space.s2, compact: false)
                 Spacer(minLength: Space.s2)
-                pricingLink(compact: false)
-                queueButton(compact: false)
-                generateButton(short: false)
-            }
-            HStack(spacing: 6) {
-                pills(spacing: 5, compact: true)
-                Spacer(minLength: 6)
+                modelPill(compact: false)
                 pricingLink(compact: true)
                 queueButton(compact: false)
+                SuiteTestRenderSwitch()
                 generateButton(short: false)
             }
             HStack(spacing: 6) {
                 pills(spacing: 5, compact: true)
                 Spacer(minLength: 6)
+                modelPill(compact: false)
                 pricingLink(compact: true)
                 queueButton(compact: true)
+                SuiteTestRenderSwitch()
+                generateButton(short: false)
+            }
+            HStack(spacing: 6) {
+                pills(spacing: 5, compact: true)
+                Spacer(minLength: 6)
+                modelPill(compact: true)
+                pricingLink(compact: true)
+                queueButton(compact: true)
+                SuiteTestRenderSwitch()
                 generateButton(short: true)
             }
             HStack(spacing: 6) {
                 ScrollView(.horizontal, showsIndicators: false) { pills(spacing: 5, compact: true).padding(.vertical, 2) }
+                modelPill(compact: true)
                 pricingLink(compact: true)
                 queueButton(compact: true)
+                SuiteTestRenderSwitch()
                 generateButton(short: true)
             }
         }
@@ -120,14 +128,15 @@ struct ComposerBottomBar: View {
 
     /// `compact`: the owner's Engine pill shows only its icon (the engine is its tooltip).
     @ViewBuilder private func pills(spacing: CGFloat, compact: Bool) -> some View {
+        // The redesign's order (frame "Shot composer"): length, shape, quality, takes, then sound and speaking. The model
+        // sits on the right beside Generate (modelPill).
         HStack(spacing: spacing) {
-            if tool != .photo && !isRemix { qualityPill } // Photo (workstream 3) and New Swap: the model's own resolution, no Quality
             if isRemix {
-                // New Swap (beta): the clip's sound and the model (Auto first, with why; every video-editing model).
+                // New Swap (beta): the clip's sound (the model is on the right).
                 listPill("sound", icon: store.suite.remix.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.remix.keepAudio ? "On" : "Off",
                          help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.remix.keepAudio) { store.suite.remix.keepAudio = $0 }
-                RemixModelPill(compact: compact)
             } else if isSwap {
+                qualityPill
                 listPill("sound", icon: store.suite.swap.keepAudio ? "speaker.wave.2" : "speaker.slash", value: store.suite.swap.keepAudio ? "On" : "Off",
                          help: "Clip sound", options: [("On", true), ("Off", false)], selected: store.suite.swap.keepAudio) { store.suite.swap.keepAudio = $0 }
                 listPill("background", icon: "photo", value: backgroundValue, help: "Background: keep the clip’s place, a new photo, or describe it in the prompt",
@@ -137,34 +146,51 @@ struct ComposerBottomBar: View {
                              options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.swap.speaking) { store.suite.swap.speaking = $0 }
                     addOnPills(compact: compact)
                 }
-                OwnerModelPill(purpose: tool == .recast ? .recast : .swap, compact: compact) // the model (WS6; 4c: everyone)
             } else if tool == .extend {
                 // Extend: the new part's length on this quality, and takes. The shape and sound follow the video.
+                qualityPill
                 if !settingsInRail {
                     lengthPill
                     takesPill
                 }
-                OwnerModelPill(purpose: .extend, compact: compact) // the model (WS6; 4c: everyone)
             } else if tool == .photo {
                 // Photo tool (workstream 3): one Photos 1–4 count in place of Shape, Length, Sound, Speaking and Takes.
                 let n = store.suite.photo.count
-                listPill("photos", icon: "photo.on.rectangle", value: "\(n)", help: "Photos",
+                listPill("photos", icon: "photo.on.rectangle", value: "\(n) photo\(n == 1 ? "" : "s")", help: "Photos",
                          options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0 }
-                enginePill(compact: compact) // the photo model (WS6; 4c: everyone)
             } else {
                 if !settingsInRail {
-                    shapePill
                     lengthPill
+                    shapePill
                 }
-                listPill("sound", icon: store.suite.composer.sound ? "speaker.wave.2" : "speaker.slash", value: store.suite.composer.sound ? "On" : "Off",
+                qualityPill
+                if !settingsInRail { takesPill }
+                listPill("sound", icon: store.suite.composer.sound ? "speaker.wave.2" : "speaker.slash", value: store.suite.composer.sound ? "Sound" : "No sound",
                          help: "Sound", options: [("On", true), ("Off", false)], selected: store.suite.composer.sound) { store.suite.composer.sound = $0 }
                 listPill("speaking", icon: "text.bubble", value: store.suite.composer.speaking.label, help: "Speaking",
                          options: ComposerSpeaking.allCases.map { ($0.label, $0) }, selected: store.suite.composer.speaking) { store.suite.composer.speaking = $0 }
-                if !settingsInRail { takesPill }
-                enginePill(compact: compact) // 4c: everyone
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// The model, beside Generate (4c: everyone): Shot, Photo and Extend's list; Swap and Recast's; New Swap's (Auto first).
+    @ViewBuilder private func modelPill(compact: Bool) -> some View {
+        if isRemix {
+            RemixModelPill(compact: compact)
+                .padding(.horizontal, Space.s1)
+                .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+                .fixedSize()
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill model") } }
+        } else if isSwap {
+            OwnerModelPill(purpose: tool == .recast ? .recast : .swap, compact: compact) // the model (WS6; 4c: everyone)
+                .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+        } else if tool == .extend {
+            OwnerModelPill(purpose: .extend, compact: compact) // the model (WS6; 4c: everyone)
+                .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
+        } else if !store.isComingSoon(tool) {
+            SuiteModelPill()
+        }
     }
 
     // MARK: Price
@@ -234,7 +260,7 @@ struct ComposerBottomBar: View {
         let range = store.composerLengthRange // the pinned model's lengths, else the quality's (WS6)
         return pill("length", help: "Length") {
             Ph("clock", 13)
-            Text("\(store.suite.composer.duration)s").font(t.body(12.5, .medium))
+            Text("\(store.suite.composer.duration) s").font(t.body(12.5, .medium))
         } popover: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -258,8 +284,8 @@ struct ComposerBottomBar: View {
     private var takesPill: some View {
         let max = store.suite.catalog?.takesMax ?? 4
         return pill("takes", help: "Takes") {
-            Ph("square.stack", 13)
-            Text("\(store.suite.composer.takes)").font(t.body(12.5, .medium)) + Text(" /\(min(max, 4))").font(t.body(12.5)).foregroundColor(t.muted)
+            Ph("squares-four", 13)
+            Text("\(store.suite.composer.takes) take\(store.suite.composer.takes == 1 ? "" : "s")").font(t.body(12.5, .medium))
         } popover: {
             PillList(title: "Takes", options: ComposerBar.takes(max).map { ("\($0) take\($0 == 1 ? "" : "s")", $0) }, selected: store.suite.composer.takes) {
                 store.suite.composer.takes = $0
@@ -381,9 +407,9 @@ struct ComposerBottomBar: View {
                 .fitProbe("composer pill \(id)") // CI fit check: a wrapped or cut label is a CUT line
                 .font(.system(size: 13))
                 .foregroundStyle(t.roles.ink)
-                // Quiet text pills on the prompt bar (the render): no box, the field tone only while its list is open.
-                .padding(.horizontal, 8).frame(height: 34)
-                .background(RoundedRectangle(cornerRadius: t.radii.chip).fill(isOpen ? t.roles.field : Color.clear))
+                // The redesign's pills: icon and value on the field tone (a step darker while its list is open).
+                .padding(.horizontal, 10).frame(height: 30)
+                .background(RoundedRectangle(cornerRadius: t.radii.control).fill(isOpen ? t.roles.hairline : t.roles.field))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -608,14 +634,14 @@ struct GenerateButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                if busy { ProgressView().controlSize(.small).tint(t.ctaInk) }
+                if busy { ProgressView().controlSize(.small).tint(t.roles.onAction) }
                 Text(label).font(t.body(14, .semibold)).lineLimit(1).fixedSize()
                     .fitProbe("composer generate") // CI fit check: Generate is never cut ("GENERATE…")
             }
-            .foregroundStyle(t.ctaInk)
+            .foregroundStyle(t.roles.onAction)
             .padding(.horizontal, 22).frame(height: height)
-            .background(t.cta.opacity(enabled && !busy ? 1 : 0.45))
-            .clipShape(RoundedRectangle(cornerRadius: t.controlRadius))
+            .background(t.roles.action.opacity(enabled && !busy ? 1 : 0.45))
+            .clipShape(RoundedRectangle(cornerRadius: t.radii.control))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

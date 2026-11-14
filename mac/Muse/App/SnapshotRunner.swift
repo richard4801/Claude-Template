@@ -180,6 +180,7 @@ enum SnapshotRunner {
             await suiteStageCheck(store, dir: dir)   // WS19: generating → result on the stage, Photo × 4 carousel, back after leaving, in the Queue
             await claudeChatCheck(store, dir: dir)   // WS18: one bubble per message, chat sessions, Claude's draft in the composer
             await fitCheck(store, dir: dir)
+            await suiteDesignShots(store, dir: dir)   // Suite redesign (owner-approved 2026-11-14): the frames' screens at 1152 × 720, A and B
             await editCheck(store, dir: dir)   // owner blocker 2026-11-07: opening Edit with real takes (SnapshotRunner+Edit.swift)
             await editOpsCheck(store, dir: dir)   // Mac Edit audit 2026-11-08: every operation changes the project, the preview and the export
             await editResumeCheck(store, dir: dir)   // Continue a draft (owner 2026-11-12): Edit reopens the last edit where it was left
