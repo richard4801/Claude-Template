@@ -126,7 +126,9 @@ data class Transform(val x: Double? = null, val y: Double? = null, val scale: Do
 
 /** Wave 1: how an overlay picture combines with the layers below ([blendPixel]). */
 enum class BlendMode(override val wire: String) : Wire {
-    NORMAL("normal"), MULTIPLY("multiply"), SCREEN("screen"), OVERLAY("overlay"), SOFT_LIGHT("softLight"), DARKEN("darken"), LIGHTEN("lighten"), ADD("add")
+    NORMAL("normal"), MULTIPLY("multiply"), SCREEN("screen"), OVERLAY("overlay"), SOFT_LIGHT("softLight"), DARKEN("darken"), LIGHTEN("lighten"), ADD("add"),
+    /** Live-negative overlays (server gate BLEND_NEXT_LIVE until this build ships). Keep the order: the ordinal is the shader's uMode. */
+    DIFFERENCE("difference"), EXCLUSION("exclusion")
 }
 data class Crop(val left: Double? = null, val top: Double? = null, val right: Double? = null, val bottom: Double? = null)
 data class Adjust(

@@ -22,7 +22,7 @@ prog = ctx.program(vertex_shader=vert, fragment_shader=frag)
 vbo = ctx.buffer(struct.pack("8f", -1, -1, 1, -1, -1, 1, 1, 1))
 vao = ctx.vertex_array(prog, [(vbo, "2f", "aPos")])
 fbo = ctx.framebuffer(color_attachments=[ctx.texture((1, 1), 4, dtype="f4")])
-modes = ["normal", "multiply", "screen", "overlay", "softLight", "darken", "lighten", "add"]
+modes = ["normal", "multiply", "screen", "overlay", "softLight", "darken", "lighten", "add", "difference", "exclusion"]
 cases = json.loads((root / "server/api/test/fixtures/editor/functions.json").read_text())["wave1"]["blend"]
 bad = 0
 for c in cases:

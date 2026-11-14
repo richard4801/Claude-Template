@@ -187,7 +187,8 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
 
 private val BLENDS = listOf(studio.muse.core.edit.BlendMode.NORMAL to "Normal", studio.muse.core.edit.BlendMode.MULTIPLY to "Multiply", studio.muse.core.edit.BlendMode.SCREEN to "Screen",
     studio.muse.core.edit.BlendMode.OVERLAY to "Overlay", studio.muse.core.edit.BlendMode.SOFT_LIGHT to "Soft light", studio.muse.core.edit.BlendMode.DARKEN to "Darken",
-    studio.muse.core.edit.BlendMode.LIGHTEN to "Lighten", studio.muse.core.edit.BlendMode.ADD to "Add")
+    studio.muse.core.edit.BlendMode.LIGHTEN to "Lighten", studio.muse.core.edit.BlendMode.ADD to "Add",
+    studio.muse.core.edit.BlendMode.DIFFERENCE to "Difference", studio.muse.core.edit.BlendMode.EXCLUSION to "Exclusion")
 
 /** Auto-captions' language choices (ISO 639-1; "auto" lets the transcriber detect it). */
 private val CAPTION_LANGUAGES = listOf("auto" to "Detect", "en" to "English", "es" to "Spanish", "pt" to "Portuguese", "fr" to "French", "de" to "German",
