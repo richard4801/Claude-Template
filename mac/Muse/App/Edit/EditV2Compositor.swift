@@ -520,7 +520,9 @@ final class EditV2Scene: @unchecked Sendable {
             else if (mode < 4.5 && mode > 3.5) { r = vec3(sl(b.r, s.r), sl(b.g, s.g), sl(b.b, s.b)); }
             else if (mode < 5.5 && mode > 4.5) { r = min(b, s); }
             else if (mode < 6.5 && mode > 5.5) { r = max(b, s); }
-            else if (mode > 6.5) { r = min(vec3(1.0), b + s); }
+            else if (mode < 7.5 && mode > 6.5) { r = min(vec3(1.0), b + s); }
+            else if (mode < 8.5 && mode > 7.5) { r = abs(b - s); }
+            else if (mode > 8.5) { r = b + s - 2.0 * b * s; }
             r = clamp(r, 0.0, 1.0);
             vec3 o = b + (r - b) * a;
             return vec4(o * below.a, below.a);
@@ -537,6 +539,8 @@ final class EditV2Scene: @unchecked Sendable {
         case .darken: return 5
         case .lighten: return 6
         case .add: return 7
+        case .difference: return 8
+        case .exclusion: return 9
         }
     }
 
