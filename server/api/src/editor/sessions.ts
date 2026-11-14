@@ -316,17 +316,25 @@ export class EditSessions {
   leave(id: string, device: string) { this.presence.get(id)?.delete(device); }
   renderer(id: string) { return this.online(id).filter(p => p.canRender).sort((a, b) => (a.platform === 'mac' ? -1 : 0) - (b.platform === 'mac' ? -1 : 0) || b.at - a.at)[0] ?? null; }
 
-  /** Asks the online app to render frame t exactly; resolves with its upload id, or null after the wait. */
-  async requestFrame(s: Session, t: number, width: number): Promise<{ uploadId: string; device: string } | null> {
+  /**
+   * Asks the online app to render frame t exactly; resolves with its upload id, or why not (`missed`, plain words for
+   * Claude): no app has the edit open (with when one was last seen), or the app didn't answer in time.
+   */
+  async requestFrame(s: Session, t: number, width: number): Promise<{ uploadId: string; device: string } | { missed: string }> {
     const r = this.renderer(s.id);
-    if (!r) return null;
+    if (!r) {
+      const last = [...(this.presence.get(s.id)?.values() ?? [])].sort((a, b) => b.at - a.at)[0];
+      return { missed: last
+        ? `No MUSE app has had this edit open for ${Math.round((Date.now() - last.at) / 1000)} s (${last.label} was the last; the app checks in every 15-30 s while the edit is open in Edit).`
+        : 'No MUSE app has this edit open in Edit right now (open it in Edit on the Mac for exact frames).' };
+    }
     const requestId = uid('fr');
     const got = await new Promise<{ uploadId: string } | null>(resolve => {
       const timer = setTimeout(() => { this.frames.delete(requestId); resolve(null); }, SESSION_LIMITS.frameWaitMs);
       this.frames.set(requestId, { resolve, timer });
       this.emit(s, { op: 'frame_request', requestId, t, width, revision: s.revision, device: r.device });
     });
-    return got ? { ...got, device: r.device } : null;
+    return got ? { ...got, device: r.device } : { missed: `${r.label} has the edit open but didn't send the frame within ${SESSION_LIMITS.frameWaitMs / 1000} s (busy loading a big clip?).` };
   }
   async frameDone(u: AuthUser, id: string, requestId: string, b: { uploadId?: unknown }) {
     await this.row(u, id);

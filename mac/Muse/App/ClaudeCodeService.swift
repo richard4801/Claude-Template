@@ -479,13 +479,17 @@ final class ClaudeCodeService: ObservableObject {
         let cwd = Self.cwd(tid)
         switch fileVerdict(a, cwd: cwd) {
         case .allow where a.toolName == "Upload":
-            await uploadLocal(a, cwd: cwd)
+            // Off the event loop: a big file takes minutes, and every other question (Bash, Read…) waits behind this
+            // loop meanwhile until Claude Code gives up on it (ci_1d271380f0de).
+            Task { await uploadLocal(a, cwd: cwd) }
         case .allow:
             try? await api.answerPermission(a.id, allow: true, message: nil)
         case .deny(let why):
             try? await api.answerPermission(a.id, allow: false, message: why)
         case .ask(let card):
             fileAsks.append(FileAsk(ask: a, threadId: tid, card: card))
+            // The server tells Claude the card is up (waiting for the person), not lost.
+            Task { try? await api.permissionProgress(a.id, .asking) }
         }
     }
 
@@ -537,20 +541,24 @@ final class ClaudeCodeService: ObservableObject {
             type = t
             file = p.url
         }
+        // Claude sees where it stands (upload_status): bytes so far, the try, then the server checking the file.
+        let reporter = ClaudeUploadReporter(total: size) { p in try? await api.permissionProgress(a.id, p) }
+        await reporter.started()
         do {
             let result: ClaudeLocalUpload
             switch type.kind {
             case .video:
                 guard size <= 500 * 1024 * 1024 else { return await fail(ClaudeFilePolicy.uploadRefusal) }
                 guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(file) else { return await fail(MediaSniff.unreadable) }
-                let att = try await up.uploadClaudeVideo(file, meta: info.meta(name: name), contentType: type.mime, progress: nil)
+                let att = try await up.uploadClaudeVideo(file, meta: info.meta(name: name), contentType: type.mime,
+                                                         progress: reporter.progress, onRetry: reporter.retry)
                 result = ClaudeLocalUpload(uploadId: att.uploadId, kind: type.resultKind, url: att.url, name: name)
             case .audio:
                 guard size <= ClaudeFilePolicy.uploadAudioMaxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
                 guard let up = api as? any ClaudeAudioUploading else { return await fail("This server can't take sound from Claude yet.") }
                 // The server fills the file's link (an editor upload has no confirm step).
                 guard let d = try? await AVURLAsset(url: file).load(.duration).seconds, d.isFinite, d > 0 else { return await fail(MediaSniff.unreadable) }
-                let id = try await up.uploadClaudeAudio(file, contentType: type.mime)
+                let id = try await up.uploadClaudeAudio(file, contentType: type.mime, progress: reporter.progress, onRetry: reporter.retry)
                 result = ClaudeLocalUpload(uploadId: id, kind: type.resultKind, url: nil, name: name, durationSec: (d * 1000).rounded() / 1000)
             case .image:
                 guard size <= SuiteClaudeAttachments.maxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
