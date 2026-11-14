@@ -1,0 +1,1267 @@
+From cac27ff6b1e4c0b11f8ae06b1c0afd7a7294813d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 14 Nov 2026 21:27:20 +0000
+Subject: [PATCH] Photo tab on the Mac (owner-approved design,
+ plans/design/photo/)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Presets: a Preset chip in the bar (a small menu with search and covers),
+  never a whole row; a preset locks Framing, Lens and Light to From preset.
+- The stage: empty until this session's run (never an old result); the 4
+  photos with a strip under the photo, Photo n of 4, Keep highlighted, Redo,
+  Upscale, Use in Shot (the still as a video's start frame) and Share.
+- The panel: Inputs (Character, Outfit, Product, References) with clear
+  empty slots, then the Rig for a still (Framing, Lens, Light, Look, Style).
+- The bar: Preset, Photos 1-4, Size (the shapes the model makes, from the
+  estimate; hidden on an older server), Auto · <model>, and Generate with the
+  real price, or Generate · 4 photos greyed with the reason beside it.
+- The prompt hint names no one.
+- Review mode: mac_<a|b>_photo_<empty|filled|results>_<w>x<h>.png at
+  1000x700, 1152x720 and 1440x900 with photo_fits, photo_price,
+  photo_empty_stage, photo_carousel and photo_presets in
+  suite-design-check.txt; photo_restart now expects an empty stage.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxoXQmfbR7CXwb939GC
+---
+ mac/Muse/App/AppStore+ModelPicker.swift       |   2 +-
+ mac/Muse/App/AppStore+Photo.swift             |   3 +
+ mac/Muse/App/AppStore+Suite.swift             |  12 +-
+ mac/Muse/App/SnapshotRunner+SuiteDesign.swift |  93 ++++
+ mac/Muse/App/SnapshotRunner+SuiteStage.swift  |  11 +-
+ .../Suite/Composer/ComposerBottomBar.swift    |  23 +-
+ .../Views/Suite/Composer/ComposerView.swift   |  31 +-
+ mac/Muse/Views/Suite/Composer/PhotoTab.swift  | 479 ++++++++++++++++++
+ .../Views/Suite/Composer/PhotoViews.swift     |   2 +-
+ mac/Muse/Views/Suite/Composer/ShotStage.swift |  41 +-
+ mac/Muse/Views/Viewer/TakeViewer.swift        |   2 +
+ .../MuseCore/Suite/ComposerShell.swift        |   2 +-
+ .../MuseCore/Suite/FakeMuseAPI+Photo.swift    |  10 +-
+ .../Sources/MuseCore/Suite/SuitePhoto.swift   |  50 +-
+ .../MuseCore/Suite/TakeViewerCore.swift       |  10 +-
+ .../Tests/MuseCoreTests/SuitePhotoTests.swift |  46 ++
+ 16 files changed, 781 insertions(+), 36 deletions(-)
+ create mode 100644 mac/Muse/Views/Suite/Composer/PhotoTab.swift
+
+diff --git a/mac/Muse/App/AppStore+ModelPicker.swift b/mac/Muse/App/AppStore+ModelPicker.swift
+index f74ee135..8c97073d 100644
+--- a/mac/Muse/App/AppStore+ModelPicker.swift
++++ b/mac/Muse/App/AppStore+ModelPicker.swift
+@@ -24,7 +24,7 @@ extension AppStore {
+ 
+     /// The Model pill's words: "Auto", "Kling 4.0, 1080p", "FLUX.2 [pro]".
+     var composerModelLabel: String {
+-        suite.composer.tool == .photo ? ComposerModelPicker.imageLabel(suite.photo, catalog: suite.catalog)
++        suite.composer.tool == .photo ? photoModelLabel // the Photo tab: "Auto · <the model Auto picked>" (owner 2026-11-14)
+             : ComposerModelPicker.label(suite.composer, catalog: suite.catalog, settings: suite.settings)
+     }
+ 
+diff --git a/mac/Muse/App/AppStore+Photo.swift b/mac/Muse/App/AppStore+Photo.swift
+index ce895a3f..80bda966 100644
+--- a/mac/Muse/App/AppStore+Photo.swift
++++ b/mac/Muse/App/AppStore+Photo.swift
+@@ -65,6 +65,8 @@ extension AppStore {
+             suite.photoEstimate = e
+             suite.photoError = nil
+             suite.rig = e.rig
++            if !e.aspects.isEmpty { suite.photoAspectsSeen = e.aspects }
++            suite.photoModelSeen = e.model?.name
+         } catch let e as ApiError {
+             guard !Task.isCancelled else { return }
+             suite.photoEstimate = nil
+@@ -99,6 +101,7 @@ extension AppStore {
+             // WS19: the run is a job: the stage and the Queue follow it, and the stills land on the stage (and the Library).
+             let j = try await api.suiteStartPhotos(req)
+             upsert(j)
++            suite.photoSessionJobs.insert(j.id) // the Photo stage shows this session's runs only
+             rememberStage(j.id, tool: .photo)
+             balance = try await api.balance()
+             showToast("Making \(PhotoEstimate.photos(max(1, j.request.takes))) · \(Pricing.money(j.cost))", action: "Open queue") { [weak self] in self?.go(.queue) }
+diff --git a/mac/Muse/App/AppStore+Suite.swift b/mac/Muse/App/AppStore+Suite.swift
+index 9058c9f1..02e8fe89 100644
+--- a/mac/Muse/App/AppStore+Suite.swift
++++ b/mac/Muse/App/AppStore+Suite.swift
+@@ -216,6 +216,12 @@ final class SuiteState {
+     var photoError: String?
+     /// Reference images still uploading.
+     var photoRefsUploading = 0
++    /// The Photo tab (owner 2026-11-14): the last estimate's shapes and Auto's model, kept while the next estimate is on
++    /// its way (the Size pill and "Auto · <model>" don't blink away on each change).
++    var photoAspectsSeen: [PhotoAspectOption] = []
++    var photoModelSeen: String?
++    /// Photo runs started in this session: the Photo stage shows only these (owner: never an old result on an empty stage).
++    var photoSessionJobs: Set<String> = []
+     var settings: SuiteSettings?
+ 
+     // The picker shell and the tool / preset browser
+@@ -551,6 +557,7 @@ extension AppStore {
+     func rememberStage(_ jobId: String, tool: ComposerTool? = nil) {
+         let own: ComposerTool? = jobs.first(where: { $0.id == jobId }).flatMap { $0.suiteTool }.flatMap { ComposerTool(rawValue: $0) }
+         let t = tool ?? own ?? suite.composer.tool
++        if t == .photo { suite.photoSessionJobs.insert(jobId) } // the Photo stage shows this session's runs (owner 2026-11-14)
+         var m = suite.stageJobs.isEmpty ? (UserDefaults.standard.dictionary(forKey: stageMemoryKey) as? [String: String] ?? [:]) : suite.stageJobs
+         m[t.rawValue] = jobId
+         suite.stageJobs = m
+@@ -568,7 +575,10 @@ extension AppStore {
+         if let id = remembered, let j = jobs.first(where: { $0.id == id }) { picks.append(j) }
+         switch tool {
+         case .swap, .recast: if let j = swapJob { picks.append(j) }
+-        case .photo: break
++        case .photo:
++            // The Photo tab (owner 2026-11-14): only this session's runs; before one, the stage is empty.
++            return picks.filter { suite.photoSessionJobs.contains($0.id) }.max { $0.createdAt < $1.createdAt }
++                ?? jobs.filter { suite.photoSessionJobs.contains($0.id) }.max { $0.createdAt < $1.createdAt }
+         default: if let j = shotJob, j.suiteTool == nil || j.suiteTool == tool.rawValue { picks.append(j) }
+         }
+         return picks.max { $0.createdAt < $1.createdAt }
+diff --git a/mac/Muse/App/SnapshotRunner+SuiteDesign.swift b/mac/Muse/App/SnapshotRunner+SuiteDesign.swift
+index 1414f3f0..2982f7d0 100644
+--- a/mac/Muse/App/SnapshotRunner+SuiteDesign.swift
++++ b/mac/Muse/App/SnapshotRunner+SuiteDesign.swift
+@@ -11,6 +11,8 @@ import MuseCore
+ //   home_no_generate   Home draws no Generate (owner decision 1: its button only opens the composer)
+ //   home_opens_shot    "Open in composer" opens Shot with the prompt carried over and starts no job
+ //   price_on_generate  on Shot and the filled Swap, Generate shows its price ("· $x" or "· Free")
++// and the Photo tab (owner-approved 2026-11-14, plans/design/photo/): mac_<a|b>_photo_<empty|filled|results>_<w>x<h>.png at
++// 1000 × 700, 1152 × 720 and 1440 × 900, with photo_fits, photo_price, photo_empty_stage, photo_carousel and photo_presets.
+ extension SnapshotRunner {
+     static func suiteDesignShots(_ store: AppStore, dir: URL) async {
+         guard let w = mainWindow else { return }
+@@ -87,6 +89,97 @@ extension SnapshotRunner {
+             && store.jobs.count == jobsBefore && !generatingBefore && !store.suite.generating
+         line(ok, "home_opens_shot", "mode \(store.suite.mode.rawValue), prompt \"\(words.trimmingCharacters(in: .whitespaces))\", jobs \(jobsBefore) → \(store.jobs.count)")
+ 
++        // The Photo tab (owner-approved 2026-11-14, plans/design/photo/): empty, filled and 4 photos, A and B, at 1000 × 700,
++        // 1152 × 720 and 1440 × 900 (mac_<a|b>_photo_<state>_<w>x<h>.png), checked:
++        //   photo_fits         Generate whole inside the window (the page never runs below it)
++        //   photo_price        filled and results: Generate shows the estimate's price ("Generate · 4 photos · $x")
++        //   photo_empty_stage  empty and filled: no old result on the stage before this session's run
++        //   photo_carousel     results: the run's 4 photos on the stage, with the strip under the photo
++        //   photo_presets      no "Start from a preset" row: the Preset chip is in the bar
++        func until(_ seconds: Double, _ ok: () -> Bool) async -> Bool {
++            let end = Date().addingTimeInterval(seconds)
++            while Date() < end {
++                if ok() { return true }
++                try? await Task.sleep(for: .milliseconds(50))
++            }
++            return ok()
++        }
++        func photoState(_ filled: Bool) {
++            store.openTool(.photo)
++            store.suite.photo.presetId = nil
++            store.suite.photo.references = []
++            store.suite.photo.count = 4
++            if filled {
++                store.suite.composer.tokens = PromptTokens.text(" on a rooftop at golden hour, laughing, one hand in her hair, city soft behind. ")
++                store.setComposerCharacter(store.character(SampleData.demo))
++                store.suite.photo.aspect = "4:5"
++            } else {
++                store.setComposerCharacter(nil)
++                store.suite.composer.tokens = PromptTokens()
++                store.suite.photo.aspect = nil
++            }
++        }
++        // One demo run (FakeMuseAPI: nothing is spent) for the results frames.
++        store.themeID = .a
++        store.suite.photoSessionJobs = []
++        photoState(true)
++        await store.estimatePhoto()
++        let jobsBefore4 = Set(store.jobs.map(\.id))
++        store.generatePhoto()
++        _ = await until(15) { store.jobs.contains { !jobsBefore4.contains($0.id) && $0.isPhoto && $0.isDone } }
++        let photoRun = store.jobs.first { !jobsBefore4.contains($0.id) && $0.isPhoto }?.id
++        for theme in [ThemeID.a, .b] {
++            store.themeID = theme
++            for (width, height) in [(1000, 700), (1152, 720), (1440, 900)] {
++                w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
++                for name in ["empty", "filled", "results"] {
++                    store.suite.picker = nil
++                    store.suite.browserOpen = false
++                    store.suite.feedOpen = false
++                    store.suite.compareIds = []
++                    store.suite.claude.open = false
++                    store.suite.photoSessionJobs = name == "results" ? Set([photoRun].compactMap { $0 }) : []
++                    photoState(name != "empty")
++                    state.generateFrame = nil
++                    state.generateLabel = nil
++                    try? await Task.sleep(for: .seconds(2))
++                    state.generateFrame = nil
++                    state.generateLabel = nil
++                    state.probeTick += 1
++                    try? await Task.sleep(for: .seconds(0.3))
++                    w.contentView?.layoutSubtreeIfNeeded()
++                    let content = w.contentView?.bounds.size ?? .zero
++                    let label = "\(name) \(theme.rawValue) \(width)x\(height)"
++                    let g = state.generateLabel ?? ""
++                    if let f = state.generateFrame {
++                        let inside = f.minX >= 0 && f.minY >= 0 && f.maxX <= content.width + 0.5 && f.maxY <= content.height + 0.5
++                        line(inside, "photo_fits", "\(label) Generate at \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)) in \(Int(content.width))x\(Int(content.height))")
++                    } else {
++                        line(false, "photo_fits", "\(label) Generate not drawn")
++                    }
++                    let frames = state.composerFrames
++                    if name != "empty" {
++                        line(g.contains(" · $") || g.hasSuffix(" · Free"), "photo_price", "\(label) \"\(g)\"")
++                    } else {
++                        line(g.hasPrefix("Generate · ") && !g.contains("—"), "photo_price", "\(label) empty reads \"\(g)\", blocker \(frames["photo blocker"] != nil ? "drawn" : "not drawn")")
++                    }
++                    if name == "results" {
++                        let four = frames.keys.contains { $0.hasPrefix("stage carousel ") && $0.hasSuffix("/4") }
++                        line(four && frames["stage photo strip"] != nil, "photo_carousel", "\(label) carousel \(four), strip \(frames["stage photo strip"] != nil)")
++                    } else {
++                        line(frames["stage ready"] == nil, "photo_empty_stage", "\(label) stage \(frames["stage ready"] == nil ? "empty" : "shows an old result")")
++                    }
++                    line(frames["pill preset"] != nil, "photo_presets", "\(label) Preset chip \(frames["pill preset"] != nil ? "in the bar" : "missing")")
++                    if let r = frames["photo rail end"] {
++                        lines.append("INFO photo_rail \(label) last row ends at \(Int(r.maxY)) of \(Int(content.height))")
++                    }
++                    capture(dir.appendingPathComponent("mac_\(theme.rawValue)_photo_\(name)_\(width)x\(height).png"))
++                }
++            }
++        }
++        store.suite.photoSessionJobs = []
++        store.themeID = .a
++
+         store.setSwapVariant(.classic)
+         w.setFrame(full, display: true)
+         try? await Task.sleep(for: .seconds(1))
+diff --git a/mac/Muse/App/SnapshotRunner+SuiteStage.swift b/mac/Muse/App/SnapshotRunner+SuiteStage.swift
+index 3aaaf589..255a1770 100644
+--- a/mac/Muse/App/SnapshotRunner+SuiteStage.swift
++++ b/mac/Muse/App/SnapshotRunner+SuiteStage.swift
+@@ -7,7 +7,8 @@ import MuseCore
+ //   photo_queue_live  that job is in the Queue's active list while it runs
+ //   photo_carousel    the four stills land on the stage as a carousel (four dots)
+ //   photo_return      leaving the page and coming back shows the same result
+-//   photo_restart     with the session's memory gone (a restart), the stage still finds it
++//   photo_restart     with the session's memory gone (a restart), the Photo stage starts empty (owner 2026-11-14: never an
++//                     old result on the stage; the run stays in the Queue and the Library)
+ //   photo_queue_row   the Queue draws its row
+ //   shot_*            the same for a video mode (Shot): generating, back after leaving, its Queue row
+ extension SnapshotRunner {
+@@ -63,12 +64,14 @@ extension SnapshotRunner {
+         let back = await until(5) { carousel(4) }
+         line(back && store.stageJob(.photo)?.id == pj?.id, "photo_return", "carousel \(back) · stage job \(store.stageJob(.photo)?.id ?? "none")")
+ 
+-        // A restart: the session's memory is gone; the stage finds the job from what was kept.
+-        let session = store.suite.stageJobs
++        // A restart: the session's memory is gone; the Photo stage starts empty (the Photo tab, owner 2026-11-14).
++        let session = store.suite.stageJobs, photoRuns = store.suite.photoSessionJobs
+         store.suite.stageJobs = [:]
++        store.suite.photoSessionJobs = []
+         let found = store.stageJob(.photo)?.id
+         store.suite.stageJobs = session
+-        line(found != nil && found == pj?.id, "photo_restart", "found \(found ?? "none")")
++        store.suite.photoSessionJobs = photoRuns
++        line(found == nil, "photo_restart", "empty after a restart \(found == nil) · found \(found ?? "none")")
+ 
+         if let id = pj?.id {
+             store.go(.queue)
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift b/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
+index 985bb2d3..dd80f1c5 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerBottomBar.swift
+@@ -29,6 +29,7 @@ struct ComposerBottomBar: View {
+             HStack(spacing: Space.s2) {
+                 pills(spacing: Space.s2, compact: false)
+                 Spacer(minLength: Space.s2)
++                blocker
+                 modelPill(compact: false)
+                 pricingLink(compact: true)
+                 queueButton(compact: false)
+@@ -38,6 +39,7 @@ struct ComposerBottomBar: View {
+             HStack(spacing: 6) {
+                 pills(spacing: 5, compact: true)
+                 Spacer(minLength: 6)
++                blocker
+                 modelPill(compact: false)
+                 pricingLink(compact: true)
+                 queueButton(compact: true)
+@@ -64,12 +66,21 @@ struct ComposerBottomBar: View {
+         .frame(minHeight: 48)
+     }
+ 
++    /// The Photo tab: why Generate can't go yet, beside it (owner 2026-11-14; never "Generate · —" alone).
++    @ViewBuilder private var blocker: some View {
++        if tool == .photo, !pricing, let why = store.photoBlocker {
++            Text(why).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
++                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "photo blocker") } }
++        }
++    }
++
+     /// `short`: the price stays, only the words between "Generate" and it go (the full label is the tooltip and the
+     /// accessibility label).
+     private func generateButton(short: Bool) -> some View {
+         let full = generateLabel
+         let shown = short ? GenerateButton.shortLabel(full) : full
+-        return GenerateButton(label: shown, accessibility: full, enabled: canGenerate, busy: store.suite.generating) { generate() }
++        return GenerateButton(label: shown, accessibility: tool == .photo ? (store.photoBlocker.map { "\(full): \($0)" } ?? full) : full,
++                              enabled: canGenerate, busy: store.suite.generating) { generate() }
+             .background { if SnapshotRunner.dir != nil { GenerateFrameProbe(label: shown) } } // CI fit check (owner fix A2)
+             .fixedSize()
+             .layoutPriority(2)
+@@ -152,10 +163,10 @@ struct ComposerBottomBar: View {
+                     takesPill
+                 }
+             } else if tool == .photo {
+-                // Photo tool (workstream 3): one Photos 1–4 count in place of Shape, Length, Sound, Speaking and Takes.
+-                let n = store.suite.photo.count
+-                listPill("photos", icon: "photo.on.rectangle", value: "\(n) photo\(n == 1 ? "" : "s")", help: "Photos",
+-                         options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0 }
++                // The Photo tab (owner 2026-11-14): the Preset chip, the 1–4 count and the Size (the shapes the model makes).
++                PhotoPresetPill(compact: compact)
++                PhotoCountControl(compact: compact)
++                PhotoSizePill()
+             } else {
+                 if !settingsInRail {
+                     lengthPill
+@@ -207,6 +218,8 @@ struct ComposerBottomBar: View {
+     private var generateLabel: String {
+         if isSwap, !isRemix, let q = store.suite.swap.addOn { return "Generate · \(Pricing.money(Pricing.totalCost(store.spec(for: q))))" }
+         if pricing { return "Generate · Pricing…" }
++        // The Photo tab: no price yet is "Generate · 4 photos", greyed, with the reason beside it (never "Generate · —").
++        if tool == .photo, !price.canGenerate, price != .free { return "Generate · \(PhotoEstimate.photos(store.suite.photo.count))" }
+         return price.buttonText
+     }
+ 
+diff --git a/mac/Muse/Views/Suite/Composer/ComposerView.swift b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+index b1120032..86672e4b 100644
+--- a/mac/Muse/Views/Suite/Composer/ComposerView.swift
++++ b/mac/Muse/Views/Suite/Composer/ComposerView.swift
+@@ -152,7 +152,7 @@ struct ComposerView: View {
+     private var hasPresets: Bool {
+         switch store.suite.composer.tool {
+         case .shot: return !store.suite.camera.presets.isEmpty
+-        case .photo: return true
++        case .photo: return false // the Photo tab (owner 2026-11-14): presets are the bar's Preset chip, never a whole row
+         default: return false
+         }
+     }
+@@ -166,11 +166,7 @@ struct ComposerView: View {
+             SuitePageHeader { headerTools(width: width) }
+                 .layoutPriority(1)
+             if presetsOpen && hasPresets {
+-                if store.suite.composer.tool == .photo {
+-                    PhotoPresetsRow() // Photo tool (workstream 3): the photo templates
+-                } else {
+-                    PresetsRow()
+-                }
++                PresetsRow()
+             }
+             if store.isNewSwap {
+                 // New Swap's own screen (plans/swap-viewer-design.md §A; redesign frames "New Swap"): the clip and its
+@@ -190,9 +186,15 @@ struct ComposerView: View {
+                     }
+                     if !strip {
+                         ScrollView(.vertical, showsIndicators: false) {
+-                            ComposerRail(narrow: narrow)
+-                                .frame(maxWidth: .infinity, alignment: .leading)
+-                                .padding(Space.s4)
++                            Group {
++                                if store.suite.composer.tool == .photo {
++                                    PhotoRail() // the Photo tab (owner 2026-11-14): Inputs, then the Rig for a still
++                                } else {
++                                    ComposerRail(narrow: narrow)
++                                }
++                            }
++                            .frame(maxWidth: .infinity, alignment: .leading)
++                            .padding(Space.s4)
+                         }
+                         .frame(width: narrow ? 272 : 294)
+                         .frame(maxHeight: .infinity, alignment: .top)
+@@ -407,7 +409,8 @@ struct ComposerMediaPane: View {
+ 
+     /// "16:9" → 16/9; anything unreadable is 16:9.
+     private var aspectRatio: CGFloat {
+-        let parts = store.suite.composer.aspect.split(separator: ":").compactMap { Double($0) }
++        let shape = tool == .photo ? store.suite.photo.shownAspect : store.suite.composer.aspect // Photo: the Size pill's shape
++        let parts = shape.split(separator: ":").compactMap { Double($0) }
+         guard parts.count == 2, parts[0] > 0, parts[1] > 0 else { return 16.0 / 9.0 }
+         return CGFloat(parts[0] / parts[1])
+     }
+@@ -432,7 +435,8 @@ struct ComposerMediaPane: View {
+     private var tag: String? {
+         let d = store.suite.composer
+         switch tool {
+-        case .photo, .swap, .recast: return nil
++        case .photo: return "\(store.suite.photo.shownAspect) · \(PhotoEstimate.photos(store.suite.photo.count))"
++        case .swap, .recast: return nil
+         case .extend: return "+\(d.duration) s"
+         default: return "\(d.aspect) · \(d.duration) s"
+         }
+@@ -441,7 +445,8 @@ struct ComposerMediaPane: View {
+     private var tagLabel: String? {
+         let d = store.suite.composer
+         switch tool {
+-        case .photo, .swap, .recast: return nil
++        case .photo: return "Shape \(store.suite.photo.shownAspect), \(PhotoEstimate.photos(store.suite.photo.count))"
++        case .swap, .recast: return nil
+         case .extend: return "Adds \(d.duration) seconds"
+         default: return "Shape \(d.aspect), \(d.duration) seconds"
+         }
+@@ -916,7 +921,7 @@ struct ComposerPromptBar: View {
+         case .swap, .recast:
+             if store.clip == nil { return "Choose a clip first" }
+             return store.suite.swapEstimate?.problem ?? store.suite.swapError
+-        case .photo: return store.suite.photoError // Photo tool (workstream 3)
++        case .photo: return nil // the Photo tab: why Generate can't go sits beside it (ComposerBottomBar)
+         default: return store.suite.estimate?.problem ?? store.suite.estimateError
+         }
+     }
+diff --git a/mac/Muse/Views/Suite/Composer/PhotoTab.swift b/mac/Muse/Views/Suite/Composer/PhotoTab.swift
+new file mode 100644
+index 00000000..5e591b33
+--- /dev/null
++++ b/mac/Muse/Views/Suite/Composer/PhotoTab.swift
+@@ -0,0 +1,479 @@
++import MuseCore
++import SwiftUI
++
++// The Photo tab (owner-approved 2026-11-14, plans/design/photo/): the suite's stage + panel + bar for stills.
++// - The panel: Inputs (Character, Outfit, Product, References), each an empty slot with a clear plus and its words, then
++//   the Rig for a still (Framing, Lens, Light, Look, Style). A preset sets its own camera and light, so Framing, Lens and
++//   Light read "From preset", locked.
++// - The bar: a compact Preset chip (a small menu with search and covers, never a whole row), the 1–4 count, the Size pill
++//   (the shapes the model makes, from the estimate) and, beside Generate, why it can't go yet.
++
++// MARK: The panel
++
++struct PhotoRail: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: 0) {
++            SuitePanelTitle(title: "Inputs") { EmptyView() }
++                .padding(.bottom, Space.s2)
++            PhotoCharacterRow()
++            PhotoOutfitRow()
++            PhotoProductRow()
++            PhotoReferencesRow()
++            SuitePanelTitle(title: "Rig", subtitle: store.photoPreset.map { "\($0.name) sets the camera and light" }) {
++                SetupRigsRow(asSaveButton: true)
++            }
++            .padding(.top, Space.s5).padding(.bottom, Space.s2)
++            ForEach(PhotoRigRow.Kind.allCases, id: \.self) { PhotoRigRow(kind: $0) }
++            VStack(alignment: .leading, spacing: Space.s3) {
++                ComposerSentImagesRow() // images sent (server images/sent.ts)
++                RigCheckRow()
++            }
++            .padding(.top, Space.s3)
++            Color.clear.frame(height: 1)
++                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "photo rail end") } }
++        }
++    }
++}
++
++/// An Inputs row: icon, name, then either the filled value (its picture and name) or an empty slot (a dashed square with a
++/// plus and words in ink, so it never reads as faint or disabled), and a caret.
++struct PhotoInputRow: View {
++    @Environment(\.theme) private var t
++    var icon: String
++    var name: String
++    /// The filled value; nil shows the empty slot with `add`.
++    var value: String?
++    var thumb: ImageRef? = nil
++    var round = false
++    /// The empty slot's words ("Add outfit").
++    var add: String
++    /// The one the photo can't go without: its empty words are underlined.
++    var needed = false
++    var detail: String? = nil
++    var enabled = true
++    var help: String? = nil
++    var action: () -> Void
++
++    var body: some View {
++        Button(action: action) {
++            HStack(spacing: Space.s2) {
++                Ph(icon, 15).frame(width: 18, height: 18).foregroundStyle(t.roles.ink2)
++                Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
++                    .frame(minWidth: 72, alignment: .leading)
++                HStack(spacing: Space.s2) {
++                    if let value {
++                        if let thumb {
++                            MuseImage(ref: thumb).frame(width: 22, height: 22)
++                                .clipShape(round ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: t.radii.chip)))
++                        }
++                        Text(value).font(t.body(13, .medium)).foregroundStyle(t.roles.ink).lineLimit(1).truncationMode(.tail)
++                    } else {
++                        Ph("plus", 11).foregroundStyle(t.roles.ink)
++                            .frame(width: 22, height: 22)
++                            .overlay(RoundedRectangle(cornerRadius: t.radii.chip).strokeBorder(t.roles.ink2, style: StrokeStyle(lineWidth: 1.2, dash: [3, 2])))
++                        Text(add).font(t.body(13, .medium)).foregroundStyle(t.roles.ink).lineLimit(1).minimumScaleFactor(0.85)
++                            .underline(needed, color: t.roles.ink2)
++                    }
++                    if let detail {
++                        Text(detail).font(t.body(13)).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
++                    }
++                }
++                Spacer(minLength: Space.s2)
++                Ph("caret-down", 12).foregroundStyle(t.roles.ink2)
++            }
++            .frame(minHeight: 36)
++            .overlay(alignment: .bottom) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
++            .contentShape(Rectangle())
++            .opacity(enabled ? 1 : 0.55)
++        }
++        .buttonStyle(.plain)
++        .disabled(!enabled)
++        .help(help ?? "\(name): \(value ?? add)")
++        .accessibilityLabel("\(name): \(value ?? add)")
++    }
++}
++
++/// Character: the studio's cast. Not required (a photo can start from words or an image), but the usual start, so its
++/// empty words are underlined.
++struct PhotoCharacterRow: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    @State private var open = false
++
++    var body: some View {
++        let m = store.composerCharacter
++        PhotoInputRow(icon: "user", name: "Character", value: m?.shortName, thumb: m?.cover, round: true, add: "Pick a character", needed: m == nil) { open = true }
++            .popover(isPresented: $open, arrowEdge: .leading) {
++                PhotoCastList(onPick: { open = false }).environment(store).environment(\.theme, t)
++            }
++    }
++}
++
++/// Outfit: her ready outfits; waits for a character ("Add outfit" makes an outfit set when she has none).
++struct PhotoOutfitRow: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    @State private var open = false
++
++    var body: some View {
++        let m = store.composerCharacter
++        let outfits = store.outfits(for: m)
++        let current = outfits.first { $0.id == (store.suite.composer.tokens.outfitId ?? store.suite.composer.outfitId) } ?? outfits.first
++        PhotoInputRow(icon: "t-shirt", name: "Outfit", value: current?.name, thumb: current?.angles.compactMap { $0 }.first,
++                      add: "Add outfit", enabled: m != nil, help: m == nil ? "Outfit: pick a character first" : nil) {
++            if outfits.isEmpty { store.openOutfitSheet(for: m?.id) } else { open = true }
++        }
++        .popover(isPresented: $open, arrowEdge: .leading) {
++            PhotoOutfitList(outfits: outfits, current: current?.id, character: m?.id) { open = false }
++                .environment(store).environment(\.theme, t)
++        }
++    }
++}
++
++/// Product (optional): the composer's image slot, as in UGC ad.
++struct PhotoProductRow: View {
++    @Environment(AppStore.self) private var store
++
++    var body: some View {
++        let model = store.suite.composerSlots
++        let id = SlotId(.image)
++        let v = model.slots[id]
++        PhotoInputRow(icon: "package", name: "Product", value: v.map { $0.ready ? ($0.name.isEmpty ? "Product" : $0.name) : "Uploading…" }, thumb: v?.image,
++                      add: "Add product", detail: nil) { model.pick(id, api: store.api) }
++            .contextMenu { if v != nil { Button("Remove the product") { model.clear(id) } } }
++    }
++}
++
++/// References (optional): up to 3, each guiding the pose, the look or the scene.
++struct PhotoReferencesRow: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    @State private var open = false
++
++    var body: some View {
++        let refs = store.suite.photo.references
++        let feature = store.photoRefsFeature
++        let guide = refs.first.flatMap { $0.guides.first }.map { feature.label($0) }
++        PhotoInputRow(icon: "images", name: "References", value: refs.isEmpty ? nil : (guide ?? "Reference"), thumb: refs.first?.image,
++                      add: "Add up to \(ShootRef.max)", detail: refs.isEmpty ? nil : "\(refs.count) of \(ShootRef.max)") { open = true }
++            .popover(isPresented: $open, arrowEdge: .leading) {
++                PhotoReferencesPanel().environment(store).environment(\.theme, t)
++            }
++    }
++}
++
++/// Her outfits, and "New outfit set".
++struct PhotoOutfitList: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var outfits: [Outfit]
++    var current: String?
++    var character: String?
++    var onPick: () -> Void
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: 4) {
++            Text("Outfits").font(t.body(13, .medium)).foregroundStyle(t.muted).padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 4)
++            ForEach(outfits) { o in
++                let on = o.id == current
++                Button {
++                    store.suite.composer.outfitId = o.id
++                    onPick()
++                } label: {
++                    HStack(spacing: 10) {
++                        MuseImage(ref: o.angles.compactMap { $0 }.first).frame(width: 32, height: 40).clipShape(RoundedRectangle(cornerRadius: t.imageRadius))
++                        Text(o.name).font(t.body(14, on ? .semibold : .regular)).lineLimit(1)
++                        Spacer(minLength: 0)
++                        if on { Ph("check", 12).foregroundStyle(t.accent) }
++                    }
++                    .padding(.horizontal, 12).frame(minHeight: 44)
++                    .contentShape(Rectangle())
++                }
++                .buttonStyle(.plain)
++                .accessibilityLabel("\(o.name)\(on ? ", selected" : "")")
++            }
++            LinkText("New outfit set", size: 13) {
++                onPick()
++                store.openOutfitSheet(for: character)
++            }
++            .padding(.horizontal, 12).padding(.vertical, 8)
++        }
++        .frame(width: 260, alignment: .leading)
++        .foregroundStyle(t.ink)
++    }
++}
++
++/// The Rig for a still: Framing (shot size), Lens (focal and aperture), Light, Look and Style. No movement, tempo or length.
++struct PhotoRigRow: View {
++    @Environment(AppStore.self) private var store
++    var kind: Kind
++
++    enum Kind: CaseIterable { case framing, lens, light, look, style }
++
++    var body: some View {
++        let d = store.suite.composer
++        let locked = kind != .look && kind != .style && store.suite.photo.presetId != nil
++        let v = locked ? ("From preset", true) : Self.value(kind, store)
++        SuiteRow(icon: icon, name: name, value: v.0, quiet: v.1, enabled: !locked,
++                 help: locked ? "\(name) comes from the preset" : nil) {
++            switch kind {
++            case .framing: store.openPicker(.camera, step: "angle")
++            case .lens: store.openPicker(.camera, step: "setup")
++            case .light: store.openPicker(.lighting)
++            case .look: store.openPicker(.look)
++            case .style: store.openPicker(.style)
++            }
++        }
++        .disabled(d.directed != nil && (kind == .framing || kind == .lens))
++    }
++
++    private var name: String {
++        switch kind {
++        case .framing: return "Framing"
++        case .lens: return "Lens"
++        case .light: return "Light"
++        case .look: return "Look"
++        case .style: return "Style"
++        }
++    }
++
++    private var icon: String {
++        switch kind {
++        case .framing: return "frame-corners"
++        case .lens: return "aperture"
++        case .light: return "sun"
++        case .look: return "palette"
++        case .style: return "sliders-horizontal"
++        }
++    }
++
++    /// The row's value and whether it is on Auto ("Auto": the house defaults; Look: "House grade").
++    @MainActor static func value(_ kind: Kind, _ store: AppStore) -> (String, Bool) {
++        let d = store.suite.composer
++        let s = d.settings
++        let cat = store.suite.camera
++        if d.directed != nil && (kind == .framing || kind == .lens) { return ("Directed", false) }
++        let parts: [String]
++        switch kind {
++        case .framing: parts = [ComposerCatalog.label(cat.shotSizes, s.shotSize), ComposerCatalog.label(cat.heights, s.height)].compactMap { $0 }
++        case .lens:
++            parts = [s.focalMm.map { ComposerCatalog.focalLabel(cat, $0) }, ComposerCatalog.label(cat.apertures, s.aperture),
++                     ComposerCatalog.label(cat.lenses, s.lens), ComposerCatalog.label(cat.bodies, s.body)].compactMap { $0 }
++        case .light: parts = [ComposerCatalog.label(cat.lighting, s.lighting)].compactMap { $0 }
++        case .look:
++            parts = [ComposerCatalog.label(cat.palettes, s.palette), ComposerCatalog.label(cat.looks, s.stock)].compactMap { $0 }
++            if parts.isEmpty { return ("House grade", true) }
++        case .style: parts = [ComposerCatalog.label(cat.genres, s.genre), ComposerCatalog.label(cat.eras, s.era)].compactMap { $0 }
++        }
++        return parts.isEmpty ? ("Auto", true) : (parts.joined(separator: " · "), false)
++    }
++}
++
++// MARK: The bar
++
++/// "Preset": a small menu of the photo presets (search, covers, names). Picked, the chip shows its name, outlined.
++struct PhotoPresetPill: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var compact = false
++    @State private var open = false
++
++    var body: some View {
++        let picked = store.photoPreset
++        Button { open.toggle() } label: {
++            HStack(spacing: 6) {
++                Ph("images", 13).frame(width: 16, height: 16).foregroundStyle(t.roles.ink2)
++                if !compact || picked != nil {
++                    Text(picked?.name ?? "Preset").font(t.body(13, .medium)).foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
++                }
++                Ph("caret-down", 9).foregroundStyle(t.roles.ink2)
++            }
++            .padding(.horizontal, 10).frame(height: 30)
++            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(picked != nil ? t.roles.raised : (open ? t.roles.hairline : t.roles.field)))
++            .overlay {
++                if picked != nil { RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.action, lineWidth: 1) }
++            }
++            .contentShape(Rectangle())
++        }
++        .buttonStyle(.plain)
++        .fixedSize()
++        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill preset") } }
++        .help(picked.map { "Preset: \($0.name)" } ?? "Start from a preset")
++        .accessibilityLabel(picked.map { "Preset: \($0.name)" } ?? "Preset: none")
++        .popover(isPresented: $open, arrowEdge: .top) {
++            PhotoPresetMenu { open = false }.environment(store).environment(\.theme, t)
++        }
++    }
++}
++
++/// The preset menu: search, the covers in a grid, and "No preset" (back to your own rig).
++struct PhotoPresetMenu: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var onPick: () -> Void
++    @State private var query = ""
++
++    var body: some View {
++        let all = store.templates
++        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
++        let list = q.isEmpty ? all : all.filter { $0.name.lowercased().contains(q) }
++        VStack(alignment: .leading, spacing: Space.s3) {
++            HStack(spacing: Space.s2) {
++                Ph("magnifying-glass", 13).foregroundStyle(t.roles.ink2)
++                TextField("Search presets", text: $query).textFieldStyle(.plain).font(t.body(13))
++            }
++            .padding(.horizontal, 10).frame(height: 30)
++            .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
++            if all.isEmpty {
++                Text("No photo presets yet. Save a photo as a template and it shows up here.")
++                    .font(t.body(13)).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
++            } else {
++                ScrollView(.vertical, showsIndicators: false) {
++                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s2, alignment: .top), count: 3), spacing: Space.s3) {
++                        ForEach(list) { tpl in
++                            PhotoPresetTile(template: tpl, selected: store.suite.photo.presetId == tpl.id, width: 100) {
++                                store.choosePhotoPreset(tpl)
++                                onPick()
++                            }
++                        }
++                    }
++                    .padding(4)
++                }
++                .frame(maxHeight: 360)
++            }
++            HStack {
++                Button {
++                    store.suite.photo.presetId = nil
++                    onPick()
++                } label: {
++                    Text("No preset: use the rig").font(t.body(12.5)).foregroundStyle(store.suite.photo.presetId == nil ? t.roles.ink2 : t.roles.ink)
++                }
++                .buttonStyle(.plain)
++                .disabled(store.suite.photo.presetId == nil)
++                Spacer()
++                LinkText("All templates", size: 12.5) {
++                    onPick()
++                    store.openTemplates()
++                }
++            }
++            .padding(.top, Space.s1)
++            .overlay(alignment: .top) { Rectangle().fill(t.roles.hairline).frame(height: 1).offset(y: -Space.s2) }
++        }
++        .padding(Space.s3)
++        .frame(width: 348, alignment: .leading)
++        .foregroundStyle(t.roles.ink)
++        .task { if store.templates.isEmpty { await store.loadTemplates() } }
++    }
++}
++
++/// Photos 1–4 as a small segmented control.
++struct PhotoCountControl: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    var compact = false
++
++    var body: some View {
++        let n = store.suite.photo.count
++        HStack(spacing: 2) {
++            HStack(spacing: 6) {
++                Ph("stack", 13).frame(width: 16, height: 16).foregroundStyle(t.roles.ink2)
++                if !compact { Text("Photos").font(t.body(13)).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize() }
++            }
++            .padding(.leading, 8).padding(.trailing, 4)
++            ForEach(PhotoDraft.counts, id: \.self) { c in
++                let on = c == n
++                Button { store.suite.photo.count = c } label: {
++                    Text("\(c)").font(t.body(13, on ? .semibold : .medium)).monospacedDigit()
++                        .foregroundStyle(on ? t.roles.ink : t.roles.ink2)
++                        .frame(width: 24, height: 26)
++                        .background(RoundedRectangle(cornerRadius: t.radii.control - 1).fill(on ? t.roles.raised : .clear))
++                        .overlay { if on { RoundedRectangle(cornerRadius: t.radii.control - 1).strokeBorder(t.roles.hairline, lineWidth: 1) } }
++                        .contentShape(Rectangle())
++                }
++                .buttonStyle(.plain)
++                .accessibilityLabel("\(PhotoEstimate.photos(c))\(on ? ", selected" : "")")
++            }
++        }
++        .padding(2)
++        .frame(height: 30)
++        .background(RoundedRectangle(cornerRadius: t.radii.control).fill(t.roles.field))
++        .fixedSize()
++        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill photos") } }
++        .help("Photos in this run")
++    }
++}
++
++/// Size: the photo's shape, with what this model makes for it. Hidden until the server lists the shapes (an older server
++/// has no size choice).
++struct PhotoSizePill: View {
++    @Environment(AppStore.self) private var store
++    @Environment(\.theme) private var t
++    @State private var open = false
++
++    var body: some View {
++        let options = store.photoAspects
++        if !options.isEmpty {
++            let shown = store.suite.photo.shownAspect
++            Button { open.toggle() } label: {
++                SuitePillLabel(icon: "frame-corners", value: shown, open: open)
++            }
++            .buttonStyle(.plain)
++            .fixedSize()
++            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill size") } }
++            .help("Size: \(shown)")
++            .accessibilityLabel("Size: \(shown)")
++            .popover(isPresented: $open, arrowEdge: .top) {
++                VStack(alignment: .leading, spacing: 0) {
++                    Text("Size").font(t.body(13, .medium)).foregroundStyle(t.roles.ink2).padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
++                    ForEach(options) { o in
++                        let on = o.id == shown
++                        Button {
++                            store.suite.photo.aspect = o.id == "9:16" ? nil : o.id
++                            open = false
++                        } label: {
++                            HStack(spacing: 10) {
++                                Text(o.label).font(t.body(13, on ? .semibold : .regular)).foregroundStyle(t.roles.ink).lineLimit(1)
++                                Spacer(minLength: 0)
++                                if on { Ph("check", 12).foregroundStyle(t.roles.ink) }
++                            }
++                            .padding(.horizontal, 12).frame(minHeight: 32)
++                            .contentShape(Rectangle())
++                        }
++                        .buttonStyle(.plain)
++                    }
++                }
++                .padding(.bottom, 6)
++                .frame(width: 220, alignment: .leading)
++                .environment(\.theme, t)
++            }
++        }
++    }
++}
++
++extension AppStore {
++    /// The Size pill's shapes: the estimate's (with what this model makes), kept from the last estimate while the next one
++    /// is on its way; none from an older server.
++    var photoAspects: [PhotoAspectOption] {
++        if let list = suite.photoEstimate?.aspects, !list.isEmpty { return list }
++        return suite.photoAspectsSeen
++    }
++
++    /// Why Photo's Generate can't go now (nil: it can, at the estimate's price), shown beside it.
++    var photoBlocker: String? {
++        let uploading = suite.photoRefsUploading > 0 || suite.composerSlots.slots.uploading
++        if let need = suite.composer.photoMissing(suite.photo, uploading: uploading) { return need }
++        if let e = suite.photoError { return e }
++        if let e = suite.photoEstimate, !e.ok { return e.warnings.first ?? "These photos can't be made as set" }
++        return nil
++    }
++
++    /// "Auto · Nano Banana": the model Auto picked, from the estimate; a model picked on the pill keeps its own name.
++    var photoModelLabel: String {
++        let base = ComposerModelPicker.imageLabel(suite.photo, catalog: suite.catalog)
++        guard suite.photo.imageModel == nil, let name = suite.photoEstimate?.model?.name ?? suite.photoModelSeen else { return base }
++        return "Auto · \(name)"
++    }
++}
+diff --git a/mac/Muse/Views/Suite/Composer/PhotoViews.swift b/mac/Muse/Views/Suite/Composer/PhotoViews.swift
+index e99598ff..42dd41b7 100644
+--- a/mac/Muse/Views/Suite/Composer/PhotoViews.swift
++++ b/mac/Muse/Views/Suite/Composer/PhotoViews.swift
+@@ -129,7 +129,7 @@ struct PhotoCharacterCard: View {
+     }
+ }
+ 
+-private struct PhotoCastList: View {
++struct PhotoCastList: View {
+     @Environment(AppStore.self) private var store
+     @Environment(\.theme) private var t
+     var onPick: () -> Void
+diff --git a/mac/Muse/Views/Suite/Composer/ShotStage.swift b/mac/Muse/Views/Suite/Composer/ShotStage.swift
+index 059ec6ff..4f4b00b8 100644
+--- a/mac/Muse/Views/Suite/Composer/ShotStage.swift
++++ b/mac/Muse/Views/Suite/Composer/ShotStage.swift
+@@ -39,6 +39,10 @@ struct ShotStageTake: View {
+                            onStep: list.count > 1 ? { step($0, count: list.count) } : nil, sharedPlayback: playback)
+                     .id(take.id)
+                     .frame(maxHeight: .infinity)
++                if !take.isVideo && list.count > 1 {
++                    // The Photo tab (owner 2026-11-14): every photo of the run as a strip, the shown one marked.
++                    StagePhotoStrip(takes: list, at: at) { i in page = ((i - start) % list.count + list.count) % list.count }
++                }
+                 if take.isVideo {
+                     StageTimeline(playback: playback, video: take.videoUrl.flatMap(URL.init(string:)), poster: take.thumb,
+                                   length: take.durationSec)
+@@ -62,12 +66,12 @@ struct ShotStageTake: View {
+ 
+     private func header(_ take: Take, at: Int, count: Int) -> some View {
+         let actions = TakeViewerActions.list(.suite, isVideo: take.isVideo, canRedo: true, canExtend: ExtendSource.take(take) != nil,
+-                                             canUpscale: take.canUpscale)
++                                             canUpscale: take.canUpscale, canUseInShot: job.isPhoto)
+         return HStack(alignment: .center, spacing: Space.s4) {
+             VStack(alignment: .leading, spacing: 3) {
+                 Text(job.title).font(t.body(15, .semibold)).foregroundStyle(t.roles.ink).lineLimit(1)
+                 HStack(spacing: 10) {
+-                    ForEach(Self.meta(take, at: at, count: count), id: \.self) { Text($0) }
++                    ForEach(Self.meta(take, at: at, count: count, noun: job.isPhoto ? "Photo" : "Take"), id: \.self) { Text($0) }
+                 }
+                 .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
+             }
+@@ -85,9 +89,9 @@ struct ShotStageTake: View {
+     }
+ 
+     /// "Take 2 of 4", "8 s", "9:16", "1080p": the take's own values (its real length, never the request's).
+-    static func meta(_ take: Take, at: Int, count: Int) -> [String] {
++    static func meta(_ take: Take, at: Int, count: Int, noun: String = "Take") -> [String] {
+         var out: [String] = []
+-        if count > 1 { out.append("Take \(at + 1) of \(count)") }
++        if count > 1 { out.append("\(noun) \(at + 1) of \(count)") }
+         if let s = take.durationSec, s > 0 { out.append(s < 10 && s.rounded() != s ? String(format: "%.1f s", s) : "\(Int(s.rounded())) s") }
+         if let w = take.width, let h = take.height, w > 0, h > 0 {
+             if let shape = shape(w, h) { out.append(shape) }
+@@ -105,6 +109,35 @@ struct ShotStageTake: View {
+     }
+ }
+ 
++/// The Photo tab's run under the photo: each still small, the shown one outlined, "2 of 4". Clicking one shows it.
++struct StagePhotoStrip: View {
++    @Environment(\.theme) private var t
++    var takes: [Take]
++    var at: Int
++    var pick: (Int) -> Void
++
++    var body: some View {
++        HStack(spacing: Space.s2) {
++            ForEach(Array(takes.enumerated()), id: \.element.id) { i, take in
++                let on = i == at
++                Button { pick(i) } label: {
++                    MuseImage(ref: take.thumb).frame(width: 40, height: 50).clipped()
++                        .clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
++                        .overlay(RoundedRectangle(cornerRadius: t.radii.chip + 2).strokeBorder(on ? t.roles.ink : .clear, lineWidth: 2).padding(-3))
++                        .opacity(on ? 1 : 0.7)
++                        .contentShape(Rectangle())
++                }
++                .buttonStyle(.plain)
++                .accessibilityLabel("Photo \(i + 1) of \(takes.count)\(on ? ", shown" : "")")
++            }
++            Text("\(at + 1) of \(takes.count)").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
++                .padding(.leading, Space.s2).fixedSize()
++        }
++        .padding(.top, 3)
++        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage photo strip") } }
++    }
++}
++
+ /// Play, the take's frames with the playhead, and "0:03 / 0:08". Clicking the strip moves the playhead there.
+ struct StageTimeline: View {
+     @Environment(\.theme) private var t
+diff --git a/mac/Muse/Views/Viewer/TakeViewer.swift b/mac/Muse/Views/Viewer/TakeViewer.swift
+index 2484cc0e..3450060b 100644
+--- a/mac/Muse/Views/Viewer/TakeViewer.swift
++++ b/mac/Muse/Views/Viewer/TakeViewer.swift
+@@ -402,6 +402,7 @@ struct ViewerActionButton: View {
+         case .extend: return "arrow-line-right"
+         case .upscale: return "arrows-out-simple"
+         case .split: return "scissors"
++        case .useInShot: return "video-camera"
+         case .share: return "export"
+         }
+     }
+@@ -449,6 +450,7 @@ private struct ViewerActionRunner {
+         case .extend: store.openExtend(take)
+         case .upscale: break // the Upscale button opens its own picker
+         case .split: store.openEdit(takeId: take.id, at: time()) // owner 2026-11-12: Edit at this moment
++        case .useInShot: store.useAsStartFrame(take) // Photo tab (owner 2026-11-14): the still opens Shot as its start frame
+         case .share: store.openPostSheet(take)
+         }
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/ComposerShell.swift b/mac/MuseCore/Sources/MuseCore/Suite/ComposerShell.swift
+index 5621dc6a..3b0ba58a 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/ComposerShell.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/ComposerShell.swift
+@@ -119,7 +119,7 @@ public enum ComposerTool: String, CaseIterable, Sendable, Identifiable {
+         case .talking: return "What does she say? · type @ for your characters"
+         case .ugc: return "Describe the ad · type @ for your characters, # for a camera move"
+         case .swap: return "Anything to change? · type # for a camera move"
+-        case .photo: return "Describe the scene and what she does · type @ for your characters"
++        case .photo: return "Describe the photo: the place, the pose, the mood · type @ for a model" // owner 2026-11-14: no "she"
+         default: return "Describe the scene · type @ for your characters, # for a camera move"
+         }
+     }
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/FakeMuseAPI+Photo.swift b/mac/MuseCore/Sources/MuseCore/Suite/FakeMuseAPI+Photo.swift
+index bea196d3..c16319f5 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/FakeMuseAPI+Photo.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/FakeMuseAPI+Photo.swift
+@@ -47,8 +47,14 @@ extension FakeMuseAPI {
+         let rig = PhotoRig.still(FakeRigCheck.check(prompt: req.prompt, camera: still, speaking: false))
+         let look = SuiteLooks.look(for: ShotRequest(camera: req.camera).withGrade(req.gradeLook), camera: SuiteDemoCatalog.catalog.camera)
+         let preset = req.presetId.flatMap { id in templates.first { $0.id == id } }.map { PhotoPresetRef(id: $0.id, name: $0.name) }
+-        return PhotoEstimate(count: count, perPhoto: preview.estimate / Double(count), estimate: preview.estimate, warnings: Self.photoWarnings(req), rig: rig,
+-                             look: look, prompt: preset == nil ? preview.text : nil, preset: preset)
++        var e = PhotoEstimate(count: count, perPhoto: preview.estimate / Double(count), estimate: preview.estimate, warnings: Self.photoWarnings(req), rig: rig,
++                              look: look, prompt: preset == nil ? preview.text : nil, preset: preset)
++        // Size and the model (the server's estimate, owner 2026-11-14): demo mode's model takes every shape.
++        e.aspect = req.aspect ?? "9:16"
++        e.makes = e.aspect
++        e.aspects = PhotoDraft.aspects.map { PhotoAspectOption(id: $0, makes: $0) }
++        e.model = PhotoModelRef(id: "demo/photo", name: req.imageModel == nil ? "Nano Banana" : nil, auto: req.imageModel == nil)
++        return e
+     }
+ 
+     public func suiteCreatePhotos(_ req: PhotoRequest) async throws -> [Take] {
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuitePhoto.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuitePhoto.swift
+index fc6968be..6c3f9751 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/SuitePhoto.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuitePhoto.swift
+@@ -33,6 +33,9 @@ public struct PhotoRequest: Codable, Hashable, Sendable {
+     public var draft: SuiteDraft?
+     /// Owner only: the photo model for this run (a Replicate `owner/name` or a custom `c_…`); nil = the studio's.
+     public var imageModel: String?
++    /// The photo's shape (owner 2026-11-14): "4:5", "1:1", "9:16"…; nil = the server's 9:16 (left out, so an older server
++    /// that doesn't know it is never sent it).
++    public var aspect: String?
+ 
+     public init(modelId: String?, outfitId: String? = nil, prompt: String = "", camera: CameraSpec? = nil, gradeLook: Bool? = nil, count: Int = PhotoRequest.maxCount,
+                 presetId: String? = nil, productImage: ImageRef? = nil, references: [ShootRef]? = nil, seed: Int64? = nil, lockSeed: Bool? = nil,
+@@ -72,6 +75,33 @@ public struct PhotoPresetRef: Codable, Hashable, Sendable {
+     }
+ }
+ 
++/// One shape on the Size pill and what the model makes for it (the nearest ratio it takes; nil: no size choice).
++public struct PhotoAspectOption: Codable, Hashable, Sendable, Identifiable {
++    public var id: String
++    public var makes: String?
++    public init(id: String, makes: String?) {
++        self.id = id
++        self.makes = makes
++    }
++    /// "4:5", or "4:5 · makes 3:4" when this model makes another ratio, or "4:5 · model's size".
++    public var label: String {
++        guard let m = makes else { return "\(id) · model's size" }
++        return m == id ? id : "\(id) · makes \(m)"
++    }
++}
++
++/// The model Auto picked (or the one picked): the bar's "Auto · <name>". `name` nil: hidden from this member.
++public struct PhotoModelRef: Codable, Hashable, Sendable {
++    public var id: String?
++    public var name: String?
++    public var auto: Bool
++    public init(id: String?, name: String?, auto: Bool) {
++        self.id = id
++        self.name = name
++        self.auto = auto
++    }
++}
++
+ /// POST /v1/suite/photos/estimate: the price (a shoot's: count × per photo), the still rig check and the Look. Holds nothing.
+ public struct PhotoEstimate: Codable, Hashable, Sendable {
+     public var tool: String
+@@ -93,6 +123,13 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
+     public var preset: PhotoPresetRef?
+     /// The images the model gets (server images/sent.ts); nil from an older server.
+     public var sentImages: SentImages? = nil
++    /// Size (owner 2026-11-14; nil/empty from an older server: the Size pill stays hidden): the shape asked, what the
++    /// model makes for it, and every shape with its mapping.
++    public var aspect: String? = nil
++    public var makes: String? = nil
++    public var aspects: [PhotoAspectOption] = []
++    /// The model this runs on (owner 2026-11-14: "Auto · <model>"); nil from an older server.
++    public var model: PhotoModelRef? = nil
+ 
+     public init(count: Int, perPhoto: Double, estimate: Double? = nil, priceLine: String? = nil, buttonLabel: String? = nil, ok: Bool = true, warnings: [String] = [],
+                 rig: [RigWarning] = [], look: SuiteLook? = nil, prompt: String? = nil, preset: PhotoPresetRef? = nil) {
+@@ -111,7 +148,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
+         self.preset = preset
+     }
+ 
+-    enum CodingKeys: String, CodingKey { case tool, count, perPhoto, estimate, priceLine, buttonLabel, ok, warnings, rig, look, prompt, preset, sentImages }
++    enum CodingKeys: String, CodingKey { case tool, count, perPhoto, estimate, priceLine, buttonLabel, ok, warnings, rig, look, prompt, preset, sentImages, aspect, makes, aspects, model }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         tool = c.v(.tool, "photo")
+@@ -127,6 +164,10 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
+         prompt = c.o(.prompt)
+         preset = c.o(.preset)
+         sentImages = c.o(.sentImages)
++        aspect = c.o(.aspect)
++        makes = c.o(.makes)
++        aspects = c.v(.aspects, [])
++        model = c.o(.model)
+     }
+ 
+     public static func photos(_ n: Int) -> String { "\(n) photo\(n == 1 ? "" : "s")" }
+@@ -186,6 +227,8 @@ public struct PhotoDraft: Hashable, Sendable {
+     public var references: [ShootRef]
+     /// Owner only: the photo model picked on the Model pill (nil = Auto, the studio's photo model).
+     public var imageModel: String?
++    /// The Size pill (owner 2026-11-14); nil = 9:16, the server's default.
++    public var aspect: String?
+ 
+     public init(count: Int = PhotoRequest.maxCount, presetId: String? = nil, references: [ShootRef] = [], imageModel: String? = nil) {
+         self.imageModel = imageModel
+@@ -196,6 +239,10 @@ public struct PhotoDraft: Hashable, Sendable {
+ 
+     /// The Photos pill's choices.
+     public static let counts = Array(1...PhotoRequest.maxCount)
++    /// The Size pill's shapes when the server doesn't list them (server suite/photo.ts PHOTO_ASPECTS).
++    public static let aspects = ["9:16", "4:5", "3:4", "2:3", "1:1", "3:2", "4:3", "16:9"]
++    /// The shape shown on the Size pill.
++    public var shownAspect: String { aspect ?? "9:16" }
+ }
+ 
+ extension ComposerSettings {
+@@ -240,6 +287,7 @@ extension ComposerDraft {
+         let words = r.prompt.split(separator: " ").prefix(5).joined(separator: " ")
+         r.title = words.isEmpty ? nil : words
+         r.imageModel = photo.imageModel
++        r.aspect = photo.aspect
+         return r
+     }
+ 
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift b/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift
+index d5935f84..6e392ee4 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/TakeViewerCore.swift
+@@ -256,7 +256,7 @@ public struct DoubleTapSkip: Equatable, Sendable {
+ 
+ /// The viewer's take actions, in their one order (plans/swap-viewer-design.md §B4).
+ public enum TakeViewerAction: String, CaseIterable, Sendable {
+-    case keep, redo, extend, upscale, split, share
++    case keep, redo, extend, upscale, split, useInShot, share
+ 
+     public var title: String {
+         switch self {
+@@ -265,6 +265,7 @@ public enum TakeViewerAction: String, CaseIterable, Sendable {
+         case .extend: return "Extend"
+         case .upscale: return "Upscale"
+         case .split: return "Split"
++        case .useInShot: return "Use in Shot"
+         case .share: return "Share"
+         }
+     }
+@@ -276,6 +277,7 @@ public enum TakeViewerAction: String, CaseIterable, Sendable {
+         case .extend: return "A longer take: what happens next, or before"
+         case .upscale: return "Sharper 1080p, 2K or 4K from this take"
+         case .split: return "Open it in Edit at this moment"
++        case .useInShot: return "Start a video from this photo (its start frame)"
+         case .share: return "Post or share this take"
+         }
+     }
+@@ -295,7 +297,8 @@ public enum TakeViewerContext: String, Sendable {
+ 
+ public enum TakeViewerActions {
+     /// The actions shown: the context's, minus any this take can't do (hidden, not greyed; More says why).
+-    public static func list(_ ctx: TakeViewerContext, isVideo: Bool, canRedo: Bool, canExtend: Bool, canUpscale: Bool) -> [TakeViewerAction] {
++    /// `canUseInShot`: a still from the Photo tab (owner 2026-11-14: "Use in Shot" makes it a video's start frame).
++    public static func list(_ ctx: TakeViewerContext, isVideo: Bool, canRedo: Bool, canExtend: Bool, canUpscale: Bool, canUseInShot: Bool = false) -> [TakeViewerAction] {
+         switch ctx {
+         case .source, .library: return []
+         case .compare: return [.keep]
+@@ -307,13 +310,14 @@ public enum TakeViewerActions {
+                 case .extend: return isVideo && canExtend
+                 case .upscale: return canUpscale
+                 case .split: return isVideo
++                case .useInShot: return !isVideo && canUseInShot
+                 }
+             }
+         }
+     }
+ 
+     /// The order labels give way when a row is too narrow: Split, Upscale, Extend, then Redo. Keep and Share keep theirs.
+-    public static let dropOrder: [TakeViewerAction] = [.split, .upscale, .extend, .redo]
++    public static let dropOrder: [TakeViewerAction] = [.split, .useInShot, .upscale, .extend, .redo]
+ 
+     /// Each step's icon-only set, from all labels to the fewest: what `ViewThatFits` tries in turn.
+     public static func steps(_ actions: [TakeViewerAction]) -> [Set<TakeViewerAction>] {
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/SuitePhotoTests.swift b/mac/MuseCore/Tests/MuseCoreTests/SuitePhotoTests.swift
+index 134daa28..9144726c 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/SuitePhotoTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/SuitePhotoTests.swift
+@@ -171,6 +171,52 @@ final class SuitePhotoTests: XCTestCase {
+         XCTAssertEqual(res.takes.map(\.title), ["Photo · Rooftop"])
+     }
+ 
++    // MARK: The Photo tab (owner 2026-11-14): size, the model Auto picked, Use in Shot
++
++    func testTheSizeIsSentOnlyWhenPicked() throws {
++        let d = ComposerDraft(tool: .photo, tokens: try tokens())
++        let plain = try XCTUnwrap(d.photoRequest(PhotoDraft()))
++        XCTAssertFalse(try json(plain).keys.contains("aspect"), "9:16 is the server's default: an older server is never sent it")
++        var p = PhotoDraft()
++        XCTAssertEqual(p.shownAspect, "9:16")
++        p.aspect = "4:5"
++        XCTAssertEqual(p.shownAspect, "4:5")
++        let r = try XCTUnwrap(d.photoRequest(p))
++        XCTAssertEqual(try json(r)["aspect"] as? String, "4:5")
++        XCTAssertEqual(PhotoDraft.aspects, ["9:16", "4:5", "3:4", "2:3", "1:1", "3:2", "4:3", "16:9"], "server suite/photo.ts PHOTO_ASPECTS")
++    }
++
++    func testTheEstimateDecodesSizeAndModel() throws {
++        let raw = #"""
++        {"count":2,"perPhoto":0.1,"aspect":"4:5","makes":"3:4","aspects":[{"id":"9:16","makes":"9:16"},{"id":"4:5","makes":"3:4"},{"id":"1:1","makes":null}],
++         "model":{"id":"black-forest-labs/flux-2-pro","name":"FLUX.2 [pro]","auto":true}}
++        """#
++        let e = try JSONDecoder().decode(PhotoEstimate.self, from: Data(raw.utf8))
++        XCTAssertEqual(e.aspect, "4:5")
++        XCTAssertEqual(e.makes, "3:4")
++        XCTAssertEqual(e.aspects.map(\.label), ["9:16", "4:5 · makes 3:4", "1:1 · model's size"])
++        XCTAssertEqual(e.model, PhotoModelRef(id: "black-forest-labs/flux-2-pro", name: "FLUX.2 [pro]", auto: true))
++        // An older server: no shapes (the Size pill stays hidden), no model (the pill reads "Auto").
++        let old = try JSONDecoder().decode(PhotoEstimate.self, from: Data(#"{"count":2,"perPhoto":0.1}"#.utf8))
++        XCTAssertEqual(old.aspects, [])
++        XCTAssertNil(old.model)
++        let hidden = try JSONDecoder().decode(PhotoEstimate.self, from: Data(#"{"count":1,"perPhoto":0.1,"model":{"id":null,"name":null,"auto":true}}"#.utf8))
++        XCTAssertNil(hidden.model?.name, "a model hidden from a member stays Auto")
++    }
++
++    func testUseInShotIsOnlyForAPhotoTabStill() {
++        XCTAssertEqual(TakeViewerActions.list(.suite, isVideo: false, canRedo: true, canExtend: false, canUpscale: true, canUseInShot: true),
++                       [.keep, .redo, .upscale, .useInShot, .share])
++        XCTAssertFalse(TakeViewerActions.list(.suite, isVideo: true, canRedo: true, canExtend: true, canUpscale: true, canUseInShot: true).contains(.useInShot))
++        XCTAssertFalse(TakeViewerActions.list(.suite, isVideo: false, canRedo: true, canExtend: false, canUpscale: true).contains(.useInShot))
++        XCTAssertEqual(TakeViewerAction.useInShot.title, "Use in Shot")
++    }
++
++    func testThePromptHintNamesNoOne() {
++        XCTAssertEqual(ComposerTool.photo.promptPlaceholder, "Describe the photo: the place, the pose, the mood · type @ for a model")
++        XCTAssertFalse(ComposerTool.photo.promptPlaceholder.contains("she"))
++    }
++
+     func testTheStillRules() {
+         let w = { (id: String) in RigWarning(id: id, reason: "", fix: RigFix(label: "", patch: .object([:]))) }
+         XCTAssertEqual(PhotoRig.still(["deep_focus", "prompt_move", "talk_move", "no_reveal", "prompt_size"].map(w)).map(\.id), ["deep_focus", "prompt_size"])
+-- 
+2.43.0
+
