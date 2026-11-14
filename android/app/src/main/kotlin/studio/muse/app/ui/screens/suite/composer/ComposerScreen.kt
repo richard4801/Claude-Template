@@ -1123,7 +1123,9 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
             }
         }
         if (ui.catalogNote != null) CatalogNote(ui)
-        else if (ui.photo == null && (presets || ui.d.collapsed)) PresetRow(ui, tileW = 150.dp, tileH = 96.dp)
+        // A short screen (a landscape tablet): the presets strip hides first, so the stage and the Rig keep their room
+        // (owner bug 2026-11-14 on the Mac: the prompt and the strip squeezed the Rig to two rows).
+        else if (ui.photo == null && ((presets && androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp >= 720) || ui.d.collapsed)) PresetRow(ui, tileW = 150.dp, tileH = 96.dp)
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             // The redesign: the stage on the field tone, the Rig panel raised with a hairline edge.
             Box(Modifier.weight(1f).fillMaxHeight().then(Modifier.suiteStage()).padding(16.dp)) {

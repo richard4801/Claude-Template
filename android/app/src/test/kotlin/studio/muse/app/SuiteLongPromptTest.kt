@@ -1,0 +1,81 @@
+package studio.muse.app
+
+import android.os.Looper
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onRoot
+import com.github.takahirom.roborazzi.captureRoboImage
+import kotlinx.coroutines.MainScope
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import studio.muse.app.data.AppPrefs
+import studio.muse.app.data.FakeMuseApi
+import studio.muse.app.data.MemoryPrefs
+import studio.muse.app.data.SampleData
+import studio.muse.app.ui.MuseApp
+import studio.muse.app.ui.Routes
+import studio.muse.app.ui.screens.suite.composer.ComposerDraft
+import studio.muse.app.ui.screens.suite.composer.ComposerTool
+import studio.muse.app.ui.screens.suite.composer.PromptTokens
+
+/**
+ * Owner bug 2026-11-14 (Mac build 654): a long, multi-paragraph prompt grew until it squeezed the stage and the Rig out. On
+ * Android the prompt is capped (120 dp on a phone, 96 dp on a tablet) and the presets strip hides on a short tablet; this
+ * shows a ~1,500-character prompt on Shot and Photo, on a phone, a tablet and a landscape tablet, and checks the Rig's first
+ * rows are on screen. PNGs: app/build/outputs/roborazzi/suite_longprompt_<theme>_<tool>_<screen>.png.
+ */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
+class SuiteLongPromptTest(private val theme: String, private val tool: String, private val screen: String) {
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}_{2}")
+        fun params(): List<Array<Any>> = listOf("a", "b").flatMap { t -> listOf("shot", "photo").flatMap { s -> listOf("phone", "tablet", "landscape").map { w -> arrayOf<Any>(t, s, w) } } }
+
+        val LONG = """SUBJECT: a woman in her late twenties, dark curly hair to the shoulders, oversized charcoal hoodie, black jeans and white sneakers, small gold hoops, natural make-up.
+
+LOCATION: a flat city rooftop at golden hour, a low railing behind her, the skyline soft and out of focus, warm backlight catching her hair, string lights not yet on.
+
+ACTION: 0–2 s she stands still, then turns to camera and smiles. 2–4 s she starts to dance, shoulders loose, one hand into her hair. 4–6 s she spins once and laughs. 6–8 s she stops and points at the camera, still laughing.
+
+CAMERA: handheld, slight sway, a slow push in, eye level, 35 mm, shallow depth of field.
+
+LIGHT AND LOOK: golden backlight, soft warm fill from the left, gentle flare at the spin, warm film grade, fine grain."""
+    }
+
+    @get:Rule val compose = createComposeRule()
+
+    private fun idle() = shadowOf(Looper.getMainLooper()).idle()
+
+    @Test fun capture() {
+        when (screen) {
+            "tablet" -> RuntimeEnvironment.setQualifiers("w840dp-h1180dp-mdpi")
+            "landscape" -> RuntimeEnvironment.setQualifiers("w1280dp-h800dp-mdpi")
+        }
+        val scope = MainScope()
+        val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
+        val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, useFake = true, token = "t", studioName = "Jenne Studio", role = "owner", email = "jenne@studio.com")), fake, null)
+        c.suite.composer.value = ComposerDraft(tool = if (tool == "photo") ComposerTool.PHOTO else ComposerTool.SHOT, tokens = PromptTokens().withText(LONG),
+            modelId = SampleData.DEMO, outfitId = SampleData.GREEN)
+        compose.mainClock.autoAdvance = false
+        compose.setContent { MuseApp(c, if (tool == "photo") Routes.SUITE_PHOTO else Routes.SUITE_SHOT) }
+        repeat(8) { idle(); compose.mainClock.advanceTimeBy(400) }
+        idle()
+        if (screen != "phone") {
+            // The Rig's first rows stay on screen beside the stage (a phone scrolls the whole page by design).
+            val first = if (tool == "photo") "Framing: " else "Camera: "
+            compose.onAllNodesWithContentDescription(first, substring = true).onFirst().assertIsDisplayed()
+            compose.onAllNodesWithContentDescription("Light: ", substring = true).onFirst().assertIsDisplayed()
+        }
+        compose.onRoot().captureRoboImage("build/outputs/roborazzi/suite_longprompt_${theme}_${tool}_$screen.png")
+    }
+}
