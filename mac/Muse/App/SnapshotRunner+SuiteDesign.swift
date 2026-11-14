@@ -94,7 +94,7 @@ extension SnapshotRunner {
         // 1152 × 720 and 1440 × 900 (mac_<a|b>_photo_<state>_<w>x<h>.png), checked:
         //   photo_fits         Generate whole inside the window (the page never runs below it)
         //   photo_price        filled and results: Generate shows the estimate's price ("Generate · 4 photos · $x")
-        //   photo_empty_stage  empty and filled: no old result on the stage before this session's run
+        //   photo_empty_stage  empty and filled: the frame's empty stage (header, four dashed photos), no old result, no takes strip
         //   photo_carousel     results: the run's 4 photos on the stage, with the strip under the photo
         //   photo_presets      no "Start from a preset" row: the Preset chip is in the bar
         func until(_ seconds: Double, _ ok: () -> Bool) async -> Bool {
@@ -168,7 +168,8 @@ extension SnapshotRunner {
                         let four = frames.keys.contains { $0.hasPrefix("stage carousel ") && $0.hasSuffix("/4") }
                         line(four && frames["stage photo strip"] != nil, "photo_carousel", "\(label) carousel \(four), strip \(frames["stage photo strip"] != nil)")
                     } else {
-                        line(frames["stage ready"] == nil, "photo_empty_stage", "\(label) stage \(frames["stage ready"] == nil ? "empty" : "shows an old result")")
+                        let empty = frames["stage ready"] == nil && frames["photo empty stage"] != nil
+                        line(empty, "photo_empty_stage", "\(label) stage \(frames["stage ready"] == nil ? "has no old result" : "shows an old result"), the frame's empty stage \(frames["photo empty stage"] != nil ? "drawn" : "not drawn")")
                     }
                     line(frames["pill preset"] != nil, "photo_presets", "\(label) Preset chip \(frames["pill preset"] != nil ? "in the bar" : "missing")")
                     if let r = frames["photo rail end"] {
