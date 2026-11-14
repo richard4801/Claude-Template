@@ -256,7 +256,7 @@ public struct DoubleTapSkip: Equatable, Sendable {
 
 /// The viewer's take actions, in their one order (plans/swap-viewer-design.md §B4).
 public enum TakeViewerAction: String, CaseIterable, Sendable {
-    case keep, redo, extend, upscale, split, share
+    case keep, redo, extend, upscale, split, useInShot, share
 
     public var title: String {
         switch self {
@@ -265,6 +265,7 @@ public enum TakeViewerAction: String, CaseIterable, Sendable {
         case .extend: return "Extend"
         case .upscale: return "Upscale"
         case .split: return "Split"
+        case .useInShot: return "Use in Shot"
         case .share: return "Share"
         }
     }
@@ -276,6 +277,7 @@ public enum TakeViewerAction: String, CaseIterable, Sendable {
         case .extend: return "A longer take: what happens next, or before"
         case .upscale: return "Sharper 1080p, 2K or 4K from this take"
         case .split: return "Open it in Edit at this moment"
+        case .useInShot: return "Start a video from this photo (its start frame)"
         case .share: return "Post or share this take"
         }
     }
@@ -295,7 +297,8 @@ public enum TakeViewerContext: String, Sendable {
 
 public enum TakeViewerActions {
     /// The actions shown: the context's, minus any this take can't do (hidden, not greyed; More says why).
-    public static func list(_ ctx: TakeViewerContext, isVideo: Bool, canRedo: Bool, canExtend: Bool, canUpscale: Bool) -> [TakeViewerAction] {
+    /// `canUseInShot`: a still from the Photo tab (owner 2026-11-14: "Use in Shot" makes it a video's start frame).
+    public static func list(_ ctx: TakeViewerContext, isVideo: Bool, canRedo: Bool, canExtend: Bool, canUpscale: Bool, canUseInShot: Bool = false) -> [TakeViewerAction] {
         switch ctx {
         case .source, .library: return []
         case .compare: return [.keep]
@@ -307,13 +310,14 @@ public enum TakeViewerActions {
                 case .extend: return isVideo && canExtend
                 case .upscale: return canUpscale
                 case .split: return isVideo
+                case .useInShot: return !isVideo && canUseInShot
                 }
             }
         }
     }
 
     /// The order labels give way when a row is too narrow: Split, Upscale, Extend, then Redo. Keep and Share keep theirs.
-    public static let dropOrder: [TakeViewerAction] = [.split, .upscale, .extend, .redo]
+    public static let dropOrder: [TakeViewerAction] = [.split, .useInShot, .upscale, .extend, .redo]
 
     /// Each step's icon-only set, from all labels to the fewest: what `ViewThatFits` tries in turn.
     public static func steps(_ actions: [TakeViewerAction]) -> [Set<TakeViewerAction>] {

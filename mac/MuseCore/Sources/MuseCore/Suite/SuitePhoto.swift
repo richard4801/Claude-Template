@@ -33,6 +33,9 @@ public struct PhotoRequest: Codable, Hashable, Sendable {
     public var draft: SuiteDraft?
     /// Owner only: the photo model for this run (a Replicate `owner/name` or a custom `c_…`); nil = the studio's.
     public var imageModel: String?
+    /// The photo's shape (owner 2026-11-14): "4:5", "1:1", "9:16"…; nil = the server's 9:16 (left out, so an older server
+    /// that doesn't know it is never sent it).
+    public var aspect: String?
 
     public init(modelId: String?, outfitId: String? = nil, prompt: String = "", camera: CameraSpec? = nil, gradeLook: Bool? = nil, count: Int = PhotoRequest.maxCount,
                 presetId: String? = nil, productImage: ImageRef? = nil, references: [ShootRef]? = nil, seed: Int64? = nil, lockSeed: Bool? = nil,
@@ -72,6 +75,33 @@ public struct PhotoPresetRef: Codable, Hashable, Sendable {
     }
 }
 
+/// One shape on the Size pill and what the model makes for it (the nearest ratio it takes; nil: no size choice).
+public struct PhotoAspectOption: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var makes: String?
+    public init(id: String, makes: String?) {
+        self.id = id
+        self.makes = makes
+    }
+    /// "4:5", or "4:5 · makes 3:4" when this model makes another ratio, or "4:5 · model's size".
+    public var label: String {
+        guard let m = makes else { return "\(id) · model's size" }
+        return m == id ? id : "\(id) · makes \(m)"
+    }
+}
+
+/// The model Auto picked (or the one picked): the bar's "Auto · <name>". `name` nil: hidden from this member.
+public struct PhotoModelRef: Codable, Hashable, Sendable {
+    public var id: String?
+    public var name: String?
+    public var auto: Bool
+    public init(id: String?, name: String?, auto: Bool) {
+        self.id = id
+        self.name = name
+        self.auto = auto
+    }
+}
+
 /// POST /v1/suite/photos/estimate: the price (a shoot's: count × per photo), the still rig check and the Look. Holds nothing.
 public struct PhotoEstimate: Codable, Hashable, Sendable {
     public var tool: String
@@ -93,6 +123,13 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
     public var preset: PhotoPresetRef?
     /// The images the model gets (server images/sent.ts); nil from an older server.
     public var sentImages: SentImages? = nil
+    /// Size (owner 2026-11-14; nil/empty from an older server: the Size pill stays hidden): the shape asked, what the
+    /// model makes for it, and every shape with its mapping.
+    public var aspect: String? = nil
+    public var makes: String? = nil
+    public var aspects: [PhotoAspectOption] = []
+    /// The model this runs on (owner 2026-11-14: "Auto · <model>"); nil from an older server.
+    public var model: PhotoModelRef? = nil
 
     public init(count: Int, perPhoto: Double, estimate: Double? = nil, priceLine: String? = nil, buttonLabel: String? = nil, ok: Bool = true, warnings: [String] = [],
                 rig: [RigWarning] = [], look: SuiteLook? = nil, prompt: String? = nil, preset: PhotoPresetRef? = nil) {
@@ -111,7 +148,7 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
         self.preset = preset
     }
 
-    enum CodingKeys: String, CodingKey { case tool, count, perPhoto, estimate, priceLine, buttonLabel, ok, warnings, rig, look, prompt, preset, sentImages }
+    enum CodingKeys: String, CodingKey { case tool, count, perPhoto, estimate, priceLine, buttonLabel, ok, warnings, rig, look, prompt, preset, sentImages, aspect, makes, aspects, model }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         tool = c.v(.tool, "photo")
@@ -127,6 +164,10 @@ public struct PhotoEstimate: Codable, Hashable, Sendable {
         prompt = c.o(.prompt)
         preset = c.o(.preset)
         sentImages = c.o(.sentImages)
+        aspect = c.o(.aspect)
+        makes = c.o(.makes)
+        aspects = c.v(.aspects, [])
+        model = c.o(.model)
     }
 
     public static func photos(_ n: Int) -> String { "\(n) photo\(n == 1 ? "" : "s")" }
@@ -186,6 +227,8 @@ public struct PhotoDraft: Hashable, Sendable {
     public var references: [ShootRef]
     /// Owner only: the photo model picked on the Model pill (nil = Auto, the studio's photo model).
     public var imageModel: String?
+    /// The Size pill (owner 2026-11-14); nil = 9:16, the server's default.
+    public var aspect: String?
 
     public init(count: Int = PhotoRequest.maxCount, presetId: String? = nil, references: [ShootRef] = [], imageModel: String? = nil) {
         self.imageModel = imageModel
@@ -196,6 +239,10 @@ public struct PhotoDraft: Hashable, Sendable {
 
     /// The Photos pill's choices.
     public static let counts = Array(1...PhotoRequest.maxCount)
+    /// The Size pill's shapes when the server doesn't list them (server suite/photo.ts PHOTO_ASPECTS).
+    public static let aspects = ["9:16", "4:5", "3:4", "2:3", "1:1", "3:2", "4:3", "16:9"]
+    /// The shape shown on the Size pill.
+    public var shownAspect: String { aspect ?? "9:16" }
 }
 
 extension ComposerSettings {
@@ -240,6 +287,7 @@ extension ComposerDraft {
         let words = r.prompt.split(separator: " ").prefix(5).joined(separator: " ")
         r.title = words.isEmpty ? nil : words
         r.imageModel = photo.imageModel
+        r.aspect = photo.aspect
         return r
     }
 

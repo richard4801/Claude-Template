@@ -24,7 +24,7 @@ extension AppStore {
 
     /// The Model pill's words: "Auto", "Kling 4.0, 1080p", "FLUX.2 [pro]".
     var composerModelLabel: String {
-        suite.composer.tool == .photo ? ComposerModelPicker.imageLabel(suite.photo, catalog: suite.catalog)
+        suite.composer.tool == .photo ? photoModelLabel // the Photo tab: "Auto · <the model Auto picked>" (owner 2026-11-14)
             : ComposerModelPicker.label(suite.composer, catalog: suite.catalog, settings: suite.settings)
     }
 

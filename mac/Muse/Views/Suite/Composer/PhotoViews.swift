@@ -129,7 +129,7 @@ struct PhotoCharacterCard: View {
     }
 }
 
-private struct PhotoCastList: View {
+struct PhotoCastList: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
     var onPick: () -> Void

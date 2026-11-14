@@ -29,6 +29,7 @@ struct ComposerBottomBar: View {
             HStack(spacing: Space.s2) {
                 pills(spacing: Space.s2, compact: false)
                 Spacer(minLength: Space.s2)
+                blocker
                 modelPill(compact: false)
                 pricingLink(compact: true)
                 queueButton(compact: false)
@@ -38,6 +39,7 @@ struct ComposerBottomBar: View {
             HStack(spacing: 6) {
                 pills(spacing: 5, compact: true)
                 Spacer(minLength: 6)
+                blocker
                 modelPill(compact: false)
                 pricingLink(compact: true)
                 queueButton(compact: true)
@@ -64,12 +66,21 @@ struct ComposerBottomBar: View {
         .frame(minHeight: 48)
     }
 
+    /// The Photo tab: why Generate can't go yet, beside it (owner 2026-11-14; never "Generate · —" alone).
+    @ViewBuilder private var blocker: some View {
+        if tool == .photo, !pricing, let why = store.photoBlocker {
+            Text(why).font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "photo blocker") } }
+        }
+    }
+
     /// `short`: the price stays, only the words between "Generate" and it go (the full label is the tooltip and the
     /// accessibility label).
     private func generateButton(short: Bool) -> some View {
         let full = generateLabel
         let shown = short ? GenerateButton.shortLabel(full) : full
-        return GenerateButton(label: shown, accessibility: full, enabled: canGenerate, busy: store.suite.generating) { generate() }
+        return GenerateButton(label: shown, accessibility: tool == .photo ? (store.photoBlocker.map { "\(full): \($0)" } ?? full) : full,
+                              enabled: canGenerate, busy: store.suite.generating) { generate() }
             .background { if SnapshotRunner.dir != nil { GenerateFrameProbe(label: shown) } } // CI fit check (owner fix A2)
             .fixedSize()
             .layoutPriority(2)
@@ -152,10 +163,10 @@ struct ComposerBottomBar: View {
                     takesPill
                 }
             } else if tool == .photo {
-                // Photo tool (workstream 3): one Photos 1–4 count in place of Shape, Length, Sound, Speaking and Takes.
-                let n = store.suite.photo.count
-                listPill("photos", icon: "photo.on.rectangle", value: "\(n) photo\(n == 1 ? "" : "s")", help: "Photos",
-                         options: PhotoDraft.counts.map { ("\($0) photo\($0 == 1 ? "" : "s")", $0) }, selected: n) { store.suite.photo.count = $0 }
+                // The Photo tab (owner 2026-11-14): the Preset chip, the 1–4 count and the Size (the shapes the model makes).
+                PhotoPresetPill(compact: compact)
+                PhotoCountControl(compact: compact)
+                PhotoSizePill()
             } else {
                 if !settingsInRail {
                     lengthPill
@@ -207,6 +218,8 @@ struct ComposerBottomBar: View {
     private var generateLabel: String {
         if isSwap, !isRemix, let q = store.suite.swap.addOn { return "Generate · \(Pricing.money(Pricing.totalCost(store.spec(for: q))))" }
         if pricing { return "Generate · Pricing…" }
+        // The Photo tab: no price yet is "Generate · 4 photos", greyed, with the reason beside it (never "Generate · —").
+        if tool == .photo, !price.canGenerate, price != .free { return "Generate · \(PhotoEstimate.photos(store.suite.photo.count))" }
         return price.buttonText
     }
 

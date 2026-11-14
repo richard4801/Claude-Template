@@ -171,6 +171,52 @@ final class SuitePhotoTests: XCTestCase {
         XCTAssertEqual(res.takes.map(\.title), ["Photo · Rooftop"])
     }
 
+    // MARK: The Photo tab (owner 2026-11-14): size, the model Auto picked, Use in Shot
+
+    func testTheSizeIsSentOnlyWhenPicked() throws {
+        let d = ComposerDraft(tool: .photo, tokens: try tokens())
+        let plain = try XCTUnwrap(d.photoRequest(PhotoDraft()))
+        XCTAssertFalse(try json(plain).keys.contains("aspect"), "9:16 is the server's default: an older server is never sent it")
+        var p = PhotoDraft()
+        XCTAssertEqual(p.shownAspect, "9:16")
+        p.aspect = "4:5"
+        XCTAssertEqual(p.shownAspect, "4:5")
+        let r = try XCTUnwrap(d.photoRequest(p))
+        XCTAssertEqual(try json(r)["aspect"] as? String, "4:5")
+        XCTAssertEqual(PhotoDraft.aspects, ["9:16", "4:5", "3:4", "2:3", "1:1", "3:2", "4:3", "16:9"], "server suite/photo.ts PHOTO_ASPECTS")
+    }
+
+    func testTheEstimateDecodesSizeAndModel() throws {
+        let raw = #"""
+        {"count":2,"perPhoto":0.1,"aspect":"4:5","makes":"3:4","aspects":[{"id":"9:16","makes":"9:16"},{"id":"4:5","makes":"3:4"},{"id":"1:1","makes":null}],
+         "model":{"id":"black-forest-labs/flux-2-pro","name":"FLUX.2 [pro]","auto":true}}
+        """#
+        let e = try JSONDecoder().decode(PhotoEstimate.self, from: Data(raw.utf8))
+        XCTAssertEqual(e.aspect, "4:5")
+        XCTAssertEqual(e.makes, "3:4")
+        XCTAssertEqual(e.aspects.map(\.label), ["9:16", "4:5 · makes 3:4", "1:1 · model's size"])
+        XCTAssertEqual(e.model, PhotoModelRef(id: "black-forest-labs/flux-2-pro", name: "FLUX.2 [pro]", auto: true))
+        // An older server: no shapes (the Size pill stays hidden), no model (the pill reads "Auto").
+        let old = try JSONDecoder().decode(PhotoEstimate.self, from: Data(#"{"count":2,"perPhoto":0.1}"#.utf8))
+        XCTAssertEqual(old.aspects, [])
+        XCTAssertNil(old.model)
+        let hidden = try JSONDecoder().decode(PhotoEstimate.self, from: Data(#"{"count":1,"perPhoto":0.1,"model":{"id":null,"name":null,"auto":true}}"#.utf8))
+        XCTAssertNil(hidden.model?.name, "a model hidden from a member stays Auto")
+    }
+
+    func testUseInShotIsOnlyForAPhotoTabStill() {
+        XCTAssertEqual(TakeViewerActions.list(.suite, isVideo: false, canRedo: true, canExtend: false, canUpscale: true, canUseInShot: true),
+                       [.keep, .redo, .upscale, .useInShot, .share])
+        XCTAssertFalse(TakeViewerActions.list(.suite, isVideo: true, canRedo: true, canExtend: true, canUpscale: true, canUseInShot: true).contains(.useInShot))
+        XCTAssertFalse(TakeViewerActions.list(.suite, isVideo: false, canRedo: true, canExtend: false, canUpscale: true).contains(.useInShot))
+        XCTAssertEqual(TakeViewerAction.useInShot.title, "Use in Shot")
+    }
+
+    func testThePromptHintNamesNoOne() {
+        XCTAssertEqual(ComposerTool.photo.promptPlaceholder, "Describe the photo: the place, the pose, the mood · type @ for a model")
+        XCTAssertFalse(ComposerTool.photo.promptPlaceholder.contains("she"))
+    }
+
     func testTheStillRules() {
         let w = { (id: String) in RigWarning(id: id, reason: "", fix: RigFix(label: "", patch: .object([:]))) }
         XCTAssertEqual(PhotoRig.still(["deep_focus", "prompt_move", "talk_move", "no_reveal", "prompt_size"].map(w)).map(\.id), ["deep_focus", "prompt_size"])

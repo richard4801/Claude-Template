@@ -47,8 +47,14 @@ extension FakeMuseAPI {
         let rig = PhotoRig.still(FakeRigCheck.check(prompt: req.prompt, camera: still, speaking: false))
         let look = SuiteLooks.look(for: ShotRequest(camera: req.camera).withGrade(req.gradeLook), camera: SuiteDemoCatalog.catalog.camera)
         let preset = req.presetId.flatMap { id in templates.first { $0.id == id } }.map { PhotoPresetRef(id: $0.id, name: $0.name) }
-        return PhotoEstimate(count: count, perPhoto: preview.estimate / Double(count), estimate: preview.estimate, warnings: Self.photoWarnings(req), rig: rig,
-                             look: look, prompt: preset == nil ? preview.text : nil, preset: preset)
+        var e = PhotoEstimate(count: count, perPhoto: preview.estimate / Double(count), estimate: preview.estimate, warnings: Self.photoWarnings(req), rig: rig,
+                              look: look, prompt: preset == nil ? preview.text : nil, preset: preset)
+        // Size and the model (the server's estimate, owner 2026-11-14): demo mode's model takes every shape.
+        e.aspect = req.aspect ?? "9:16"
+        e.makes = e.aspect
+        e.aspects = PhotoDraft.aspects.map { PhotoAspectOption(id: $0, makes: $0) }
+        e.model = PhotoModelRef(id: "demo/photo", name: req.imageModel == nil ? "Nano Banana" : nil, auto: req.imageModel == nil)
+        return e
     }
 
     public func suiteCreatePhotos(_ req: PhotoRequest) async throws -> [Take] {

@@ -216,6 +216,12 @@ final class SuiteState {
     var photoError: String?
     /// Reference images still uploading.
     var photoRefsUploading = 0
+    /// The Photo tab (owner 2026-11-14): the last estimate's shapes and Auto's model, kept while the next estimate is on
+    /// its way (the Size pill and "Auto · <model>" don't blink away on each change).
+    var photoAspectsSeen: [PhotoAspectOption] = []
+    var photoModelSeen: String?
+    /// Photo runs started in this session: the Photo stage shows only these (owner: never an old result on an empty stage).
+    var photoSessionJobs: Set<String> = []
     var settings: SuiteSettings?
 
     // The picker shell and the tool / preset browser
@@ -551,6 +557,7 @@ extension AppStore {
     func rememberStage(_ jobId: String, tool: ComposerTool? = nil) {
         let own: ComposerTool? = jobs.first(where: { $0.id == jobId }).flatMap { $0.suiteTool }.flatMap { ComposerTool(rawValue: $0) }
         let t = tool ?? own ?? suite.composer.tool
+        if t == .photo { suite.photoSessionJobs.insert(jobId) } // the Photo stage shows this session's runs (owner 2026-11-14)
         var m = suite.stageJobs.isEmpty ? (UserDefaults.standard.dictionary(forKey: stageMemoryKey) as? [String: String] ?? [:]) : suite.stageJobs
         m[t.rawValue] = jobId
         suite.stageJobs = m
@@ -568,7 +575,10 @@ extension AppStore {
         if let id = remembered, let j = jobs.first(where: { $0.id == id }) { picks.append(j) }
         switch tool {
         case .swap, .recast: if let j = swapJob { picks.append(j) }
-        case .photo: break
+        case .photo:
+            // The Photo tab (owner 2026-11-14): only this session's runs; before one, the stage is empty.
+            return picks.filter { suite.photoSessionJobs.contains($0.id) }.max { $0.createdAt < $1.createdAt }
+                ?? jobs.filter { suite.photoSessionJobs.contains($0.id) }.max { $0.createdAt < $1.createdAt }
         default: if let j = shotJob, j.suiteTool == nil || j.suiteTool == tool.rawValue { picks.append(j) }
         }
         return picks.max { $0.createdAt < $1.createdAt }
