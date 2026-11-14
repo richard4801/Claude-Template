@@ -19,7 +19,7 @@ import { editorAi } from './service.js';
 import { editSessionsOf } from './sessions.js';
 import { canvasToSource } from './layers.js';
 import { probe } from '../replicate/media.js';
-import { LEAN_DECODE, oneAtATime } from '../lib/mediaLane.js';
+import { leanDecode, oneAtATime } from '../lib/mediaLane.js';
 import { requireAssetMedia } from './assetMedia.js';
 
 const num = (d?: string, min?: number, max?: number) => ({ type: 'number', ...(d ? { description: d } : {}), ...(min !== undefined ? { minimum: min } : {}), ...(max !== undefined ? { maximum: max } : {}) });
@@ -410,7 +410,7 @@ const TOOLS: EditTool[] = [
       // The asset's own file (a take or an Edit upload, made ready when it arrived unconfirmed), one decode at a time, two threads.
       const media = await requireAssetMedia(env.ctx, s.studioId, asset);
       const c = env.ctx.config;
-      const m = await oneAtATime(() => ai.withLocalInput(media.key, input => measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { maxSec: 600, inputArgs: LEAN_DECODE })));
+      const m = await oneAtATime(() => ai.withLocalInput(media.key, input => measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { maxSec: 600, inputArgs: leanDecode() })), 'action_peaks');
       const cuts = findCuts(m);
       const peaks = findPeaks(m, { cuts, minGapSec: Number(a.minGapSec) || undefined, sensitivity: Number(a.sensitivity) || undefined, max: Number(a.max) || undefined });
       await svc.log(s, `Found ${peaks.length} action peak${peaks.length === 1 ? '' : 's'}`);

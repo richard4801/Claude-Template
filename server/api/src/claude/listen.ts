@@ -17,7 +17,7 @@ import type { EditTool, ToolEnv } from '../editor/mcpTools.js';
 import type * as M from '../editor/model.js';
 import { renderSound } from '../editor/render.js';
 import { editorAi } from '../editor/service.js';
-import { LEAN_DECODE, oneAtATime } from '../lib/mediaLane.js';
+import { leanDecode, oneAtATime } from '../lib/mediaLane.js';
 import { mediaToolsAvailable } from '../replicate/media.js';
 import { readyIfStored } from '../storage/objects.js';
 import { IN_EDIT, videoOf, watchTarget } from './watch.js';
@@ -114,7 +114,7 @@ export function analyse(x: Float32Array, sr = BEAT_SR): Listening {
 /** EBU R128 loudness of the sound (one audio-only pass): integrated LUFS, loudness range and sample peak. Null when unreadable. */
 function r128(ffmpeg: string, input: string, fromSec: number, lenSec: number): Promise<Loudness> {
   const none = { integratedLufs: null, rangeLu: null, peakDb: null };
-  return new Promise(resolve => execFile(ffmpeg, ['-hide_banner', '-nostats', '-v', 'info', ...LEAN_DECODE, ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-vn', '-sn', '-dn', '-i', input,
+  return new Promise(resolve => execFile(ffmpeg, ['-hide_banner', '-nostats', '-v', 'info', ...leanDecode(), ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-vn', '-sn', '-dn', '-i', input,
     '-t', lenSec.toFixed(3), '-af', 'ebur128=peak=sample:framelog=quiet', '-f', 'null', '-'], { timeout: 180_000, maxBuffer: 8 * 1024 * 1024 }, (err, _o, stderr) => {
     if (err) return resolve(none);
     const tail = String(stderr).slice(String(stderr).lastIndexOf('Summary:'));
@@ -187,14 +187,14 @@ export async function listenTo(ctx: Ctx, u: AuthUser, a: Record<string, unknown>
         if (!mixed.hasAudio) return { durationSec: mixed.durationSec, note: 'The edit is silent: no clip with sound, or all of them muted.' };
         return { ...(await hear(ctx, out, s.id, fromSec, toSec)), durationSec: Math.round(mixed.durationSec * 1000) / 1000 };
       } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-    });
+    }, 'listen_edit');
     return remember(ck, { source: { sessionId: s.id, revision: s.revision, timeline: true }, ...r });
   }
   const { key, id: rid } = await soundFileOf(ctx, u, args);
   const ck = `${u.studioId}|${key}|${fromSec}|${toSec}`;
   const hit = cache.get(ck);
   if (hit) return hit;
-  const r = await oneAtATime(() => editorAi(ctx).withLocalInput(key, input => hear(ctx, input, rid, fromSec, toSec)));
+  const r = await oneAtATime(() => editorAi(ctx).withLocalInput(key, input => hear(ctx, input, rid, fromSec, toSec)), 'listen');
   return remember(ck, { id: rid, ...r });
 }
 

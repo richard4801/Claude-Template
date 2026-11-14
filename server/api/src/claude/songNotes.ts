@@ -15,11 +15,12 @@ import type { EditTool, ToolEnv } from '../editor/mcpTools.js';
 import * as M from '../editor/model.js';
 import { findCuts, findImpacts, measureMotion } from '../editor/motion.js';
 import { editorAi } from '../editor/service.js';
-import { LEAN_DECODE, oneAtATime } from '../lib/mediaLane.js';
+import { leanDecode, oneAtATime } from '../lib/mediaLane.js';
 import { mediaToolsAvailable } from '../replicate/media.js';
 import { soundFileOf } from './listen.js';
 import { chromaFrames, energyCurve, keyOf, noteOnsets, sections, songChroma, type Band, type Key, type Onset, type Section } from './songDsp.js';
 import { IN_EDIT, videoOf, watchTarget } from './watch.js';
+import { decThreads } from '../lib/resources.js';
 
 const MAX_SEC = 600, VERSION = 1;
 
@@ -71,7 +72,7 @@ Times are seconds from the start of the audio. "vocals" are the spans where a vo
 
 function encodeForListening(ffmpeg: string, input: string): Promise<{ data: Buffer; mime: string }> {
   const run = (args: string[], mime: string) => new Promise<{ data: Buffer; mime: string }>((resolve, reject) => execFile(ffmpeg,
-    ['-v', 'error', '-threads', '1', '-i', input, '-vn', '-sn', '-dn', '-ac', '1', '-ar', '16000', '-t', String(MAX_SEC), ...args, 'pipe:1'],
+    ['-v', 'error', '-threads', decThreads(1), '-i', input, '-vn', '-sn', '-dn', '-ac', '1', '-ar', '16000', '-t', String(MAX_SEC), ...args, 'pipe:1'],
     { encoding: 'buffer', timeout: 120_000, maxBuffer: 20 * 1024 * 1024 }, (err, out) => (err ? reject(err) : resolve({ data: out as Buffer, mime }))));
   return run(['-c:a', 'libmp3lame', '-b:a', '32k', '-f', 'mp3'], 'audio/mp3').catch(() => run(['-c:a', 'aac', '-b:a', '32k', '-f', 'adts'], 'audio/aac'));
 }
@@ -200,7 +201,7 @@ export async function impactsOf(env: ToolEnv, a: Record<string, unknown>) {
     const v = await videoOf(ctx, u, await watchTarget({ ctx, user: u }, a));
     mediaKey = v.key; id = v.id;
   }
-  const m = await oneAtATime(() => editorAi(ctx).withLocalInput(mediaKey, input => measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { maxSec: MAX_SEC, inputArgs: LEAN_DECODE })));
+  const m = await oneAtATime(() => editorAi(ctx).withLocalInput(mediaKey, input => measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { maxSec: MAX_SEC, inputArgs: leanDecode() })));
   const from = a.fromSec === undefined ? 0 : Number(a.fromSec), to = a.toSec === undefined ? Infinity : Number(a.toSec);
   const kinds = Array.isArray(a.kinds) ? new Set(a.kinds as string[]) : null;
   const all = findImpacts(m, { cuts: findCuts(m), sensitivity: Number(a.sensitivity) || undefined });

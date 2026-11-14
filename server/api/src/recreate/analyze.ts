@@ -5,7 +5,7 @@ import { decodeMono, detectBeats } from '../editor/audio.js';
 import { energyCurve, findCuts, findPeaks, measureMotion, type Cut } from '../editor/motion.js';
 import { probe } from '../replicate/media.js';
 import type { Rig } from '../suite/drafts.js';
-import { contactSheet, DECODE_ARGS, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './frames.js';
+import { contactSheet, decodeArgs, grabFrame, gradeOf, sheetTiles, type GradeInfo } from './frames.js';
 import { cameraOf, classifyCut, findGlitches, findGradual, motionTracker, peaksIn, shotsOf, speedOf, transitionFrames, type CameraMotion, type Speed, type Transition } from './signals.js';
 import { findText, type TextItem } from './text.js';
 import { readWords } from './ocr.js';
@@ -96,7 +96,7 @@ export async function analyzeReference(cfg: { ffmpeg: string; ffprobe: string; t
   if (!info.width || !info.height) throw new Error('no video stream');
   await o.progress?.(0.05, 'Finding the cuts');
   const tracker = motionTracker();
-  const m = await measureMotion(cfg.ffmpeg, cfg.ffprobe, input, { maxSec, onFrame: tracker.hook, inputArgs: DECODE_ARGS });
+  const m = await measureMotion(cfg.ffmpeg, cfg.ffprobe, input, { maxSec, onFrame: tracker.hook, inputArgs: decodeArgs() });
   const g = tracker.g;
   // Glitch bursts first (G6): the cut finder may take a burst's edge frames for cuts, which then belong to the glitch.
   const glitches = findGlitches(m);

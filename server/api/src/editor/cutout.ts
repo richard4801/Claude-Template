@@ -5,6 +5,7 @@
 import { execFile } from 'node:child_process';
 import sharp from 'sharp';
 import { ReplicateError } from '../replicate/client.js';
+import { encThreads } from '../lib/resources.js';
 
 export const CUTOUT_LIMITS = { maxSide: 2048, clipSec: 1, fps: 10, maxPixels: 40_000_000, padPct: 0.02, minAlpha: 8 } as const;
 
@@ -26,7 +27,7 @@ export async function prepareStill(ffmpeg: string, input: string, still: string,
   const width = Math.max(2, Math.floor((upright.w * k) / 2) * 2), height = Math.max(2, Math.floor((upright.h * k) / 2) * 2);
   await sharp(input, { limitInputPixels: CUTOUT_LIMITS.maxPixels }).rotate().resize(width, height, { fit: 'fill' }).removeAlpha().png().toFile(still);
   await ff(ffmpeg, ['-loop', '1', '-framerate', String(CUTOUT_LIMITS.fps), '-i', still, '-t', String(CUTOUT_LIMITS.clipSec), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '12',
-    '-pix_fmt', 'yuv420p', '-threads', '2', '-movflags', '+faststart', clip]);
+    '-pix_fmt', 'yuv420p', '-threads', encThreads(2), '-movflags', '+faststart', clip]);
   return { width, height };
 }
 

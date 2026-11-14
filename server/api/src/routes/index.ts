@@ -44,6 +44,8 @@ import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
 import { referencesOf } from '../suite/assist.js';
 import { modelChoice } from '../engines/service.js'; // WS13: model choice everywhere
 import type { StepOverrides } from '../images/steps.js'; // WS13
+import { mediaProfile } from '../lib/resources.js';
+import { setMediaLog } from '../lib/mediaLane.js';
 
 /** SSE comment interval: well under any hosting proxy's idle timeout (Koyeb, Railway, Cloudflare: 60-100 s). */
 export const SSE_KEEPALIVE_MS = 10_000;
@@ -128,6 +130,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // The host's health check (Koyeb, Railway) calls this every few seconds. It must not touch the database: a query every
   // few seconds would keep a serverless database (Neon) awake around the clock and use up its free compute hours. It
   // reports the last known database state instead. `/health?db=1` really queries (and wakes) the database.
+  // The box's usable CPUs and memory (lib/resources.ts), numbers only: shows which media profile the server runs.
+  const media = mediaProfile();
+  setMediaLog(ctx.log);
   app.get('/health', { config: { public: true } }, async (req, reply) => {
     const deep = ['1', 'true'].includes(String((req.query as any)?.db ?? ''));
     let db: boolean | 'unchecked' = 'unchecked';
@@ -137,7 +142,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const lastOkAt = dbStatus.lastOkAt || null;
     const body = { ok: db !== false, speed: ctx.config.SPEED, db, dbLastOkAt: lastOkAt, gpu: ctx.gpu.mode, storage: ctx.storage.kind,
       imageEngine: ctx.images.defaultSelection().provider, videoEngine: ctx.config.videoEngineDefault, version: '0.1.0',
-      build: ctx.boot.build, startedAt: ctx.boot.startedAt, migrations: ctx.boot.migrations, starters: ctx.boot.starters };
+      build: ctx.boot.build, startedAt: ctx.boot.startedAt, migrations: ctx.boot.migrations, starters: ctx.boot.starters,
+      media: { cpus: media.cpus, memMB: media.memMB } };
     reply.header('cache-control', 'no-store');
     return db === false ? reply.status(503).send(body) : body;
   });

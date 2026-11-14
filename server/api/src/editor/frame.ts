@@ -11,7 +11,7 @@ import sharp from 'sharp';
 import type { Ctx } from '../ctx.js';
 import { uid } from '../lib/util.js';
 import { mediaToolsAvailable } from '../replicate/media.js';
-import { LEAN_DECODE, oneAtATime } from '../lib/mediaLane.js';
+import { leanDecode, oneAtATime } from '../lib/mediaLane.js';
 import { assetMedia } from './assetMedia.js';
 import { renderLook, type Lut } from './look.js';
 import * as M from './model.js';
@@ -44,7 +44,7 @@ async function still(ctx: Ctx, key: string, sec: number, w: number, h: number, f
 /** A JPEG of the frame at `sec` (the last frame when `sec` is just past the end), its long side at most 2×`edge` (≥ 320). */
 function stillJpeg(ffmpeg: string, input: string, out: string, sec: number, edge: number): Promise<void> {
   const box = Math.max(320, Math.min(1080, Math.round(edge * 2)));
-  const args = (at: number) => ['-y', '-v', 'error', ...LEAN_DECODE, '-ss', Math.max(0, at).toFixed(3), '-i', input, '-an', '-sn', '-dn', '-frames:v', '1',
+  const args = (at: number) => ['-y', '-v', 'error', ...leanDecode(), '-ss', Math.max(0, at).toFixed(3), '-i', input, '-an', '-sn', '-dn', '-frames:v', '1',
     '-vf', `scale=${box}:${box}:force_original_aspect_ratio=decrease:flags=bilinear`, '-q:v', '3', out];
   const go = (a: string[]) => new Promise<void>((resolve, reject) => execFile(ffmpeg, a, { timeout: 60_000 }, (err, _o, stderr) => (err ? reject(new Error(String(stderr || err.message).slice(0, 300))) : resolve())));
   return go(args(sec)).then(() => { if (!fs.existsSync(out)) return go(args(Math.max(0, sec - 0.25))); });

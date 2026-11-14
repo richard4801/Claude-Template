@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import sharp from 'sharp';
 import { SWATCHES, swatchGrade } from '../suite/looks.js';
 import { PALETTES } from '../suite/camera.js';
+import { decThreads } from '../lib/resources.js';
 
 export type Rgb = { t: number; width: number; height: number; rgb: Uint8Array };
 
@@ -13,12 +14,12 @@ export type Rgb = { t: number; width: number; height: number; rgb: Uint8Array };
  * near 90 MB instead of 115+ (one frame thread per core holds its own full-size frames); the scale filter runs inside
  * ffmpeg, so Node only ever gets small frames.
  */
-export const DECODE_ARGS = ['-threads', '2', '-filter_threads', '1'];
+export const decodeArgs = () => ['-threads', decThreads(2), '-filter_threads', '1'];
 
 /** One RGB frame at `t` seconds, `width` px wide (a fast seek; analysis only, nothing is stored). */
 export function grabFrame(ffmpeg: string, input: string, t: number, width: number, height: number): Promise<Rgb> {
   return new Promise((resolve, reject) => {
-    execFile(ffmpeg, ['-v', 'error', ...DECODE_ARGS, '-ss', Math.max(0, t).toFixed(3), '-i', input, '-frames:v', '1', '-vf', `scale=${width}:${height}:flags=area`,
+    execFile(ffmpeg, ['-v', 'error', ...decodeArgs(), '-ss', Math.max(0, t).toFixed(3), '-i', input, '-frames:v', '1', '-vf', `scale=${width}:${height}:flags=area`,
       '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], { encoding: 'buffer', timeout: 60_000, maxBuffer: width * height * 3 + 1024 }, (err, out) => {
       if (err) return reject(new Error(`ffmpeg failed: ${err.message.slice(0, 200)}`));
       const b = out as Buffer;
@@ -35,7 +36,7 @@ export function grabFrame(ffmpeg: string, input: string, t: number, width: numbe
 export function readWindow(ffmpeg: string, input: string, start: number, count: number, fps: number, width: number, height: number): Promise<Rgb[]> {
   const size = width * height * 3;
   return new Promise((resolve, reject) => {
-    execFile(ffmpeg, ['-v', 'error', ...DECODE_ARGS, '-ss', Math.max(0, start).toFixed(3), '-i', input, '-an', '-frames:v', String(count),
+    execFile(ffmpeg, ['-v', 'error', ...decodeArgs(), '-ss', Math.max(0, start).toFixed(3), '-i', input, '-an', '-frames:v', String(count),
       '-vf', `fps=${fps},scale=${width}:${height}:flags=area`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'],
     { encoding: 'buffer', timeout: 60_000, maxBuffer: size * count + 1024 }, (err, out) => {
       if (err) return reject(new Error(`ffmpeg failed: ${err.message.slice(0, 200)}`));

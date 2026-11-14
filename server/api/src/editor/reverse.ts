@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { decThreads, encThreads } from '../lib/resources.js';
 
 /** Pieces of 0.5 s, decoded and encoded on one thread with no x264 lookahead: about 210 MB peak at 1080p (measured). */
 export const REVERSE_LIMITS = { maxSec: 60, pieceSec: 0.5 } as const;
@@ -28,8 +29,8 @@ export async function reverseVideo(ffmpeg: string, input: string, out: string, h
       const start = i * pieceSec, len = Math.min(pieceSec, durationSec - start);
       if (len < 0.02) continue;
       const f = path.join(dir, `p${String(i).padStart(4, '0')}.mkv`);
-      await ff(ffmpeg, ['-threads', '1', '-ss', start.toFixed(4), '-t', len.toFixed(4), '-i', input, '-vf', 'reverse', ...(hasAudio ? ['-af', 'areverse', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2'] : ['-an']),
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', '1', '-x264-params', 'rc-lookahead=0:sync-lookahead=0', f]);
+      await ff(ffmpeg, ['-threads', decThreads(1), '-ss', start.toFixed(4), '-t', len.toFixed(4), '-i', input, '-vf', 'reverse', ...(hasAudio ? ['-af', 'areverse', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2'] : ['-an']),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', encThreads(1), '-x264-params', 'rc-lookahead=0:sync-lookahead=0', f]);
       pieces.push(f);
     }
     const list = path.join(dir, 'list.txt');

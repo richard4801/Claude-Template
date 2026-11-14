@@ -8,6 +8,7 @@ import { execFile } from 'node:child_process';
 import type { FalProvider } from '../suite/providers.js';
 import { ReplicateError } from '../replicate/client.js';
 import { pollPaid, type PollHooks } from './paidPoll.js';
+import { decThreads, encThreads, x264Lean } from '../lib/resources.js';
 
 export type SlowmoFactor = 2 | 4;
 export const SLOWMO_LIMITS = { maxRangeSec: 10, minRangeSec: 0.3, maxFps: 60, maxShortSide: 1080, maxWaitMs: 15 * 60_000 } as const;
@@ -32,19 +33,19 @@ function ff(ffmpeg: string, args: string[], timeoutMs = 5 * 60_000): Promise<voi
   return new Promise((resolve, reject) => execFile(ffmpeg, ['-y', '-v', 'error', ...args], { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
     (err, _o, e) => (err ? reject(new ReplicateError(`slow motion failed: ${String(e || err.message).trim().split('\n').slice(-2).join(' ').slice(0, 300)}`, 'failed')) : resolve())));
 }
-const X264 = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-x264-params', 'sliced-threads=1:rc-lookahead=5:sync-lookahead=0', '-threads', '2', '-movflags', '+faststart'];
+const X264 = () => ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', ...x264Lean(), '-threads', encThreads(2), '-movflags', '+faststart'];
 
 /** The range [start, end) of [input] as its own clip: no sound, at most 1080p on its short side and 60 fps. */
 export async function cutRange(ffmpeg: string, input: string, out: string, startSec: number, endSec: number, fps: number) {
   const r = Math.min(fps || 30, SLOWMO_LIMITS.maxFps), s = SLOWMO_LIMITS.maxShortSide;
-  await ff(ffmpeg, ['-threads', '2', '-ss', startSec.toFixed(3), '-i', input, '-t', (endSec - startSec).toFixed(3), '-an',
-    '-vf', `scale='if(lt(iw,ih),min(${s},iw),-2)':'if(lt(iw,ih),-2,min(${s},ih))',fps=${r}`, ...X264, out]);
+  await ff(ffmpeg, ['-threads', decThreads(2), '-ss', startSec.toFixed(3), '-i', input, '-t', (endSec - startSec).toFixed(3), '-an',
+    '-vf', `scale='if(lt(iw,ih),min(${s},iw),-2)':'if(lt(iw,ih),-2,min(${s},ih))',fps=${r}`, ...X264(), out]);
 }
 
 /** fal's interpolated clip played at [fps] for [seconds] (its frames spread evenly, none dropped or doubled). */
 export async function retime(ffmpeg: string, input: string, out: string, inputSec: number, seconds: number, fps: number) {
   const k = seconds / inputSec;
-  await ff(ffmpeg, ['-threads', '2', '-i', input, '-an', '-vf', `setpts=${k.toFixed(6)}*PTS`, '-r', String(Math.min(fps || 30, SLOWMO_LIMITS.maxFps) * 1), '-t', seconds.toFixed(3), ...X264, out]);
+  await ff(ffmpeg, ['-threads', decThreads(2), '-i', input, '-an', '-vf', `setpts=${k.toFixed(6)}*PTS`, '-r', String(Math.min(fps || 30, SLOWMO_LIMITS.maxFps) * 1), '-t', seconds.toFixed(3), ...X264(), out]);
 }
 
 /**

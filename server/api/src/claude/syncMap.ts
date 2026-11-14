@@ -11,6 +11,7 @@ import { oneAtATime } from '../lib/mediaLane.js';
 import type { Band } from './songDsp.js';
 import { geminiJson, impactsOf, songOf, type SongAnalysis } from './songNotes.js';
 import { IN_EDIT } from './watch.js';
+import { decThreads } from '../lib/resources.js';
 
 export type Pair = { t: number; onset: number; offsetMs: number; band: Band; pitch: string; onsetStrength: number; kind: Impact['kind']; onBeat: boolean; label?: string };
 export type SyncMap = ReturnType<typeof syncMap>;
@@ -72,7 +73,7 @@ export const LABELS_PROMPT = `This is a short video edit where on-screen actions
 t is seconds from the start of the video, to the nearest 0.05 s, at the moment of contact or landing (or the cut). label is 1–3 words ("punch", "slide", "fruit lands on tray", "slap", "camera whip", "cut").`;
 
 function encodeVideo(ffmpeg: string, input: string): Promise<{ data: Buffer; mime: string }> {
-  return new Promise((resolve, reject) => execFile(ffmpeg, ['-v', 'error', '-threads', '1', '-i', input, '-t', '120', '-vf', 'scale=-2:360,fps=15', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '32',
+  return new Promise((resolve, reject) => execFile(ffmpeg, ['-v', 'error', '-threads', decThreads(1), '-i', input, '-t', '120', '-vf', 'scale=-2:360,fps=15', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '32',
     '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '48k', '-ac', '1', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'],
   { encoding: 'buffer', timeout: 180_000, maxBuffer: 20 * 1024 * 1024 }, (err, out) => (err ? reject(err) : resolve({ data: out as Buffer, mime: 'video/mp4' }))));
 }

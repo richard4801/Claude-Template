@@ -2,6 +2,7 @@
 // join of source + extension into one take. Re-encodes (H.264 / AAC) so cuts land on exact times and both parts match.
 import { execFile } from 'node:child_process';
 import type { MediaInfo } from '../replicate/media.js';
+import { encThreads } from '../lib/resources.js';
 
 function run(bin: string, args: string[], timeoutMs = 10 * 60_000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -12,20 +13,20 @@ function run(bin: string, args: string[], timeoutMs = 10 * 60_000): Promise<stri
   });
 }
 
-const ENC = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', '2'];
+const ENC = () => ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', encThreads(2)];
 const AENC = ['-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2'];
 
 /** `seconds` from the end (`from: "end"`) or the start of `src`. */
 export async function segment(ffmpeg: string, src: string, out: string, seconds: number, from: 'start' | 'end', info: MediaInfo) {
   const s = Math.max(0.1, Math.min(seconds, info.duration));
   const seek = from === 'end' ? ['-ss', Math.max(0, info.duration - s).toFixed(3)] : [];
-  await run(ffmpeg, ['-y', ...seek, '-i', src, '-t', s.toFixed(3), ...ENC, ...(info.audioCodec ? AENC : ['-an']), '-movflags', '+faststart', out]);
+  await run(ffmpeg, ['-y', ...seek, '-i', src, '-t', s.toFixed(3), ...ENC(), ...(info.audioCodec ? AENC : ['-an']), '-movflags', '+faststart', out]);
 }
 
 /** New Swap's trimmer: `from`–`to` seconds of `src` (re-encoded so the cut lands on the exact time). */
 export async function cutRange(ffmpeg: string, src: string, out: string, from: number, to: number, info: MediaInfo) {
   const a = Math.max(0, Math.min(from, info.duration)), d = Math.max(0.1, Math.min(to, info.duration) - a);
-  await run(ffmpeg, ['-y', '-ss', a.toFixed(3), '-i', src, '-t', d.toFixed(3), ...ENC, ...(info.audioCodec ? AENC : ['-an']), '-movflags', '+faststart', out]);
+  await run(ffmpeg, ['-y', '-ss', a.toFixed(3), '-i', src, '-t', d.toFixed(3), ...ENC(), ...(info.audioCodec ? AENC : ['-an']), '-movflags', '+faststart', out]);
 }
 
 /** One frame of `src` at `at` seconds, as a JPEG (New Swap's frames for models that can't take a video). */
@@ -59,5 +60,5 @@ export async function joinClips(ffmpeg: string, first: { file: string; info: Med
     parts.forEach((idx, i) => { if (idx != null) filters.push(`[${idx}:a]anull[a${i}]`); });
     filters.push('[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]');
   } else filters.push('[v0][v1]concat=n=2:v=1:a=0[v]');
-  await run(ffmpeg, [...args, '-filter_complex', filters.join(';'), '-map', '[v]', ...(audio ? ['-map', '[a]', ...AENC] : []), ...ENC, '-movflags', '+faststart', out]);
+  await run(ffmpeg, [...args, '-filter_complex', filters.join(';'), '-map', '[v]', ...(audio ? ['-map', '[a]', ...AENC] : []), ...ENC(), '-movflags', '+faststart', out]);
 }

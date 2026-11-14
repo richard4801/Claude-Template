@@ -1,5 +1,6 @@
 // Server renders of edit sessions (workstream 1, Release 1): the preview "Your edit" plays in Recreate's Compare on
-// both apps, and Recreate's export. One render at a time (CPU); each render is a file in private storage under
+// both apps, and Recreate's export. Renders have their own budget (lib/resources.ts renderConcurrency: one on a small
+// box, two on a large one), apart from Claude's media lane, so a render never waits behind a watch; each render is a file in private storage under
 // renders/ (served only by the authenticated routes), named by the session's revision, so a preview is made once per
 // revision and an edit after it makes a new one. A live `edit` event (op "render") says when it is ready.
 import fs from 'node:fs';
@@ -11,19 +12,23 @@ import { and, eq } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads } from '../db/schema.js';
 import { uid } from '../lib/util.js';
+import { mediaProfile } from '../lib/resources.js';
 import { contentFile } from './content.js';
 import type * as M from './model.js';
 import { renderProject, type RenderOptions } from './render.js';
 import { editSessionsOf } from './sessions.js';
 
 export type RenderState = { key: string; state: 'rendering' | 'ready' | 'failed'; revision: number; durationSec?: number; width?: number; height?: number;
-  unsupported?: string[]; error?: string; at: number };
+  unsupported?: string[]; error?: string; at: number;
+  /** How long the render took (ms, queue wait excluded), and the profile it ran under (resources.ts). */
+  renderMs?: number; profile?: 'small' | 'large' };
 /** A preview is at most this long on its longest side, at most 30 fps. */
 export const PREVIEW_MAX_SIDE = 720;
 
 export class EditRenders {
   private states = new Map<string, RenderState>();
-  private chain: Promise<unknown> = Promise.resolve();
+  private pending = new Set<Promise<unknown>>();
+  private waiting: (() => void)[] = [];
   private running = 0;
   constructor(private ctx: Ctx) {}
 
@@ -52,7 +57,7 @@ export class EditRenders {
 
   /**
    * Renders `project` into storage at `key` (once: a key already stored or rendering is not redone). `onDone` runs after
-   * it is stored. One render at a time across the server.
+   * it is stored. At most the profile's renderConcurrency at once across the server.
    */
   start(studioId: string, key: string, revision: number, project: M.EditProject, o: RenderOptions & { guideKey?: string }, onDone?: (s: RenderState) => void | Promise<void>): RenderState {
     const have = this.states.get(key);
@@ -60,7 +65,7 @@ export class EditRenders {
     const st: RenderState = { key, state: 'rendering', revision, at: Date.now() };
     this.states.set(key, st);
     const go = async () => {
-      this.running++;
+      const t0 = Date.now(), prof = mediaProfile();
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-render-'));
       try {
         const files = await this.files(studioId, project, dir);
@@ -71,19 +76,20 @@ export class EditRenders {
         const clean = (await cleanVideoFile(this.ctx.config.FFMPEG_PATH, out, 'video/mp4')) ?? out;
         if (clean !== out) fs.renameSync(clean, out);
         await this.ctx.storage.putStream(key, fs.createReadStream(out), 'video/mp4', fs.statSync(out).size);
-        Object.assign(st, { state: 'ready', durationSec: r.durationSec, width: r.width, height: r.height, unsupported: r.unsupported, at: Date.now() });
+        Object.assign(st, { state: 'ready', durationSec: r.durationSec, width: r.width, height: r.height, unsupported: r.unsupported, at: Date.now(), renderMs: Date.now() - t0, profile: prof.name });
+        this.ctx.log.info({ tool: 'render', key, ms: st.renderMs, inputSec: r.durationSec, quality: o.quality ?? 'preview', profile: prof.name, cpus: prof.cpus, memMB: prof.memMB }, 'media timing');
         await this.ctx.storage.put(`${key}.json`, Buffer.from(JSON.stringify(st)), 'application/json');
       } catch (e) {
-        Object.assign(st, { state: 'failed', error: 'The render didn’t finish · try again', at: Date.now() });
-        this.ctx.log.warn({ err: (e as Error).message.slice(0, 300), key }, 'edit render failed');
+        Object.assign(st, { state: 'failed', error: 'The render didn’t finish · try again', at: Date.now(), renderMs: Date.now() - t0, profile: prof.name });
+        this.ctx.log.warn({ err: (e as Error).message.slice(0, 300), key, ms: st.renderMs, profile: prof.name }, 'edit render failed');
       } finally {
-        this.running--;
         fs.rmSync(dir, { recursive: true, force: true });
       }
       await onDone?.(st);
     };
-    const p = this.chain.then(go, go);
-    this.chain = p.catch(() => undefined);
+    const p = this.acquire().then(() => go().finally(() => this.release())).catch(() => undefined);
+    this.pending.add(p);
+    void p.finally(() => this.pending.delete(p));
     return st;
   }
   /** What is known about a render: in memory, else its stored sidecar (after a restart). */
@@ -101,8 +107,16 @@ export class EditRenders {
     await this.ctx.storage.delete(key).catch(() => undefined);
     await this.ctx.storage.delete(`${key}.json`).catch(() => undefined);
   }
+  /** A place in the render budget, oldest first. */
+  private acquire(): Promise<void> {
+    return new Promise(res => { this.waiting.push(res); this.pump(); });
+  }
+  private release() { this.running--; this.pump(); }
+  private pump() {
+    while (this.running < Math.max(1, mediaProfile().renderConcurrency) && this.waiting.length) { this.running++; this.waiting.shift()!(); }
+  }
   /** Waits for every queued render (tests, shutdown). */
-  async idle() { await this.chain; }
+  async idle() { while (this.pending.size) await Promise.all([...this.pending]); }
 
   // ------------------------------------------------------------------ previews of edit sessions
   private previewKey = (studioId: string, sessionId: string, revision: number) => `renders/${studioId}/${sessionId}/preview-r${revision}.mp4`;

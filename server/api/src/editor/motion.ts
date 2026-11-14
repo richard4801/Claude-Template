@@ -2,6 +2,7 @@
 // (frame differencing), the action peaks in it, and the hard cuts that would otherwise read as peaks. Free: ffmpeg on
 // the server's CPU, nothing stored. Used by the find_action_peaks tool and the reference analysis.
 import { spawn } from 'node:child_process';
+import { decThreads } from '../lib/resources.js';
 
 export const PROXY_WIDTH = 96;
 /** The proxy keeps every source frame up to 30 fps: a one-frame flash or cut must not fall between proxy frames. */
@@ -30,7 +31,7 @@ export function measureMotion(ffmpeg: string, ffprobe: string, input: string, o:
   return probeSize(ffprobe, input, width).then(({ height, fps: srcFps }) => new Promise((resolve, reject) => {
     const fps = o.fps ?? Math.min(PROXY_FPS_MAX, Math.round(srcFps) || PROXY_FPS_MAX);
     const frame = width * height;
-    const p = spawn(ffmpeg, ['-v', 'error', ...(o.inputArgs ?? ['-threads', '1']) /* workstream 1: Recreate caps decode threads */, '-i', input, '-t', String(maxSec), '-an',
+    const p = spawn(ffmpeg, ['-v', 'error', ...(o.inputArgs ?? ['-threads', decThreads(1)]) /* workstream 1: Recreate caps decode threads */, '-i', input, '-t', String(maxSec), '-an',
       '-vf', `fps=${fps},scale=${width}:${height}:flags=area,format=gray`, '-f', 'rawvideo', 'pipe:1']);
     const energy: number[] = [], hist: number[] = [], luma: number[] = [], hists: Float32Array[] = [];
     let prev: Uint8Array | null = null, prevH: Float64Array | null = null, buf: Buffer = Buffer.alloc(0), err = '';

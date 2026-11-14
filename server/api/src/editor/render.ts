@@ -24,6 +24,7 @@ import { hash01, parseCube, writeCube, type Look, type Lut } from './look.js';
 import { voiceChain } from './audio.js';
 import * as L from './layer.js';
 import * as TD from './textdraw.js';
+import { decThreads, encThreads, x264Lean } from '../lib/resources.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -318,7 +319,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     const openAt = (file: string, at: number, dur: number, threads = 2): number => {
       const k = inputs.length;
       inputs.push(file);
-      inputArgs.set(k, ['-threads', String(threads), '-ss', n4(Math.max(0, at)), '-t', n4(dur + 0.5)]);
+      inputArgs.set(k, ['-threads', decThreads(threads), '-ss', n4(Math.max(0, at)), '-t', n4(dur + 0.5)]);
       return k;
     };
     /**
@@ -720,7 +721,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       fs.writeFileSync(list, ['ffconcat version 1.0', ...seq.flatMap(x => [`file '${stillFile(x.still)}'`, `duration ${n6(x.frames / FPS)}`]), `file '${stillFile(seq.at(-1)!.still)}'`].join('\n') + '\n');
       temp.push(list);
       const k = input(list);
-      inputArgs.set(k, ['-threads', '1', '-f', 'concat', '-safe', '0']);
+      inputArgs.set(k, ['-threads', decThreads(1), '-f', 'concat', '-safe', '0']);
       g.push(`[${k}:v]format=rgba[txt]`, `[${acc}][txt]overlay=${textCrop[0]}:${textCrop[1]}:format=auto:eof_action=repeat[vtxt]`);
       acc = 'vtxt';
     }
@@ -733,7 +734,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
     });
     g.push(`[${acc}]format=yuv420p[vout]`);
     return ['-y', '-v', 'error', ...inputs.flatMap((x, i) => [...(inputArgs.get(i) ?? []), '-i', x]), '-filter_complex', g.join(';'), '-map', '[vout]',
-      '-c:v', 'libx264', ...q, '-pix_fmt', 'yuv420p', '-r', String(FPS), '-threads', '2', '-frames:v', String(N), outFile];
+      '-c:v', 'libx264', ...q, '-pix_fmt', 'yuv420p', '-r', String(FPS), '-threads', encThreads(2), '-frames:v', String(N), outFile];
   };
 
   // ---------------------------------------------------------------- sound: a pass of its own
@@ -796,9 +797,9 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
   }
 
   // ---------------------------------------------------------------- the pictures, window by window, then joined
-  // Export: x264's frame threads and lookahead held ~190 MB at 1080 × 1920; sliced threads and a 5-frame lookahead
-  // halve that (the box has 512 MB) for ~50 % more encode time.
-  const q = o.quality === 'export' ? ['-preset', 'veryfast', '-x264-params', 'sliced-threads=1:rc-lookahead=5:sync-lookahead=0', '-crf', '18'] : ['-preset', 'ultrafast', '-crf', '28'];
+  // Export: x264's frame threads and lookahead held ~190 MB at 1080 × 1920; on a small box (the Trial's 512 MB) sliced
+  // threads and a 5-frame lookahead halve that for ~50 % more encode time. A large box keeps frame threads (resources.ts).
+  const q = o.quality === 'export' ? ['-preset', 'veryfast', ...x264Lean(), '-crf', '18'] : ['-preset', 'ultrafast', '-crf', '28'];
   const chunkFiles = windows.map(() => tmpName('part', 'mp4'));
   temp.push(...chunkFiles);
   const chunks = windows.map(([F0, F1], i) => chunk(F0, F1, chunkFiles[i]!));

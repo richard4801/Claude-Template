@@ -5,6 +5,7 @@
 //   about −16 LUFS (two-pass loudnorm, linear when it can be; true peak ≤ −1.5 dBTP). True silence is left alone.
 import { execFile } from 'node:child_process';
 import type { MediaInfo } from '../replicate/media.js';
+import { encThreads } from '../lib/resources.js';
 
 export const TARGET_LUFS = -16;
 const TRUE_PEAK = -1.5;
@@ -70,7 +71,7 @@ export async function finishTake(ffmpeg: string, src: string, out: string, info:
   }
   if (!loud && plan.trimTo == null) return null;
   const video = plan.trimTo != null
-    ? ['-c:v', 'libx264', '-preset', 'medium', '-crf', '16', '-pix_fmt', 'yuv420p', '-threads', '2']
+    ? ['-c:v', 'libx264', '-preset', 'medium', '-crf', '16', '-pix_fmt', 'yuv420p', '-threads', encThreads(2)]
     : ['-c:v', 'copy'];
   const audio = !info.audioCodec ? ['-an']
     : loud ? ['-af', `${pre ? `volume=${pre.toFixed(2)}dB,` : ''}loudnorm=I=${TARGET_LUFS}:TP=${TRUE_PEAK}:LRA=${LRA}:measured_I=${loud.i}:measured_TP=${loud.tp}:measured_LRA=${loud.lra}:measured_thresh=${loud.thresh}:offset=${loud.offset}:linear=true`,

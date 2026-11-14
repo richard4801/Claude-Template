@@ -24,7 +24,8 @@ import { findCuts, findPeaks, measureMotion, type MotionFrames } from '../editor
 import type { EditTool } from '../editor/mcpTools.js';
 import { editorAi } from '../editor/service.js';
 import { mediaToolsAvailable, probe, type MediaInfo } from '../replicate/media.js';
-import { LEAN_DECODE, laneConcurrency, oneAtATime } from '../lib/mediaLane.js';
+import { laneConcurrency, leanDecode, oneAtATime } from '../lib/mediaLane.js';
+import { decThreads } from '../lib/resources.js';
 
 export const SHEET_COLS = 4, SHEET_TILES = 16, MAX_SHEETS = 3, TILE_EDGE = 256, CLOSER_EDGE = 400, CLOSER_MAX = 16, SINGLE_EDGE = 1024;
 // The full sweep: every part of the video at an even rate, beside the motion-picked overview. 24 frames a sheet, 4
@@ -284,7 +285,7 @@ export async function grab(ffmpeg: string, input: string, frames: number[], edge
       const sel = part.map(f => `eq(n,${f})`).join('+');
       const vf = () => [raw ? '' : `fps=${fps.toFixed(6)}:round=near`, `select='${sel}'`, `scale=${edge}:${edge}:force_original_aspect_ratio=decrease:flags=bilinear`,
         hdr && !raw ? sdrChain(o.colour!) : '', 'format=yuvj420p'].filter(Boolean).join(',');
-      const go = () => run(ffmpeg, ['-v', 'error', '-threads', '1', '-filter_threads', '1', ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-i', input, ...(lenSec ? ['-t', lenSec.toFixed(3)] : []), '-an', '-sn', '-dn',
+      const go = () => run(ffmpeg, ['-v', 'error', ...leanDecode(), ...(fromSec > 0 ? ['-ss', fromSec.toFixed(3)] : []), '-i', input, ...(lenSec ? ['-t', lenSec.toFixed(3)] : []), '-an', '-sn', '-dn',
         '-vf', vf(), '-fps_mode', 'passthrough', '-frames:v', String(part.length), '-q:v', '5', path.join(dir, 'f%04d.jpg')], 180_000);
       try { await go(); } catch (e) {
         // An HDR conversion this ffmpeg can't do (odd colour tags): the plain conversion instead.
@@ -380,7 +381,7 @@ export async function watchVideo(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: un
     const dur = Number.isFinite(info.duration) ? info.duration : 0;
     // Short videos: every frame up to 30 fps; long ones a lighter pass (the overview, then watch_closer on parts).
     const mfps = dur > 600 ? 1 : dur > 120 ? 4 : undefined;
-    const m = await measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { width: 64, maxSec: MAX_WATCH_SEC, inputArgs: ['-threads', '1'], ...(mfps ? { fps: mfps } : {}) });
+    const m = await measureMotion(c.FFMPEG_PATH, c.FFPROBE_PATH, input, { width: 64, maxSec: MAX_WATCH_SEC, inputArgs: ['-threads', decThreads(1)], ...(mfps ? { fps: mfps } : {}) });
     const picks = pickFrames(m, budgetFor(dur));
     const fps = gridFps(info.fps || m.fps), last = Math.max(0, Math.floor(dur * fps) - 1);
     const colour = await colourOf(c.FFPROBE_PATH, input);
@@ -415,7 +416,7 @@ export async function watchVideo(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: un
     sh.forEach((s, i) => blocks.push({ type: 'text', text: `Sheet ${i + 1}/${sh.length}: ${mmss(s.from)}–${mmss(s.to)}` }, { type: 'image', data: s.jpg.toString('base64'), mimeType: 'image/jpeg' }));
     ssh.forEach((s, i) => blocks.push({ type: 'text', text: `Sweep ${i + 1}/${ssh.length}: ${mmss(s.from)}–${mmss(s.to)}` }, { type: 'image', data: s.jpg.toString('base64'), mimeType: 'image/jpeg' }));
     return remember(ck, { meta, blocks });
-  }));
+  }), 'watch');
 }
 
 /** Every frame of a short window (or an even run of at most `count`), larger; one frame at `fromSec` when to = from. */
@@ -448,7 +449,7 @@ export async function watchCloser(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: u
     if (single && tiles[0]) blocks.push({ type: 'text', text: `Frame at ${mmss(tiles[0].t)}` }, { type: 'image', data: tiles[0].jpg.toString('base64'), mimeType: 'image/jpeg' });
     else for (const s of await sheets(tiles, edge, wide ? SWEEP_TILES : 12, wide ? 68 : 72)) blocks.push({ type: 'text', text: `${mmss(s.from)}–${mmss(s.to)}, left→right then down` }, { type: 'image', data: s.jpg.toString('base64'), mimeType: 'image/jpeg' });
     return remember(ck, { meta, blocks });
-  }));
+  }), 'watch_closer');
 }
 
 // ---- the tools ----------------------------------------------------------------------------------------------------

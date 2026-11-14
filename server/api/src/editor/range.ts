@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process';
 import type { EditorJobKind, EditorSource } from './schema.js';
 import { badRequest } from '../errors.js';
+import { decThreads, encThreads } from '../lib/resources.js';
 
 /** Kinds that work on a window of their source (the rest always take the whole source). */
 export const RANGED_KINDS: readonly EditorJobKind[] = ['matte', 'layers', 'denoise'];
@@ -60,8 +61,8 @@ function ff(ffmpeg: string, args: string[], timeoutMs = 5 * 60_000): Promise<voi
  */
 export async function trimRange(ffmpeg: string, input: string, out: string, r: SourceRange, kind: 'video' | 'audio') {
   const cut = ['-ss', r.startSec.toFixed(3), '-i', input, '-t', (r.endSec - r.startSec).toFixed(3)];
-  if (kind === 'audio') await ff(ffmpeg, ['-threads', '2', ...cut, '-vn', '-c:a', 'pcm_s16le', out]);
-  else await ff(ffmpeg, ['-threads', '2', ...cut, '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '14', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out]);
+  if (kind === 'audio') await ff(ffmpeg, ['-threads', decThreads(2), ...cut, '-vn', '-c:a', 'pcm_s16le', out]);
+  else await ff(ffmpeg, ['-threads', encThreads(2), ...cut, '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '14', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out]);
 }
 
 /**
@@ -77,5 +78,5 @@ export async function padToSource(ffmpeg: string, file: string, out: string, r: 
   }
   await ff(ffmpeg, ['-i', file, '-an', '-vf',
     `trim=duration=${lenSec.toFixed(3)},setpts=PTS-STARTPTS,format=gray,tpad=start_duration=${r.startSec.toFixed(3)}:start_mode=add:color=black:stop_duration=${after.toFixed(3)}:stop_mode=add,format=yuv420p`,
-    '-t', fullSec.toFixed(3), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-threads', '2', '-movflags', '+faststart', out]);
+    '-t', fullSec.toFixed(3), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-threads', encThreads(2), '-movflags', '+faststart', out]);
 }

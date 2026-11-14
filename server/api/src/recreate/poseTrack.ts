@@ -3,7 +3,7 @@
 // with a one-euro filter (little lag) and with low-confidence joints dropped, never invented. Used to match the
 // studio's takes to a shot by movement (a pose-similarity term in the take score). Free: CPU.
 import { spawn } from 'node:child_process';
-import { DECODE_ARGS } from './frames.js';
+import { decodeArgs } from './frames.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -185,7 +185,7 @@ async function readFrames(ffmpeg: string, input: string, start: number, len: num
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-pose-')), raw = path.join(dir, 'frames.rgb');
   try {
     await new Promise<void>((resolve, reject) => {
-      const p = spawn(ffmpeg, ['-v', 'error', ...DECODE_ARGS, '-ss', String(Math.max(0, start)), '-i', input, '-t', String(len), '-an',
+      const p = spawn(ffmpeg, ['-v', 'error', ...decodeArgs(), '-ss', String(Math.max(0, start)), '-i', input, '-t', String(len), '-an',
         '-vf', `fps=${fps},scale=${w}:${h}:flags=area,format=rgb24`, '-f', 'rawvideo', '-y', raw]);
       let err = '';
       p.stderr.on('data', d => { err = (err + String(d)).slice(-2000); });

@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { badRequest } from '../errors.js';
 import type { KeepPoint } from './service.js';
 import * as M from './model.js';
+import { encThreads } from '../lib/resources.js';
 
 /** Owner decisions 2026-11-11: clips up to 60 s; anything above $1 per clip asks first; no depth. */
 export const LAYERS_LIMITS = { maxSec: 60, maxObjects: 5, maxPoints: 10, askAboveUsd: 1, trackFps: 5 } as const;
@@ -94,7 +95,7 @@ export async function retimeMatte(ffmpeg: string, ffprobe: string, file: string,
   const k = durationSec / got;
   await new Promise<void>((resolve, reject) => {
     const p = spawn(ffmpeg, ['-y', '-v', 'error', '-i', file, '-an', '-vf', `setpts=PTS*${k.toFixed(6)},scale='if(gte(iw,ih),min(720,iw),-2)':'if(gte(iw,ih),-2,min(720,ih))',format=gray`,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', '2', '-t', durationSec.toFixed(3), out], { stdio: ['ignore', 'ignore', 'pipe'] });
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', encThreads(2), '-t', durationSec.toFixed(3), out], { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     p.stderr.on('data', d => { err = (err + d).slice(-400); });
     p.on('error', reject);

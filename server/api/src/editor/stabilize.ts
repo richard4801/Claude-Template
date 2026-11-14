@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { decThreads, encThreads, x264Lean } from '../lib/resources.js';
 
 export const STABILIZE_LIMITS = { maxSec: 180, smoothing: 15 } as const;
 /** The apps' strength (0–1, default 0.5) as vid.stab smoothing: frames each way, 5 (light) to 30 (locked off). */
@@ -33,9 +34,9 @@ export async function stabilizeVideo(ffmpeg: string, input: string, out: string,
   const timeout = Math.max(5 * 60_000, durationSec * 20_000);
   try {
     const trf = path.join(dir, 'motion.trf');
-    await ff(ffmpeg, ['-threads', '2', '-i', input, '-an', '-vf', `vidstabdetect=shakiness=6:accuracy=9:stepsize=6:result=${trf}`, '-f', 'null', '-'], timeout);
-    await ff(ffmpeg, ['-threads', '2', '-i', input, '-vf', `vidstabtransform=input=${trf}:smoothing=${Math.round(smoothing)}:${zoom === 'auto' ? 'optzoom=1:zoomspeed=0.25' : 'optzoom=0:crop=black'}:interpol=bilinear,unsharp=5:5:0.6:3:3:0.3,format=yuv420p`,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-x264-params', 'sliced-threads=1:rc-lookahead=5:sync-lookahead=0', '-threads', '2',
+    await ff(ffmpeg, ['-threads', decThreads(2), '-i', input, '-an', '-vf', `vidstabdetect=shakiness=6:accuracy=9:stepsize=6:result=${trf}`, '-f', 'null', '-'], timeout);
+    await ff(ffmpeg, ['-threads', decThreads(2), '-i', input, '-vf', `vidstabtransform=input=${trf}:smoothing=${Math.round(smoothing)}:${zoom === 'auto' ? 'optzoom=1:zoomspeed=0.25' : 'optzoom=0:crop=black'}:interpol=bilinear,unsharp=5:5:0.6:3:3:0.3,format=yuv420p`,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', ...x264Lean(), '-threads', encThreads(2),
       ...(hasAudio ? ['-c:a', 'copy'] : ['-an']), '-movflags', '+faststart', out], timeout);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
