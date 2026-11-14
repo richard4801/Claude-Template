@@ -12,7 +12,8 @@ import MuseCore
 //   home_opens_shot    "Open in composer" opens Shot with the prompt carried over and starts no job
 //   price_on_generate  on Shot and the filled Swap, Generate shows its price ("· $x" or "· Free")
 // and the Photo tab (owner-approved 2026-11-14, plans/design/photo/): mac_<a|b>_photo_<empty|filled|results>_<w>x<h>.png at
-// 1000 × 700, 1152 × 720 and 1440 × 900, with photo_fits, photo_price, photo_empty_stage, photo_carousel and photo_presets.
+// 1000 × 700, 1152 × 720 and 1440 × 900, with photo_fits, photo_price, photo_empty_stage, photo_carousel and photo_presets;
+// and the long prompt (owner bug 2026-11-14): long_prompt_stage and long_prompt_rig on Shot, Photo and Swap, themes a–d.
 extension SnapshotRunner {
     static func suiteDesignShots(_ store: AppStore, dir: URL) async {
         guard let w = mainWindow else { return }
@@ -178,6 +179,66 @@ extension SnapshotRunner {
             }
         }
         store.suite.photoSessionJobs = []
+        store.themeID = .a
+
+        // Owner bug 2026-11-14 (build 654): a long prompt grew to half the window and squeezed the stage and the Rig out.
+        // A ~1,500-character prompt on Shot, Photo and the classic Swap (prompt on), with the presets strip asked for, in
+        // themes a–d at 1000 × 700, 1152 × 720 and 1440 × 900 (mac_<theme>_longprompt_<tool>_<w>x<h>.png):
+        //   long_prompt_stage  the stage keeps at least 40% of its height with a short prompt
+        //   long_prompt_rig    the Rig panel is on screen and shows its rows (all of them, or at least 160 pt of them, the
+        //                      rest a scroll away inside the panel)
+        let longText = """
+         SUBJECT: a woman in her late twenties, dark curly hair to the shoulders, oversized charcoal hoodie, black jeans and white sneakers, small gold hoops, no other jewellery, natural make-up.
+
+         LOCATION: a flat city rooftop at golden hour, a low railing behind her, the skyline soft and out of focus, warm backlight catching the edges of her hair, a few string lights not yet on.
+
+         ACTION: 0–2 s she stands still, looking past the camera, then turns her head to camera and smiles. 2–4 s she starts to dance, small steps, shoulders loose, one hand into her hair. 4–6 s she spins once, the hoodie swinging, and laughs. 6–8 s she stops, catches her breath and points at the camera, still laughing.
+
+         CAMERA: handheld, slight sway, a slow push in through the whole take, eye level, 35 mm, shallow depth of field, the skyline melting into bokeh.
+
+         LIGHT AND LOOK: golden backlight with a soft warm fill from the left, gentle lens flare at the spin, warm film grade with lifted blacks, fine grain.
+        """
+        for theme in [ThemeID.a, .b, .c, .d] {
+            store.themeID = theme
+            for (width, height) in [(1000, 700), (1152, 720), (1440, 900)] {
+                w.setFrame(NSRect(x: full.minX, y: full.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
+                for tool in ["shot", "photo", "swap"] {
+                    var normal: CGFloat = 0
+                    for long in [false, true] {
+                        store.suite.picker = nil
+                        store.suite.feedOpen = false
+                        store.suite.claude.open = false
+                        switch tool {
+                        case "photo": store.openPhoto(model: SampleData.demo)
+                        case "swap": store.openTool(.swap); store.setSwapVariant(.classic); store.suite.swap.promptOn = true
+                        default: store.openTool(.shot); fillDemoDraft(store)
+                        }
+                        store.suite.composer.tokens = PromptTokens.text(long ? longText : " on a rooftop at golden hour. ")
+                        state.overlay = "presets" // the owner's case: the presets strip asked for
+                        try? await Task.sleep(for: .seconds(1.5))
+                        state.probeTick += 1
+                        try? await Task.sleep(for: .seconds(0.3))
+                        w.contentView?.layoutSubtreeIfNeeded()
+                        let frames = state.composerFrames
+                        let main = frames["composer main row"]?.height ?? 0
+                        if !long { normal = main; continue }
+                        let content = w.contentView?.bounds.size ?? .zero
+                        let label = "\(tool) \(theme.rawValue) \(width)x\(height)"
+                        line(normal > 0 && main >= normal * 0.4, "long_prompt_stage", "\(label) stage \(Int(main)) of \(Int(normal)) with a short prompt")
+                        if let rail = frames["composer rail"], let inner = frames["composer rail content"] {
+                            let onScreen = rail.minY >= 0 && rail.maxY <= content.height + 0.5
+                            let shown = rail.height >= min(inner.height, 160)
+                            line(onScreen && shown, "long_prompt_rig", "\(label) Rig panel \(Int(rail.height)) tall of \(Int(inner.height)), on screen \(onScreen)")
+                        } else {
+                            line(false, "long_prompt_rig", "\(label) Rig panel not drawn")
+                        }
+                        capture(dir.appendingPathComponent("mac_\(theme.rawValue)_longprompt_\(tool)_\(width)x\(height).png"))
+                    }
+                }
+            }
+        }
+        state.overlay = nil
+        store.suite.composer.tokens = PromptTokens()
         store.themeID = .a
 
         store.setSwapVariant(.classic)

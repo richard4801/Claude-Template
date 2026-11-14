@@ -40,6 +40,21 @@ let composerPromptMinHeight: CGFloat = 60
 /// Below this window height the composer page scrolls as a whole (header, a short picture, the prompt bar).
 let composerMinHeight: CGFloat = 520
 
+/// The prompt's auto-grow stops at five lines (16 pt at 1.35 plus the box's insets) or 22% of the page, whichever is
+/// smaller; past that it scrolls inside, and the expand button opens the full editor (owner bug 2026-11-14: a long prompt
+/// grew to half the window and squeezed the stage and the Rig out).
+func composerPromptCap(_ pageHeight: CGFloat) -> CGFloat {
+    max(composerPromptMinHeight, min(132, (pageHeight * 0.22).rounded()))
+}
+
+/// The stage and the Rig panel never get less than this (36% of the page, at least 180 pt): the prompt and the presets
+/// strip give way first, and the Rig scrolls inside.
+func composerMainMinHeight(_ pageHeight: CGFloat) -> CGFloat { max(180, (pageHeight * 0.36).rounded()) }
+
+/// The presets strip shows only on a page tall enough to keep the stage and the Rig at their minimum with the prompt at
+/// its cap; on a shorter page it hides first (Presets in the header still toggles it on a taller one).
+let composerPresetsMinPageHeight: CGFloat = 790
+
 struct ComposerView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -165,7 +180,7 @@ struct ComposerView: View {
             // The redesign (plans/design/suite-redesign): "Video suite", the tabs, and this page's quiet tools.
             SuitePageHeader { headerTools(width: width) }
                 .layoutPriority(1)
-            if presetsOpen && hasPresets {
+            if (presetsOpen || SnapshotRunner.state.overlay == "presets") && hasPresets && height >= composerPresetsMinPageHeight {
                 PresetsRow()
             }
             if store.isNewSwap {
@@ -195,13 +210,17 @@ struct ComposerView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(Space.s4)
+                            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "composer rail content") } }
                         }
                         .frame(width: narrow ? 272 : 294)
                         .frame(maxHeight: .infinity, alignment: .top)
                         .suitePanel(t)
+                        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "composer rail") } }
                     }
                 }
-                .frame(minHeight: 0, maxHeight: .infinity)
+                // The stage and the Rig keep their minimum: the prompt is capped and the presets strip hides first.
+                .frame(minHeight: composerMainMinHeight(height), maxHeight: .infinity)
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "composer main row") } }
                 .zIndex(0)
                 // Above the main row so the prompt's @ / # list, which opens upwards, draws over the picture. It keeps its
                 // full height; the row above takes what is left.
@@ -210,8 +229,9 @@ struct ComposerView: View {
                         .layoutPriority(1)
                         .zIndex(1)
                 }
-                // The prompt grows with its text up to ~40% of the page's height, then scrolls (owner, 2026-11-11).
-                ComposerPromptBar(promptMaxHeight: max(composerPromptMinHeight, (height * 0.4).rounded()))
+                // The prompt grows with its text up to five lines or 22% of the page, then scrolls; the expand button opens
+                // the full editor (owner bug 2026-11-14).
+                ComposerPromptBar(promptMaxHeight: composerPromptCap(height))
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
                     .zIndex(1)
