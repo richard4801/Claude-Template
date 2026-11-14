@@ -22,7 +22,7 @@ function bigProject(mainClips: number, overlays: number): M.EditProject {
 }
 
 describe('edit project limits', () => {
-  it.skip('the owner\'s project shape (enable with the apps\' 400 limit) (67 main clips + 16 overlays, 83 uploads) validates', () => {
+  it('the owner\'s project shape (67 main clips + 16 overlays, 83 uploads) validates', () => {
     expect(M.LIMITS.maxAssets).toBeGreaterThanOrEqual(400);
     const p = bigProject(67, 16);
     expect(p.assets.length).toBe(84);
@@ -33,7 +33,7 @@ describe('edit project limits', () => {
     expect(M.LIMITS.maxItems).toBeGreaterThanOrEqual(600);
     expect(M.LIMITS.maxAssets).toBeGreaterThanOrEqual(60);
   });
-  it.skip('past the limit it still says so plainly (enable with 400)', () => {
+  it('past the limit it still says so plainly', () => {
     const p = bigProject(M.LIMITS.maxAssets, 1);
     expect(() => M.validate(p)).toThrow(/edits\.assets: must be a list of at most 400/);
   });
