@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Photo tab</title>
+<!-- The Video suite's Photo tab (design for the owner; plans/design/photo/README.md).
+     Query: ?theme=a|b&state=empty|filled|results|presets&layout=desk|phone -->
+<style>
+@font-face { font-family: "Instrument Serif"; src: url("../../../mac/Muse/Resources/Fonts/InstrumentSerif-Regular.ttf"); }
+@font-face { font-family: "Archivo"; src: url("../../../mac/Muse/Resources/Fonts/Archivo-VF.ttf"); font-weight: 100 900; }
+:root {
+  --canvas: #EEEAE3; --side: #ECE7DF; --raised: #F7F4EF; --field: #E5E0D7; --hair: #DBD5CB;
+  --ink: #171717; --ink2: #6D6A64; --ink3: #9A968F; --action: #141414; --onAction: #FFFFFF;
+  --accent: #B3261E; --sel: #E3DDD3; --ok: #3E8E5A;
+}
+[data-theme="b"] {
+  --canvas: #17191B; --side: #17191B; --raised: #212427; --field: #1D2022; --hair: #2C3034;
+  --ink: #EDEAE4; --ink2: #A19D96; --ink3: #6E6B66; --action: #F2A93B; --onAction: #17191B;
+  --accent: #F2A93B; --sel: #26292D; --ok: #5DBB7E;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { background: var(--canvas); color: var(--ink); font: 400 13px/1.3 "Archivo", system-ui, sans-serif; overflow: hidden;
+  -webkit-font-smoothing: antialiased; }
+.ic { display: inline-flex; width: 16px; height: 16px; flex: none; }
+.ic svg { width: 100%; height: 100%; }
+button { font: inherit; color: inherit; background: none; border: 0; }
+
+/* ---------- desktop frame: sidebar | main ---------- */
+.app { display: grid; grid-template-columns: 186px 1fr; height: 100vh; }
+.side { background: var(--side); border-right: 1px solid var(--hair); display: flex; flex-direction: column; padding: 18px 12px 16px; }
+.side .logo { font: 26px "Instrument Serif"; padding: 0 10px 22px; }
+.nav { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 6px; color: var(--ink); font-size: 13px; position: relative; }
+.nav .ic { color: var(--ink2); }
+.nav.on { background: var(--sel); font-weight: 600; }
+.nav.on::before { content: ""; position: absolute; left: -12px; top: 6px; bottom: 6px; width: 2px; background: var(--accent); }
+.side .grow { flex: 1; }
+.bal { display: flex; justify-content: space-between; align-items: end; padding: 12px 10px 0; font-size: 12px; color: var(--ink2); }
+.bal b { display: block; color: var(--ink); font-size: 14px; margin-top: 2px; }
+
+.main { display: grid; grid-template-rows: 44px auto minmax(0, 1fr) auto; min-width: 0; height: 100vh; }
+.top { display: flex; align-items: center; justify-content: space-between; padding: 0 26px; border-bottom: 1px solid var(--hair); }
+.search { width: 288px; height: 26px; border-radius: 6px; background: var(--field); display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--ink2); font-size: 12px; }
+.search .k { margin-left: auto; font-size: 10px; }
+.top .r { display: flex; gap: 10px; align-items: center; }
+.ghost { height: 28px; padding: 0 10px; border: 1px solid var(--hair); border-radius: 6px; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; background: var(--raised); }
+.avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--field); border: 1px solid var(--hair); }
+
+.head { display: flex; align-items: center; gap: 20px; padding: 14px 26px 10px; }
+.head h1 { font: 400 27px "Instrument Serif"; letter-spacing: -.2px; white-space: nowrap; }
+.tabs { display: flex; gap: 2px; padding: 3px; background: var(--field); border-radius: 8px; }
+.tab { height: 26px; padding: 0 11px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); font-size: 12.5px; }
+.tab .ic { width: 14px; height: 14px; }
+.tab.on { background: var(--raised); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--hair); }
+
+/* ---------- work area: stage | panel ---------- */
+.work { display: grid; grid-template-columns: minmax(0, 1fr) 296px; gap: 18px; padding: 0 26px; min-height: 0; }
+.stage { background: var(--field); border-radius: 10px; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 14px 18px 12px; }
+.panel { background: var(--raised); border: 1px solid var(--hair); border-radius: 10px; min-height: 0; padding: 14px 16px 10px; display: flex; flex-direction: column; overflow: hidden; }
+
+.shead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-height: 34px; }
+.shead .t { font-size: 14px; font-weight: 600; }
+.shead .m { font-size: 11.5px; color: var(--ink2); margin-top: 3px; }
+.acts { display: flex; align-items: center; gap: 2px; }
+.act { height: 30px; padding: 0 9px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink); }
+.act .ic { width: 14px; height: 14px; color: var(--ink2); }
+.keep { height: 30px; padding: 0 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600;
+  background: var(--raised); border: 1px solid var(--hair); margin-left: 6px; }
+[data-theme="b"] .keep { border-color: var(--action); color: var(--action); }
+[data-theme="b"] .keep .ic { color: var(--action); }
+
+.view { min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; padding: 8px 0; }
+.view img.hero { height: 100%; max-width: 100%; object-fit: cover; aspect-ratio: 4/5; border-radius: 4px; display: block; }
+.arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 30px; height: 30px; border-radius: 50%; background: var(--raised); border: 1px solid var(--hair);
+  display: flex; align-items: center; justify-content: center; }
+.arrow .ic { width: 14px; height: 14px; }
+.empty { text-align: center; color: var(--ink2); display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.slots4 { display: grid; grid-template-columns: repeat(4, 64px); gap: 8px; }
+.slots4 i { height: 80px; border-radius: 4px; border: 1px dashed var(--ink3); opacity: .55; }
+.empty .t { color: var(--ink); font-size: 14px; font-weight: 600; margin-top: 6px; }
+.empty .m { font-size: 12px; }
+
+.strip { display: flex; align-items: center; justify-content: center; gap: 8px; padding-top: 6px; }
+.thumb { width: 44px; height: 55px; border-radius: 4px; overflow: hidden; opacity: .7; position: relative; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.on { opacity: 1; outline: 2px solid var(--ink); outline-offset: 2px; }
+[data-theme="b"] .thumb.on { outline-color: var(--action); }
+.thumb .kept { position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--raised); display: flex; align-items: center; justify-content: center; }
+.thumb .kept .ic { width: 9px; height: 9px; }
+.strip .n { font-size: 11.5px; color: var(--ink2); margin-left: 8px; min-width: 40px; }
+
+/* panel */
+.ptitle { display: flex; align-items: center; justify-content: space-between; }
+.ptitle h2 { font-size: 17px; font-weight: 600; letter-spacing: -.1px; }
+.sec { font-size: 11.5px; color: var(--ink2); margin: 12px 0 2px; display: flex; justify-content: space-between; }
+.row { display: grid; grid-template-columns: 18px 82px minmax(0, 1fr) 14px; align-items: center; gap: 8px; height: 37px; border-bottom: 1px solid var(--hair); }
+.row:last-child { border-bottom: 0; }
+.row > .ic { color: var(--ink2); }
+.row .l { color: var(--ink2); font-size: 12.5px; }
+.row .v { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; font-weight: 500; }
+.row .v span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .v .sub { color: var(--ink2); font-weight: 400; }
+.row .c { color: var(--ink2); width: 14px; height: 14px; }
+.av { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; flex: none; }
+.av.round { border-radius: 50%; }
+.add { width: 22px; height: 22px; border-radius: 4px; border: 1.5px dashed var(--ink2); display: flex; align-items: center; justify-content: center; flex: none; color: var(--ink); }
+.add .ic { width: 12px; height: 12px; }
+.row .v .addt { color: var(--ink); font-weight: 500; }
+.row.need .v .addt { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ink3); }
+.row.locked .v span { color: var(--ink2); font-weight: 400; }
+.chip { font-size: 10.5px; padding: 2px 6px; border-radius: 4px; background: var(--field); color: var(--ink2); font-weight: 500; }
+.refs { display: flex; gap: 4px; }
+.refs .add { width: 22px; height: 22px; }
+
+/* ---------- prompt + bar ---------- */
+.bottom { padding: 12px 26px 14px; display: flex; flex-direction: column; gap: 10px; }
+.prompt { background: var(--raised); border: 1px solid var(--hair); border-radius: 10px; min-height: 50px; padding: 15px 14px; display: flex; align-items: flex-start; gap: 10px; font-size: 13.5px; }
+.prompt .tx { flex: 1; }
+.prompt .ph { color: var(--ink3); }
+.prompt .mention { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.prompt .ic { color: var(--ink2); }
+.bar { display: flex; align-items: center; gap: 8px; }
+.pill { height: 30px; padding: 0 10px; border-radius: 6px; background: var(--field); display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; white-space: nowrap; position: relative; }
+.pill .ic { width: 14px; height: 14px; color: var(--ink2); }
+.pill .c { width: 12px; height: 12px; }
+.pill.preset.on { background: var(--raised); box-shadow: inset 0 0 0 1px var(--ink); }
+[data-theme="b"] .pill.preset.on { box-shadow: inset 0 0 0 1px var(--action); }
+.pill .x { width: 12px; height: 12px; margin-left: 2px; }
+.seg { display: inline-flex; background: var(--field); border-radius: 6px; padding: 2px; height: 30px; align-items: center; }
+.seg b { font-weight: 500; font-size: 12.5px; min-width: 24px; height: 26px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: var(--ink2); }
+.seg b.on { background: var(--raised); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--hair); }
+.seg .lab { padding: 0 6px 0 8px; display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--ink2); }
+.seg .lab .ic { width: 14px; height: 14px; }
+.bar .sp { flex: 1; }
+.model { height: 34px; padding: 0 10px; border: 1px solid var(--hair); background: var(--raised); border-radius: 6px; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.model .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.model .sub { color: var(--ink2); font-weight: 400; }
+.model .c { width: 12px; height: 12px; color: var(--ink2); }
+.why { font-size: 12px; color: var(--ink2); white-space: nowrap; }
+.gen { height: 34px; padding: 0 16px; border-radius: 6px; background: var(--action); color: var(--onAction); font-weight: 600; font-size: 13px; white-space: nowrap; display: inline-flex; align-items: center; }
+.gen.off { background: var(--field); color: var(--ink3); box-shadow: inset 0 0 0 1px var(--hair); }
+
+/* preset menu */
+.menu { position: absolute; bottom: 38px; left: 0; width: 340px; background: var(--raised); border: 1px solid var(--hair); border-radius: 10px; padding: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.16); z-index: 5; cursor: default; }
+.menu .q { height: 30px; border-radius: 6px; background: var(--field); display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--ink3); font-size: 12.5px; font-weight: 400; }
+.menu .q .ic { color: var(--ink2); }
+.menu .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.menu .p { font-size: 11.5px; font-weight: 500; }
+.menu .p img { width: 100%; aspect-ratio: 4/5; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 5px; }
+.menu .p .s { color: var(--ink2); font-weight: 400; font-size: 11px; margin-top: 1px; }
+.menu .p.on img { outline: 2px solid var(--ink); outline-offset: 1px; }
+[data-theme="b"] .menu .p.on img { outline-color: var(--action); }
+.menu .none { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--hair); display: flex; justify-content: space-between; font-size: 12px; color: var(--ink2); font-weight: 400; }
+
+/* ---------- phone ---------- */
+.phone { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); }
+.phone .phead { overflow: hidden; }
+.phone .stage { display: block; }
+.phone .scroll > * { flex: none; }
+.phone .shead { flex-direction: column; gap: 8px; }
+.phone .acts { width: 100%; justify-content: space-between; }
+.phone .view { padding: 10px 0 4px; }
+.phone .view { height: 330px; }
+.phone .idle .view { height: 170px; }
+.phone .idle .slots4 { grid-template-columns: repeat(4, 40px); }
+.phone .idle .slots4 i { height: 50px; }
+.phone .arrow { display: none; }
+.phone .keep { padding: 0 10px; }
+.phone .phead { padding: 12px 16px 8px; }
+.phone .phead .r1 { display: flex; align-items: center; justify-content: space-between; height: 40px; }
+.phone .phead h1 { font: 400 26px "Instrument Serif"; }
+.phone .tabs { margin-top: 6px; overflow: hidden; width: max-content; }
+.phone .scroll { overflow: auto; padding: 4px 16px 12px; display: flex; flex-direction: column; gap: 12px; }
+.phone .stage { padding: 12px; }
+.phone .act { padding: 0 6px; }
+.phone .act .w { display: none; }
+.phone .panel { overflow: visible; }
+.phone .bottom { padding: 10px 16px 14px; background: var(--canvas); border-top: 1px solid var(--hair); gap: 8px; }
+.phone .prompt { min-height: 44px; padding: 12px; font-size: 13px; }
+.phone .bar { flex-wrap: nowrap; }
+.phone .gen { flex: 1; justify-content: center; height: 40px; }
+.phone .pill, .phone .seg { height: 32px; }
+.phone .menu { width: 358px; }
+</style>
+<script src="icons.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const theme = q.get('theme') || 'a', state = q.get('state') || 'empty', phone = q.get('layout') === 'phone';
+document.body.dataset.theme = theme;
+const I = (n, cls = '') => `<span class="ic ${cls}">${ICONS[n]}</span>`;
+const filled = state !== 'empty', results = state === 'results', menuOpen = state === 'presets';
+const preset = menuOpen ? 'Rooftop editorial' : null; // the presets frame: picker open, a preset picked, the rig locked
+
+// Sample price only: the button text is the server's buttonLabel from POST /v1/suite/photos/estimate.
+const PRICE = '$0.16';
+
+const side = `<aside class="side">
+  <div class="logo">Muse</div>
+  ${[['house','Home'],['user','Models'],['video-camera','Video suite',1],['file-text','Templates'],['scissors','Edit'],['list-bullets','Queue'],['book-open-text','Library'],['paper-plane-tilt','Posts']]
+    .map(([i,t,on]) => `<div class="nav ${on?'on':''}">${I(i)}${t}</div>`).join('')}
+  <div class="nav" style="margin-top:14px">${I('plus')}New model</div>
+  <div class="grow"></div>
+  <div class="nav">${I('sliders-horizontal')}Settings</div>
+  <div class="bal"><div>Balance<b>$6.07</b></div><div style="display:flex;gap:6px;align-items:center;color:var(--ink)">${I('plus')}Add funds</div></div>
+</aside>`;
+
+const tabs = `<div class="tabs">${[['video-camera','Shot'],['camera','Photo',1],['arrows-left-right','Swap'],['squares-four','Storyboard'],['arrows-clockwise','Recreate']]
+  .map(([i,t,on]) => `<div class="tab ${on?'on':''}">${I(i)}${t}</div>`).join('')}<div class="tab">${I('dots-three')}</div></div>`;
+
+const photos = ['p1','p2','p3','p4'];
+const cur = 1; // showing photo 2 of 4
+const stage = () => {
+  if (!results) return `<section class="stage idle">
+    <div class="shead"><div><div class="t">Photo</div><div class="m">${filled ? 'Zelphira · Hoodie · 4 photos' : 'Nothing generated yet'}</div></div></div>
+    <div class="view"><div class="empty">
+      <div class="slots4"><i></i><i></i><i></i><i></i></div>
+      <div class="t">Your photos appear here</div>
+      <div class="m">${filled ? '4 photos, one run' : '1 to 4 photos per run'}</div>
+    </div></div><div></div></section>`;
+  return `<section class="stage">
+    <div class="shead"><div><div class="t">Rooftop, golden hour</div><div class="m">Photo 2 of 4 · 1024 × 1280</div></div>
+      <div class="acts">
+        <div class="act">${I('arrow-clockwise')}<span class="w">Redo</span></div>
+        <div class="act">${I('arrows-out-simple')}<span class="w">Upscale</span></div>
+        <div class="act">${I('video-camera')}<span class="w">Use in Shot</span></div>
+        <div class="act">${I('export')}</div>
+        <div class="keep">${I('check')}Keep</div>
+      </div></div>
+    <div class="view">
+      <div class="arrow" style="left:${phone?6:24}px">${I('caret-left')}</div>
+      <img class="hero" src="assets/${photos[cur]}.jpg" alt="">
+      <div class="arrow" style="right:${phone?6:24}px">${I('caret-right')}</div>
+    </div>
+    <div class="strip">${photos.map((p,i) => `<div class="thumb ${i===cur?'on':''}"><img src="assets/${p}.jpg" alt="">${i===0?`<span class="kept">${I('check')}</span>`:''}</div>`).join('')}
+      <span class="n">2 of 4</span></div>
+  </section>`;
+};
+
+const row = (icon, label, value, cls = '') => `<div class="row ${cls}">${I(icon)}<div class="l">${label}</div><div class="v">${value}</div>${I('caret-down','c')}</div>`;
+const addv = (t) => `<span class="add">${I('plus')}</span><span class="addt">${t}</span>`;
+const panel = () => `<section class="panel">
+  <div class="ptitle"><h2>Inputs</h2></div>
+  ${row('user','Character', filled ? `<img class="av round" src="assets/face.jpg"><span>Zelphira</span>` : addv('Pick a character'), filled ? '' : 'need')}
+  ${row('t-shirt','Outfit', filled ? `<img class="av" src="assets/outfit.jpg"><span>Hoodie</span>` : addv('Add outfit'))}
+  ${row('package','Product', addv('Add product'))}
+  ${row('images','References', filled ? `<span class="refs"><img class="av" src="assets/p3.jpg"><span class="add">${I('plus')}</span></span><span class="sub">Pose · 1 of 3</span>` : addv('Add up to 3'))}
+  <div class="sec" style="margin-top:16px"><span style="font-size:17px;font-weight:600;color:var(--ink)">Rig</span><span>${preset ? preset : ''}</span></div>
+  ${preset ? [['frame-corners','Framing'],['aperture','Lens'],['sun','Light'],['palette','Look']].map(([i,l]) => `<div class="row locked">${I(i)}<div class="l">${l}</div><div class="v"><span>From preset</span></div>${I('lock-simple','c')}</div>`).join('') : `
+  ${row('frame-corners','Framing', filled ? '<span>Medium full</span>' : '<span>Auto</span>')}
+  ${row('aperture','Lens', filled ? '<span>50 mm · f/2</span>' : '<span>Auto</span>')}
+  ${row('sun','Light', filled ? '<span>Golden hour backlight</span>' : '<span>Auto</span>')}
+  ${row('palette','Look', filled ? '<span>Warm film grade</span>' : '<span>House grade</span>')}`}
+</section>`;
+
+const menu = `<div class="menu">
+  <div class="q">${I('magnifying-glass')}Search presets</div>
+  <div class="grid">
+    <div class="p on"><img src="assets/p2.jpg">Rooftop editorial<div class="s">Camera + light</div></div>
+    <div class="p"><img src="assets/p4.jpg">Bed profile<div class="s">Camera + light</div></div>
+    <div class="p"><img src="assets/p3.jpg">Living room candid<div class="s">Camera + light</div></div>
+  </div>
+  <div class="none"><span>No preset: use the rig</span><span>All 12 presets</span></div>
+</div>`;
+
+const prompt = `<div class="prompt"><div class="tx">${filled
+  ? '<span class="mention">@Zelphira</span> on a rooftop at golden hour, laughing, one hand in her hair, city soft behind.'
+  : '<span class="ph">Describe the photo: the place, the pose, the mood. Use @ for a model.</span>'}</div>${phone ? '' : `<span class="ic">@</span>`}</div>`;
+const count = `<div class="seg"><span class="lab">${I('stack')}${phone ? '' : 'Photos'}</span>${[1,2,3,4].map(n => `<b class="${n===4?'on':''}">${n}</b>`).join('')}</div>`;
+const presetPill = `<div class="pill preset ${menuOpen?'on':''}">${I('images')}${menuOpen ? 'Rooftop editorial' : 'Preset'}${I('caret-down','c')}${menuOpen ? menu : ''}</div>`;
+const model = `<div class="model"><span class="dot"></span>Auto${phone ? '' : '<span class="sub">· Nano Banana</span>'}${I('caret-down','c')}</div>`;
+const gen = filled ? `<button class="gen">Generate · 4 photos · ${PRICE}</button>` : `<button class="gen off">Generate · 4 photos</button>`;
+const why = filled ? '' : `<span class="why">Pick a character or add a photo</span>`;
+
+const bottom = phone
+  ? `<div class="bottom">${prompt}<div class="bar">${presetPill}${count}<span class="sp"></span>${model}</div>
+      ${filled ? '' : `<div class="why" style="text-align:center">Pick a character or add a photo</div>`}<div class="bar">${gen}</div></div>`
+  : `<div class="bottom">${prompt}<div class="bar">${presetPill}${count}<span class="sp"></span>${why}${model}${gen}</div></div>`;
+
+const root = document.getElementById('root');
+if (!phone) {
+  root.innerHTML = `<div class="app">${side}<div class="main">
+    <div class="top"><div class="search">${I('magnifying-glass')}Search or jump to…<span class="k">⌘K</span></div>
+      <div class="r"><div class="ghost">${I('chat-circle-text')}Ask Claude</div><div class="avatar"></div></div></div>
+    <div class="head"><h1>Video suite</h1>${tabs}</div>
+    <div class="work">${stage()}${panel()}</div>
+    ${bottom}
+  </div></div>`;
+} else {
+  root.innerHTML = `<div class="phone">
+    <div class="phead"><div class="r1"><h1>Video suite</h1><div class="avatar"></div></div>${tabs}</div>
+    <div class="scroll">${stage()}${panel()}</div>
+    ${bottom}</div>`;
+}
+</script>
+</body>
+</html>
