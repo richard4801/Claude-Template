@@ -435,17 +435,22 @@ struct ComposerMediaPane: View {
     private var tag: String? {
         let d = store.suite.composer
         switch tool {
-        case .photo: return "\(store.suite.photo.shownAspect) · \(PhotoEstimate.photos(store.suite.photo.count))"
+        case .photo: return photoLine // the approved frames: "1 to 4 photos per run", then "<n> photos, one run" once filled
         case .swap, .recast: return nil
         case .extend: return "+\(d.duration) s"
         default: return "\(d.aspect) · \(d.duration) s"
         }
     }
 
+    /// The Photo tab's empty stage line (plans/design/photo/): nothing filled yet, then the run once the inputs are filled.
+    private var photoLine: String {
+        store.photoRequest == nil ? "1 to \(PhotoRequest.maxCount) photos per run" : "\(PhotoEstimate.photos(store.suite.photo.count)), one run"
+    }
+
     private var tagLabel: String? {
         let d = store.suite.composer
         switch tool {
-        case .photo: return "Shape \(store.suite.photo.shownAspect), \(PhotoEstimate.photos(store.suite.photo.count))"
+        case .photo: return photoLine
         case .swap, .recast: return nil
         case .extend: return "Adds \(d.duration) seconds"
         default: return "Shape \(d.aspect), \(d.duration) seconds"
