@@ -29,6 +29,9 @@ final class ClaudeFileAccessTests: XCTestCase {
         for t in ["Bash", "Read", "Write", "Edit", "Glob", "Grep"] { XCTAssertFalse(deny.contains(t), t) }
         XCTAssertEqual(on[on.firstIndex(of: "--allowedTools")! + 1], "mcp__muse")
         XCTAssertEqual(ClaudeCommand.environment([:], executable: "/bin/claude", home: home)["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"], "3700000")
+        // ci_1d271380f0de: Claude Code ends an HTTP MCP call after MCP_TOOL_TIMEOUT (60 s unset) with "The operation timed out.".
+        XCTAssertEqual(ClaudeCommand.environment([:], executable: "/bin/claude", home: home)["MCP_TOOL_TIMEOUT"], "3700000")
+        XCTAssertEqual(ClaudeCommand.environment(["MCP_TOOL_TIMEOUT": "90000"], executable: "/bin/claude", home: home)["MCP_TOOL_TIMEOUT"], "90000")
     }
 
     func testEveryFileCallAsksWithTheExactPathAndFolder() {
@@ -96,7 +99,7 @@ final class ClaudeFileAccessTests: XCTestCase {
 
     func testTheAppSaysItCanAnswerFileQuestions() {
         let api = HTTPClaudeAPI(baseURL: URL(string: "https://muse.example")!, token: { "t" })
-        XCTAssertEqual(api.request("GET", "v1/claude/status").value(forHTTPHeaderField: "X-Muse-Caps"), "files,results,ui")
+        XCTAssertEqual(api.request("GET", "v1/claude/status").value(forHTTPHeaderField: "X-Muse-Caps"), "files,results,ui,acks")
     }
 
     func testOffRefusesEverything() {

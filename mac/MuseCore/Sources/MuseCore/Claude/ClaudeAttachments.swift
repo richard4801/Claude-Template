@@ -70,18 +70,78 @@ public enum ClaudeAttachmentPrompt {
     }
 }
 
+/// upload_local_file's big files (ci_5c0e35ee5488, ci_9c7fc3adb445): a PUT that drops or stalls is tried again on the same
+/// presigned link (valid an hour), and a failure says why in plain words instead of "Try again".
+public enum ClaudeUploadRetry {
+    public static let maxAttempts = 3
+    /// Confirm reads the whole file back on the server (its fingerprint) and classifies its sound: minutes for a big clip.
+    public static let confirmTimeout: TimeInterval = 300
+    /// Pause before try n (n ≥ 2), seconds.
+    public static func pause(beforeTry n: Int) -> Double { n <= 2 ? 2 : 6 }
+
+    /// A failure worth another try: the connection dropped, stalled or was reset, or the store/server was briefly unwell.
+    public static func retryable(_ error: Error) -> Bool {
+        if let u = error as? URLError {
+            return [.timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost, .dnsLookupFailed, .secureConnectionFailed, .cannotFindHost].contains(u.code)
+        }
+        if let a = error as? ApiError { return ["http_500", "http_502", "http_503", "http_504", "http_408", "http_429"].contains(a.code) }
+        return (error as NSError).domain == NSPOSIXErrorDomain
+    }
+
+    /// Plain words for why the file didn't go up.
+    public static func why(_ error: Error) -> String {
+        if let u = error as? URLError {
+            switch u.code {
+            case .timedOut: return "the connection stalled (nothing moved for 10 minutes)"
+            case .networkConnectionLost: return "the connection dropped"
+            case .notConnectedToInternet: return "this Mac is offline"
+            case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed: return "the file store couldn't be reached"
+            default: return u.localizedDescription
+            }
+        }
+        if let a = error as? ApiError { return a.message }
+        return error.localizedDescription
+    }
+
+    /// Runs `put` up to `attempts` times while the failure is retryable; the last failure is thrown with why.
+    public static func run(attempts: Int = maxAttempts, onRetry: (@Sendable (Int) -> Void)?, sleep: @Sendable (Double) async -> Void = { s in try? await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000)) },
+                           _ put: @Sendable () async throws -> Void) async throws {
+        var n = 1
+        while true {
+            do { try await put(); return } catch {
+                guard n < attempts, retryable(error), !Task.isCancelled else {
+                    throw ApiError("upload_failed", "The upload didn't finish after \(n) \(n == 1 ? "try" : "tries"): \(why(error)).")
+                }
+                n += 1
+                onRetry?(n)
+                await sleep(pause(beforeTry: n))
+            }
+        }
+    }
+}
+
 /// Uploads a video for a Claude message: an upload of kind "clip" (presign → PUT → confirm), so the server keeps it and
 /// Claude can watch it. → its upload id (the attachment is marked as a video).
 public protocol ClaudeVideoUploading: Sendable {
     func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?) async throws -> ClaudeAttachment
+    /// With retries of a dropped PUT (`onRetry` hears try n) and a long confirm (upload_local_file).
+    func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?, onRetry: (@Sendable (Int) -> Void)?) async throws -> ClaudeAttachment
+}
+public extension ClaudeVideoUploading {
+    func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?, onRetry: (@Sendable (Int) -> Void)?) async throws -> ClaudeAttachment {
+        try await uploadClaudeVideo(file, meta: meta, contentType: contentType, progress: progress)
+    }
 }
 
 /// The Claude chat's own API (the service holds this one): the same upload as HTTPMuseAPI's, signed in with the same token.
 extension HTTPClaudeAPI: ClaudeVideoUploading {
     public func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?) async throws -> ClaudeAttachment {
+        try await uploadClaudeVideo(file, meta: meta, contentType: contentType, progress: progress, onRetry: nil)
+    }
+    public func uploadClaudeVideo(_ file: URL, meta: ClipMeta, contentType: String, progress: UploadProgress?, onRetry: (@Sendable (Int) -> Void)?) async throws -> ClaudeAttachment {
         let http = HTTPMuseAPI(baseURL: baseURL)
         if let tok = currentToken { await http.setToken(tok) }
-        return try await http.uploadClaudeVideo(file, meta: meta, contentType: contentType, progress: progress)
+        return try await http.uploadClaudeVideo(file, meta: meta, contentType: contentType, progress: progress, onRetry: onRetry)
     }
 }
 
@@ -106,12 +166,22 @@ extension FakeClaudeAPI: ClaudeImageUploading {
 /// /v1/editor/uploads/presign + PUT), so Edit and Claude's edit tools take it as an audio asset. → its upload id.
 public protocol ClaudeAudioUploading: Sendable {
     func uploadClaudeAudio(_ file: URL, contentType: String) async throws -> String
+    /// With progress and retries of a dropped PUT (upload_local_file).
+    func uploadClaudeAudio(_ file: URL, contentType: String, progress: UploadProgress?, onRetry: (@Sendable (Int) -> Void)?) async throws -> String
+}
+public extension ClaudeAudioUploading {
+    func uploadClaudeAudio(_ file: URL, contentType: String, progress: UploadProgress?, onRetry: (@Sendable (Int) -> Void)?) async throws -> String {
+        try await uploadClaudeAudio(file, contentType: contentType)
+    }
 }
 extension HTTPClaudeAPI: ClaudeAudioUploading {
     public func uploadClaudeAudio(_ file: URL, contentType: String) async throws -> String {
+        try await uploadClaudeAudio(file, contentType: contentType, progress: nil, onRetry: nil)
+    }
+    public func uploadClaudeAudio(_ file: URL, contentType: String, progress: UploadProgress?, onRetry: (@Sendable (Int) -> Void)?) async throws -> String {
         let http = HTTPMuseAPI(baseURL: baseURL)
         if let tok = currentToken { await http.setToken(tok) }
-        return try await http.uploadEditorFile(file, contentType: contentType, purpose: nil, progress: nil)
+        return try await http.uploadClaudeAudio(file, contentType: contentType, progress: progress, onRetry: onRetry)
     }
 }
 extension FakeClaudeAPI: ClaudeAudioUploading {
