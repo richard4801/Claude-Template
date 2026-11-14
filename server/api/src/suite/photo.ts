@@ -25,6 +25,9 @@ export const PhotoRequestSchema = z.object({
   camera: CameraSpecSchema.optional(),
   /** "Grade with this look" (on by default, as for shots): the Look's LUT is applied to each photo as an editable look. */
   gradeLook: z.boolean().default(true),
+  /** The photo's shape (owner 2026-11-14). Unset = 9:16, as every photo before it (1080 × 1920). Each model gets the nearest
+   *  ratio it takes (the estimate's `aspects` says which). */
+  aspect: z.enum(['9:16', '4:5', '3:4', '2:3', '1:1', '3:2', '4:3', '16:9']).optional(),
   /** Photos in this run (as the old Photoshoot: 1–4). */
   count: z.number().int().min(1).max(4).default(4),
   /** A Photo preset (a photo template id). */
@@ -119,6 +122,30 @@ export function photoRigCheck(r: Pick<PhotoRequest, 'prompt' | 'camera'>): RigWa
 export function photoFilter(r: Pick<PhotoRequest, 'camera' | 'gradeLook'>) {
   const l = shotLook(r.camera ? resolvePreset(r.camera) : undefined, r.gradeLook);
   return l ? { look: l, filter: { lut: l.lut, strength: 1 } } : null;
+}
+
+/** The Photo tab's shapes, tallest first (owner 2026-11-14: 4:5, 1:1, 9:16 and the other common ones). */
+export const PHOTO_ASPECTS = ['9:16', '4:5', '3:4', '2:3', '1:1', '3:2', '4:3', '16:9'] as const;
+export type PhotoAspect = typeof PHOTO_ASPECTS[number];
+const ratio = (a: string) => { const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(a); return m ? Number(m[1]) / Number(m[2]) : null; };
+/** The size asked of the engine: 9:16 is 1080 × 1920 as before; the others the same area (about 2 MP, so the same price), multiples of 16. */
+export function photoSize(aspect?: string | null) {
+  const r = aspect ? ratio(aspect) : null;
+  if (!r || aspect === '9:16') return { width: 1080, height: 1920 };
+  const area = 1080 * 1920;
+  return { width: Math.round(Math.sqrt(area * r) / 16) * 16, height: Math.round(Math.sqrt(area / r) / 16) * 16 };
+}
+/** What the model makes for each shape: the shape itself, the nearest ratio it takes, or null (no size choice: the model's
+ *  own). `supported` null = any width × height. */
+export function photoAspects(supported: string[] | null) {
+  const near = (a: string): string | null => {
+    if (!supported) return a;
+    if (!supported.length) return null;
+    const t = ratio(a)!; let best: string | null = null, d = Infinity;
+    for (const v of supported) { const r = ratio(v); if (r != null && Math.abs(Math.log(r / t)) < d) { d = Math.abs(Math.log(r / t)); best = v; } }
+    return best;
+  };
+  return PHOTO_ASPECTS.map(id => ({ id, makes: near(id) }));
 }
 
 /** "Generate · 4 photos · $0.24". */

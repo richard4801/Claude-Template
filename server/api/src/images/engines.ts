@@ -129,7 +129,7 @@ export type ReplicateImageConfig = {
   editModel: string; runUsd: number; mpUsd: number; editUsd: number; maxRefs: number; safety: number;
   pollMs: number; timeoutMs: number; maxWaitMs: number; loraUrl?: string; loraScale: number;
 };
-const RATIOS: [string, number][] = [['9:16', 9 / 16], ['3:4', 3 / 4], ['2:3', 2 / 3], ['4:5', 4 / 5], ['1:1', 1], ['5:4', 5 / 4], ['4:3', 4 / 3], ['3:2', 3 / 2], ['16:9', 16 / 9]];
+export const RATIOS: [string, number][] = [['9:16', 9 / 16], ['3:4', 3 / 4], ['2:3', 2 / 3], ['4:5', 4 / 5], ['1:1', 1], ['5:4', 5 / 4], ['4:3', 4 / 3], ['3:2', 3 / 2], ['16:9', 16 / 9]];
 /** The nearest aspect ratio FLUX.2 accepts. */
 export const aspectFor = (w: number, h: number) => RATIOS.reduce((a, b) => (Math.abs(Math.log(b[1] / (w / h))) < Math.abs(Math.log(a[1] / (w / h))) ? b : a))[0];
 

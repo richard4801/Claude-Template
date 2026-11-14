@@ -39,7 +39,7 @@ import { CatalogError } from '../replicate/catalog.js';
 import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
 import type { Look } from '../editor/look.js';
 import { previewLayouts } from '../suite/previewLayouts.js'; // the take viewer's safe zones
-import { freePhotoPrompt, PhotoRequestSchema, photoButton, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
+import { freePhotoPrompt, PhotoRequestSchema, photoAspects, photoButton, photoSize, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
 import { referencesOf } from '../suite/assist.js';
 import { modelChoice } from '../engines/service.js'; // WS13: model choice everywhere
@@ -877,7 +877,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     presets: z.boolean().optional(), camera: z.object({ shot: z.string().min(1).max(20), lens: z.number().int().min(8).max(400), aperture: z.string().min(1).max(10) }).optional(),
     light: z.string().max(80).optional(), grade: z.string().max(80).optional(), refs: z.array(ShootRefBody).max(3).optional(),
     templateId: z.string().optional(), shuffleSeed: z.number().int().min(0).optional(), productImage: z.object({ asset: z.string().optional(), url: z.string().optional() }).optional(),
-    imageEngine: ImageEngineOverride.optional() }).passthrough();
+    imageEngine: ImageEngineOverride.optional(), aspect: z.string().max(10).optional() }).passthrough();
 
   /** Everything a shoot (or its preview) needs: the model, outfit, images to send, the prompt and the estimate. */
   async function planShoot(u: AuthUser, body: unknown, still?: StillRig, engine?: EngineSelection, models?: StepOverrides) {
@@ -969,7 +969,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     let r: Awaited<ReturnType<typeof ctx.images.generate>>, partial: ShootResult['partial'] = null;
     try {
       r = await ctx.images.generate({ studioId: req.user.studioId, userId: req.user.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length, panels: plan.panels,
-        bill, models: s.stepModels, req: { prompt, width: 1080, height: 1920, count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
+        bill, models: s.stepModels, req: { prompt, ...photoSize(b.aspect), count, seed, simAssets: [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'] } });
     } catch (e) {
       // Some stills were made (paid) before a later one failed: they are kept and charged; the rest is refunded.
       const pe = e instanceof PhotoError ? e.partial : undefined;
@@ -1023,7 +1023,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           direction: b.direction, shuffleSeed, index: n, lockSeed: b.lockSeed, seed: randomImageSeed(), hasProduct: !!product, refs: plan.sent }, s.texts);
         const sim = [o?.angles?.[0]?.asset ?? 'g_front', 'c_face', 'face', 'g_tq'];
         const r = await ctx.images.generate({ studioId: u.studioId, userId: u.id, purpose: 'shoot', refId: id, override: b.imageEngine, refs: plan.images, maxImages: plan.images.length, panels: plan.panels,
-          bill, models: s.stepModels, req: { prompt: p.fullText, width: 1080, height: 1920, count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
+          bill, models: s.stepModels, req: { prompt: p.fullText, ...photoSize(s.b.aspect), count: 1, seed: p.seed ?? undefined, simAssets: [sim[n % sim.length]!] } });
         // The template's finishing on a paid still: one that fails keeps the still as made.
         const fx = await ctx.templates.postProcess(r.images[0]!, t.layers, { studioId: u.studioId, userId: u.id })
           .catch(() => ({ ref: r.images[0]!, key: ctx.images.keyOf(r.images[0]!) }));
@@ -1060,7 +1060,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     // References Claude added to the composer's draft (suite_add_reference) count too, after the ones sent (max 3).
     const fromDraft = referencesOf((draftOf(body) ?? {}) as Draft).map(r => ({ image: { url: r.url }, guides: [r.use === 'pose' ? 'pose' : r.use === 'location' ? 'scene' : 'look'] as ('pose' | 'look' | 'scene')[] }));
     const refsAll = [...(p.references ?? []), ...fromDraft.filter(d => !(p.references ?? []).some(x => x.image?.url === d.image.url))].slice(0, 3);
-    const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: refsAll.length ? refsAll : undefined, templateId: p.presetId,
+    const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: refsAll.length ? refsAll : undefined, templateId: p.presetId, aspect: p.aspect,
       shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true,
       ...(sentOfBody(p) ? { sentImages: p.sentImages, addImages: p.addImages, excludeImages: p.excludeImages, sentImagesBy: p.sentImagesBy } : p.draft ? { draft: p.draft } : {}) };
     // WS5: a custom image model the user may use replaces the studio's image engine for this run.
@@ -1076,7 +1076,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     // Priced and run on that model (planShoot); passed as checked step models so a member can run on the studio default.
     const s = await planShoot(u, shoot, p.presetId ? undefined : still, engine, imageModel && !custom ? { shot: imageModel } : undefined);
     const notes = [...still.notes, ...(p.presetId && (still.camera || still.light || still.grade || still.direction) ? ['The preset sets its own camera and light'] : [])];
-    return { p, s, notes, graded };
+    // The photo model (owner 2026-11-14): the bar's "Auto · <model>", the shapes it makes, and words alone only on a model
+    // that can make a photo without an image.
+    const shape = await ctx.images.shotShape(u.studioId, s.b.imageEngine, s.stepModels);
+    if (s.kind === 'free' && !s.plan.images.length && shape.needsImage) throw badRequest(`${shape.name} needs an image to work from · add a photo or pick another model`);
+    return { p, s, notes, graded, shape };
   };
   // Images sent (images/sent.ts): what each page's generation would send, for Claude's get_sent_images / set_sent_images.
   const dry = (b: unknown) => ({ ...((b ?? {}) as object), dryRun: true });
@@ -1085,11 +1089,20 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     outfit: async (u, body) => ((await createOutfit({ user: u, body: dry(body) })) as { sentImages?: SentView | null }).sentImages ?? null,
     fill_angles: async (u, body) => ((await fillAngles({ user: u, body: dry(body), params: { id: String((body as { modelId?: unknown }).modelId ?? '') } })) as { sentImages?: SentView }).sentImages ?? null,
   };
+  // The bar's "Auto · <model>" (owner 2026-11-14): the name the model picker (GET /v1/engines?purpose=photo) shows this
+  // person; a model hidden from a member stays "Auto" (name null), never its id.
+  const photoModelView = async (u: AuthUser, model: string, auto: boolean) => {
+    const list = await modelChoice(ctx).list(u, 'photo') as { models?: { model: string; label?: string }[] };
+    const row = list.models?.find(m => m.model === model);
+    return { id: row ? model : null, name: row?.label ?? null, auto };
+  };
   app.post('/v1/suite/photos/estimate', async req => {
-    const { p, s, notes, graded } = await photoPlan(req.user, req.body);
+    const { p, s, notes, graded, shape } = await photoPlan(req.user, req.body);
     const estimate = s.count * s.plan.perShot, money = P.aboutMoney(estimate);
+    const aspects = photoAspects(shape.aspects), aspect = p.aspect ?? '9:16';
     return { tool: 'photo', count: s.count, perPhoto: s.plan.perShot, estimate, priceLine: `${money} · ${s.count} photo${s.count === 1 ? '' : 's'}`,
       buttonLabel: photoButton(s.count, P.money(estimate)), ok: true, warnings: notes, rig: photoRigCheck(p), look: graded?.look ?? null, sentImages: s.plan.sentImages,
+      aspect, makes: aspects.find(a => a.id === aspect)?.makes ?? null, aspects, model: await photoModelView(req.user, shape.model, !p.imageModel && !p.engineModel),
       ...(s.kind === 'template' ? { preset: { id: s.t.id, name: s.t.name } } : { prompt: s.kind === 'free' ? s.text : s.custom ?? s.built.text }) };
   });
   // Every photo run is a job (WS19): a `render` row with request.engine 'photo', so the Queue, the hub and the Suite's

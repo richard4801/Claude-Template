@@ -9,7 +9,7 @@ import { generatedImages, studioSettings, type ImageRef } from '../db/schema.js'
 import { ApiError } from '../errors.js';
 import { sha256, uid } from '../lib/util.js';
 import { putObject } from '../storage/objects.js';
-import { CustomHttpEngine, FalEngine, ImageEngineError, ReplicateImageEngine, SimulatedEngine, type EngineImage, type EngineSelection, type ImageEngine, type ImageRequest } from './engines.js';
+import { CustomHttpEngine, FalEngine, ImageEngineError, RATIOS, ReplicateImageEngine, SimulatedEngine, type EngineImage, type EngineSelection, type ImageEngine, type ImageRequest } from './engines.js';
 import * as P from '../pricing.js';
 import type { PhotoBill } from './bill.js';
 import { ReplicateError, SAFETY_RE, CREDIT_RE, errorText } from '../replicate/client.js';
@@ -131,6 +131,24 @@ export class ImageService {
       const m = mapModel(await this.ctx.imageModels.info(sel.model), 'shot').mapping;
       return takesReferenceSheet(m) ? { capacity: max, sheet: true } : { capacity: imageCapacity(m), sheet: false };
     } catch { return { capacity: max, sheet: false }; }
+  }
+  /**
+   * The Photo tab's facts about the photo model (owner 2026-11-14): its name (the bar's "Auto · <model>"), the aspect
+   * ratios it takes (null = any width × height; [] = no size choice, the model's own) and whether it needs an image
+   * (an edit-only model can't make a photo from words alone).
+   */
+  async shotShape(studioId: string, override?: Partial<EngineSelection> | null, models?: StepOverrides | null): Promise<{ model: string; name: string; aspects: string[] | null; needsImage: boolean }> {
+    const sel = await this.selection(studioId, override, models);
+    if (sel.provider === 'byo') return { model: sel.model, ...(await this.ctx.suite.byo.photoShape(studioId, sel.model)) };
+    if (sel.provider !== 'replicate') return { model: sel.model, name: sel.provider === 'simulated' ? 'Simulated' : sel.provider === 'fal' ? sel.model : 'Custom', aspects: null, needsImage: false };
+    const name = modelLabel(sel.model);
+    if (this.ctx.imageModels.isRecipe('shot', sel.model) || !this.toolsLive) return { model: sel.model, name, aspects: RATIOS.map(r => r[0]), needsImage: false };
+    try {
+      const { mapping: m, inputs } = mapModel(await this.ctx.imageModels.info(sel.model), 'shot');
+      const aspects = m.aspectRatio && m.aspectValues?.some(v => /^\d+(\.\d+)?:\d+(\.\d+)?$/.test(v)) ? m.aspectValues.filter(v => /^\d+(\.\d+)?:\d+(\.\d+)?$/.test(v)) : m.size ? null : [];
+      const img = m.image ? inputs.find(f => f.name === m.image!.field) : undefined;
+      return { model: sel.model, name, aspects, needsImage: !!img?.required && img.default === undefined };
+    } catch { return { model: sel.model, name, aspects: null, needsImage: false }; }
   }
   /**
    * The images one new shot sends (her identity images, then a shoot's reference images; shoots, sheet fills, outfit-set

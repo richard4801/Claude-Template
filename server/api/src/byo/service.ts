@@ -15,6 +15,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { sleep } from '../lib/util.js';
 import { ReplicateError } from '../replicate/client.js';
 import { aspectFor, ImageEngineError, type EngineImage, type EngineSelection, type ImageEngine, type ImageRequest, type ImageResult } from '../images/engines.js';
+import { nearestAspect } from '../replicate/mapping.js';
 import type { ProviderStatus, StartHooks, VideoProvider } from '../suite/providers.js';
 import { customModelsOf, setCustomModels, inputSlotsOf, type ModelSpec, type Resolution } from '../suite/registry.js';
 import { adapters, KINDS, ProviderUnreachable, type Price, type ProviderAdapter, type ProviderKind, type RawModel } from './adapters.js';
@@ -385,6 +386,16 @@ export class ByoService {
     if (!r || r.studioId !== studioId || r.kind !== 'image') throw new ApiError(400, 'engine_unavailable', 'That model isn’t available');
     return Math.round(r.price!.costUsd * r.priceScale * 10000) / 10000;
   }
+  /** The Photo tab's model facts (owner 2026-11-14): its name, and the aspect ratios it takes (null = any width × height). */
+  async photoShape(studioId: string, id: string): Promise<{ name: string; aspects: string[] | null; needsImage: boolean }> {
+    await this.ensure(studioId);
+    const r = this.usable.get(id);
+    if (!r) return { name: 'Custom', aspects: null, needsImage: false };
+    const a = r.analysis, fixed = (r.fixedInputs ?? {}) as Record<string, unknown>;
+    const fixedAr = a.map.aspectRatio ? fixed[a.map.aspectRatio] : undefined;
+    const aspects = typeof fixedAr === 'string' ? [fixedAr] : a.map.width && a.map.height ? null : a.map.aspectRatio && a.inputs.aspectRatios.length ? a.inputs.aspectRatios : null;
+    return { name: r.displayName, aspects, needsImage: false };
+  }
   async photoCapacity(studioId: string, id: string) {
     await this.ensure(studioId);
     return Math.max(0, this.usable.get(id)?.analysis.inputs.referenceImages ?? 0);
@@ -469,8 +480,9 @@ export function imageInput(a: Analysis, fixed: Record<string, unknown>, req: Pic
     input[map.referenceImages] = a.shapes.referenceImages === 'single' ? req.referenceImages[0] : req.referenceImages.slice(0, Math.max(1, a.inputs.referenceImages));
   if (map.width && map.height) { input[map.width] = req.width; input[map.height] = req.height; }
   if (map.aspectRatio) {
-    const ar = aspectFor(req.width, req.height);
-    if (!a.inputs.aspectRatios.length || a.inputs.aspectRatios.includes(ar)) input[map.aspectRatio] = ar;
+    // The nearest ratio the model takes (owner 2026-11-14: the Photo tab's shapes map per model).
+    const ar = a.inputs.aspectRatios.length ? nearestAspect(a.inputs.aspectRatios, req.width, req.height) : aspectFor(req.width, req.height);
+    if (ar) input[map.aspectRatio] = ar;
   }
   if (map.seed && req.seed != null) input[map.seed] = req.seed + i;
   return input;

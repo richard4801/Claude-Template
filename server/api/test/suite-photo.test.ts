@@ -2,7 +2,8 @@
 // the shoot pipeline (same count and price as a shoot; /v1/shoots unchanged). Fake image engine, no money.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CameraSpecSchema, type CameraSpecInput } from '../src/suite/camera.js';
-import { PhotoRequestSchema, photoFilter, photoPrompt, photoRigCheck, stillRig } from '../src/suite/photo.js';
+import { PHOTO_ASPECTS, PhotoRequestSchema, photoAspects, photoFilter, photoPrompt, photoRigCheck, photoSize, stillRig } from '../src/suite/photo.js';
+import { imageInput } from '../src/byo/service.js';
 import { demoModel, makeApp, people, type Client } from './helpers.js';
 
 const cam = (c: CameraSpecInput) => CameraSpecSchema.parse(c);
@@ -54,6 +55,36 @@ describe('Photo tool · the rig for a still', () => {
   });
 });
 
+describe('Photo tool · size and ratio (owner 2026-11-14)', () => {
+  it('9:16 stays 1080 × 1920 (older apps send no aspect); the others keep the same area (same price), multiples of 16', () => {
+    expect(photoSize(undefined)).toEqual({ width: 1080, height: 1920 });
+    expect(photoSize('9:16')).toEqual({ width: 1080, height: 1920 });
+    expect(photoSize('1:1')).toEqual({ width: 1440, height: 1440 });
+    for (const a of PHOTO_ASPECTS) {
+      const { width: w, height: h } = photoSize(a), [x, y] = a.split(':').map(Number) as [number, number];
+      if (a !== '9:16') expect(w % 16 + h % 16).toBe(0); // 9:16 keeps the old 1080 × 1920
+      expect(Math.abs(w / h - x / y)).toBeLessThan(0.02);
+      expect(w * h).toBeGreaterThanOrEqual(1.5e6); // the 2 MP price bucket (pricing.ts outMpFor)
+    }
+    expect(PhotoRequestSchema.parse({ prompt: 'x' }).aspect).toBeUndefined();
+    expect(PhotoRequestSchema.parse({ prompt: 'x', aspect: '4:5' }).aspect).toBe('4:5');
+    expect(PhotoRequestSchema.safeParse({ prompt: 'x', aspect: '5:7' }).success).toBe(false);
+  });
+
+  it('maps each shape to what the model makes: itself, the nearest ratio it takes, or null (no size choice)', () => {
+    expect(photoAspects(null).every(a => a.makes === a.id)).toBe(true);
+    const m = Object.fromEntries(photoAspects(['16:9', '9:16', '1:1']).map(a => [a.id, a.makes]));
+    expect(m).toMatchObject({ '9:16': '9:16', '4:5': '1:1', '1:1': '1:1', '16:9': '16:9', '2:3': '9:16' });
+    expect(photoAspects([]).every(a => a.makes === null)).toBe(true);
+  });
+
+  it('a custom image model gets the nearest ratio it takes (before: none sent when the exact one was missing)', () => {
+    const a = { map: { prompt: 'prompt', aspectRatio: 'aspect_ratio' }, inputs: { aspectRatios: ['1:1', '16:9', '3:4'] }, shapes: {} } as any;
+    expect(imageInput(a, {}, { prompt: 'p', referenceImages: [], ...photoSize('4:5') })).toMatchObject({ aspect_ratio: '3:4' });
+    expect(imageInput(a, {}, { prompt: 'p', referenceImages: [], ...photoSize('1:1') })).toMatchObject({ aspect_ratio: '1:1' });
+  });
+});
+
 describe('Photo tool · routes (fake image engine)', () => {
   let a: Awaited<ReturnType<typeof makeApp>>, owner: Client, member: Client, model: any;
   beforeAll(async () => {
@@ -83,7 +114,8 @@ describe('Photo tool · routes (fake image engine)', () => {
     expect(e.prompt).toContain('Shot on a modern smartphone camera');
     expect(e.rig.map((w: any) => w.id)).toEqual(['deep_focus']);
     expect(e.look).toMatchObject({ id: 'teal_orange', kind: 'palette' });
-    expect(JSON.stringify({ ...e, prompt: undefined })).not.toMatch(PROVIDER_WORDS);
+    // The model's name is the picker's own label (it may name the model); nothing else says who makes it.
+    expect(JSON.stringify({ ...e, prompt: undefined, model: undefined })).not.toMatch(PROVIDER_WORDS);
     expect((await member.req('POST', '/v1/suite/photos/estimate', { modelId: model.id, count: 9 })).status).toBe(400);
     expect((await member.req('POST', '/v1/suite/photos/estimate', { modelId: 'nope' })).status).toBe(404);
   });
@@ -118,6 +150,21 @@ describe('Photo tool · routes (fake image engine)', () => {
     const w = (await member.req('POST', '/v1/suite/photos', { modelId: model.id, count: 1 })).body;
     expect(w.takes).toHaveLength(1);
     expect(w.job).toMatchObject({ state: 'done', takeIds: [w.takes[0].id] });
+  });
+
+  it('size and ratio: 9:16 by default, the shapes the model makes, the same price; Auto names the picker\'s model', async () => {
+    const base = (await member.req('POST', '/v1/suite/photos/estimate', { modelId: model.id, count: 2 })).body;
+    expect(base).toMatchObject({ aspect: '9:16', makes: '9:16', model: { auto: true } });
+    expect(base.aspects.map((a: any) => a.id)).toEqual([...PHOTO_ASPECTS]);
+    const picker = (await member.req('GET', '/v1/engines?purpose=photo')).body.models as { model: string; label: string }[];
+    if (base.model.id) expect(base.model.name).toBe(picker.find(m => m.model === base.model.id)!.label);
+    else expect(base.model.name).toBeNull();
+    const sq = (await member.req('POST', '/v1/suite/photos/estimate', { modelId: model.id, count: 2, aspect: '1:1' })).body;
+    expect(sq).toMatchObject({ aspect: '1:1', estimate: base.estimate, buttonLabel: base.buttonLabel });
+    expect((await member.req('POST', '/v1/suite/photos/estimate', { modelId: model.id, aspect: '7:3' })).status).toBe(400);
+    const made = await member.req('POST', '/v1/suite/photos', { modelId: model.id, count: 1, aspect: '4:5', prompt: 'A window seat.' });
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    expect(made.body.takes).toHaveLength(1);
   });
 
   it('a Photo preset is a photo template: its own camera and light, the template pipeline', async () => {
