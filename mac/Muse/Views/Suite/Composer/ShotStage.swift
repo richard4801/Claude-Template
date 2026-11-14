@@ -46,7 +46,14 @@ struct ShotStageTake: View {
                 }
             }
             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage ready") } }
-            .background { if SnapshotRunner.probing && list.count > 1 { ComposerBarFrame(key: "stage carousel \(at + 1)/\(list.count)").id("stage carousel \(at + 1)/\(list.count)") } } // a new key is a new probe (run 635)
+            .background {
+                // Review mode: the carousel's probe, keyed by its job too (run 640: the stage's previous Photo × 4 job had the same
+                // "1/4" key, and its probe going away removed the new one's). The check reads the prefix and the "/4" end.
+                if SnapshotRunner.probing && list.count > 1 {
+                    let key = "stage carousel \(job.id) \(at + 1)/\(list.count)"
+                    ComposerBarFrame(key: key).id(key)
+                }
+            }
             .onChange(of: job.id) { page = 0 }
         }
     }
