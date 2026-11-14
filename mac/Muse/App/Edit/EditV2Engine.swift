@@ -416,8 +416,9 @@ enum EditV2Engine {
                 }
                 defer { poll.cancel() }
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                    box.session.exportAsynchronously { cont.resume() }
+                    box.start { cont.resume() }
                 }
+                if box.cancelledEarly { throw CancellationError() }
                 switch box.session.status {
                 case .completed:
                     await progress(1)
@@ -427,7 +428,7 @@ enum EditV2Engine {
                     throw ApiError("edit_export_failed", "Couldn't export the edit" + (box.session.error.map { " (\($0.localizedDescription))" } ?? ""))
                 }
             } onCancel: {
-                box.session.cancelExport()
+                box.cancel()
             }
         } catch {
             try? FileManager.default.removeItem(at: url)

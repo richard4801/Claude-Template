@@ -131,8 +131,9 @@ enum VideoEditEngine {
             }
             defer { poll.cancel() }
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                box.session.exportAsynchronously { cont.resume() }
+                box.start { cont.resume() }
             }
+            if box.cancelledEarly { throw CancellationError() }
             switch box.session.status {
             case .completed:
                 await progress(1)
@@ -142,7 +143,7 @@ enum VideoEditEngine {
                 throw ApiError("edit_export_failed", "Couldn't export the edit" + (box.session.error.map { " (\($0.localizedDescription))" } ?? ""))
             }
         } onCancel: {
-            box.session.cancelExport()
+            box.cancel()
         }
     }
 
@@ -160,8 +161,30 @@ enum VideoEditEngine {
         return EditedVideo(file: file, thumbJPEG: jpeg, durationSec: i.duration, width: i.width, height: i.height, fps: i.fps)
     }
 
+    /// An export session that's safe to cancel at any moment. AVFoundation raises "Cannot call
+    /// exportAsynchronouslyWithCompletionHandler: more than once" when cancelExport() comes before the export starts
+    /// (run 635: Cancel pressed right after Save to Library crashed the app), so start and cancel take turns under a lock
+    /// and an export cancelled before it started never starts.
     final class ExportBox: @unchecked Sendable {
         let session: AVAssetExportSession
+        private let lock = NSLock()
+        private var started = false
+        private(set) var cancelledEarly = false
         init(_ s: AVAssetExportSession) { session = s }
+
+        /// Starts the export, or calls `done` at once if it was cancelled first.
+        func start(_ done: @escaping @Sendable () -> Void) {
+            lock.lock()
+            if cancelledEarly { lock.unlock(); done(); return }
+            started = true
+            session.exportAsynchronously(completionHandler: done)
+            lock.unlock()
+        }
+
+        func cancel() {
+            lock.lock()
+            defer { lock.unlock() }
+            if started { session.cancelExport() } else { cancelledEarly = true }
+        }
     }
 }
