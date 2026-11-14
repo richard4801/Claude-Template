@@ -221,6 +221,8 @@ struct BlendPanel: View {
         case .darken: return "Darken"
         case .lighten: return "Lighten"
         case .add: return "Add"
+        case .difference: return "Difference"
+        case .exclusion: return "Exclusion"
         }
     }
 
