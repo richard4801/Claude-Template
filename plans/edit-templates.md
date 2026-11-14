@@ -17,14 +17,13 @@ In `plans/design/edit-templates/`, rebuilt with `src/build.mjs` (the repo's font
   - "Save as template" (Punch-in) and Claude's "saved" chat card.
   - Loading, empty, older app ("Negative hit needs the next MUSE update") and offline.
 
-## Owner decisions
-Pending owner confirmation: these are the coordinator's proposed defaults, not answers yet.
-1. The new **Templates library replaces Edit's current Templates bin tab** (Mac `EditSuiteBin.swift:319`, caption styles today). Caption styles stay in it as one section, and as the "Captions" filter.
-2. **Templates that can't be applied yet show from day one**, as "Not ready" with their reference clip and the reason.
-   - This is a revision. The coordinator's default was "show finished-clip templates from day one".
-   - The pack's README says the finished clips **contain the Icon edit's own film pixels and are for reference only**, so they can't be dropped on another video.
-   - So those tiles play the reference, and Apply is replaced by "Ask Claude to make it for this cut". That button is on the Mac only, where the pack's scripts live.
-3. **Owner only for now**, like the rest of Edit with Claude.
+## Owner decisions (confirmed by the owner through the coordinator, 2026-11-14)
+1. **Confirmed:** the new Templates library replaces Edit's current Templates bin tab (Mac `EditSuiteBin.swift:319`, caption styles today). Caption styles stay in it as one section and as the "Captions" filter.
+2. **Confirmed:** finished-clip templates show from day one.
+   - How it is built: the pack README says the finished clips contain the Icon edit's own film footage and are for reference only.
+   - So on day one those tiles show as "Not ready": the reference clip plays, the reason is shown, and on the Mac there is "Ask Claude to make it for this cut". Claude adapts the pack's script to the person's shots.
+   - They are not dropped onto other videos as they are. This follows the owner's answer; flagged to the coordinator in case the owner expected one-click Apply for those.
+3. **Confirmed:** owner only for now, like the rest of Edit with Claude.
 
 ## 0. What the pack is
 The coordinator confirmed it arrived. I read it with `template_pack_read` and `gaps_list` through the owner MCP; there were no DB reads.
