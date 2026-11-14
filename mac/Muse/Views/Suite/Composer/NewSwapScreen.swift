@@ -483,8 +483,8 @@ struct NewSwapTrimmer: View {
             // The window: drag to slide it.
             Rectangle().fill(Color.clear)
                 .frame(width: max(0, b - a), height: 40)
-                .overlay(alignment: .top) { Rectangle().fill(t.roles.accent).frame(height: 2) }
-                .overlay(alignment: .bottom) { Rectangle().fill(t.roles.accent).frame(height: 2) }
+                // The frame's look: the part used outlined in ink; the accent is only the playhead.
+                .overlay(RoundedRectangle(cornerRadius: t.radii.chip).strokeBorder(t.roles.ink.opacity(0.85), lineWidth: 1.5))
                 .contentShape(Rectangle())
                 .offset(x: a)
                 .gesture(drag { start, dx in var n = start; n.slide(by: dx); return n }, including: .all)
@@ -509,8 +509,8 @@ struct NewSwapTrimmer: View {
     }
 
     private func handle(at x: CGFloat, change: @escaping (TrimWindow, Double) -> TrimWindow) -> some View {
-        RoundedRectangle(cornerRadius: 3).fill(t.roles.accent)
-            .frame(width: 6, height: 44)
+        RoundedRectangle(cornerRadius: 2).fill(t.roles.ink)
+            .frame(width: 4, height: 44)
             .frame(width: 20, height: 44) // a wider target than it looks
             .contentShape(Rectangle())
             .offset(x: x - 10, y: -2)
