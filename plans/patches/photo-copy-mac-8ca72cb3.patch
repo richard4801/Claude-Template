@@ -1,34 +1,41 @@
-From 6b5b34f9f4d537557757e0d16c571856a8fae8de Mon Sep 17 00:00:00 2001
+From 8ca72cb33716c66ce3903dc52bb2ba8bfe740836 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
-Date: Sat, 14 Nov 2026 22:06:14 +0000
-Subject: [PATCH] Photo: the empty stage reads "<n> photos, one run" (the
- approved frame)
+Date: Sat, 14 Nov 2026 22:07:12 +0000
+Subject: [PATCH] Photo: the empty stage's line as in the approved frames ("1
+ to 4 photos per run", then "<n> photos, one run" once filled)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01Py2rxoXQmfbR7CXwb939GC
 ---
- mac/Muse/Views/Suite/Composer/ComposerView.swift | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+ mac/Muse/Views/Suite/Composer/ComposerView.swift | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
 
 diff --git a/mac/Muse/Views/Suite/Composer/ComposerView.swift b/mac/Muse/Views/Suite/Composer/ComposerView.swift
-index 86672e4b..279125c5 100644
+index 86672e4b..a2c39b3b 100644
 --- a/mac/Muse/Views/Suite/Composer/ComposerView.swift
 +++ b/mac/Muse/Views/Suite/Composer/ComposerView.swift
-@@ -435,7 +435,7 @@ struct ComposerMediaPane: View {
+@@ -435,17 +435,22 @@ struct ComposerMediaPane: View {
      private var tag: String? {
          let d = store.suite.composer
          switch tool {
 -        case .photo: return "\(store.suite.photo.shownAspect) · \(PhotoEstimate.photos(store.suite.photo.count))"
-+        case .photo: return "\(PhotoEstimate.photos(store.suite.photo.count)), one run" // the approved frame's line
++        case .photo: return photoLine // the approved frames: "1 to 4 photos per run", then "<n> photos, one run" once filled
          case .swap, .recast: return nil
          case .extend: return "+\(d.duration) s"
          default: return "\(d.aspect) · \(d.duration) s"
-@@ -445,7 +445,7 @@ struct ComposerMediaPane: View {
+         }
+     }
+ 
++    /// The Photo tab's empty stage line (plans/design/photo/): nothing filled yet, then the run once the inputs are filled.
++    private var photoLine: String {
++        store.photoRequest == nil ? "1 to \(PhotoRequest.maxCount) photos per run" : "\(PhotoEstimate.photos(store.suite.photo.count)), one run"
++    }
++
      private var tagLabel: String? {
          let d = store.suite.composer
          switch tool {
 -        case .photo: return "Shape \(store.suite.photo.shownAspect), \(PhotoEstimate.photos(store.suite.photo.count))"
-+        case .photo: return "\(PhotoEstimate.photos(store.suite.photo.count)), one run, shape \(store.suite.photo.shownAspect)"
++        case .photo: return photoLine
          case .swap, .recast: return nil
          case .extend: return "Adds \(d.duration) seconds"
          default: return "Shape \(d.aspect), \(d.duration) seconds"
