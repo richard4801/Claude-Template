@@ -142,7 +142,7 @@ class SuiteComposerShellTest {
         assertEquals("Generate · 8 s · $0.16", ComposerPrice.button(e))
         assertEquals("about $0.16 · 8 s", ComposerPrice.line(e))
         val t = e.copy(test = true)
-        assertEquals("Free", ComposerPrice.short(t)); assertEquals("Generate · Free", ComposerPrice.button(t)); assertEquals("Test render · free", ComposerPrice.line(t))
+        assertEquals("Free", ComposerPrice.short(t)); assertEquals("Test render · Free", ComposerPrice.button(t)); assertEquals("Test render · free", ComposerPrice.line(t))
         // A cap problem shows the estimate's message and stops Generate.
         val cap = e.copy(ok = false, message = "Over the studio's $5.00 per-shot limit")
         assertEquals("Over the studio's $5.00 per-shot limit", ComposerPrice.blocker(null, cap, null))

@@ -140,6 +140,12 @@ fun EditSuiteScreen(takeId: String?, onBack: () -> Unit) {
     val sharedNow by c.shared.collectAsState()
     var shared by remember { mutableStateOf<studio.muse.app.data.SharedReference?>(null) }
     LaunchedEffect(sharedNow) { sharedNow?.let { shared = it; c.shared.value = null; open = null; learn = null; reference = null; recreating = true } }
+    // The Video suite's Recreate tab (suite redesign): Edit opens on Recreate, once.
+    LaunchedEffect(Unit) {
+        if (studio.muse.app.ui.screens.suite.SuiteNavFlags.openRecreate.value) {
+            studio.muse.app.ui.screens.suite.SuiteNavFlags.openRecreate.value = false; open = null; learn = null; reference = null; recreating = true
+        }
+    }
     // On the home (and back on it): the draft and Recent edits show where each edit now stands.
     LaunchedEffect(open) { if (open == null) recent = recentEdits(c, filesDir) }
     val openTake: (String) -> Unit = { t -> resume = recent.firstOrNull { it.takeId == t }; open = t }

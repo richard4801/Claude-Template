@@ -34,6 +34,17 @@ class DesignTokensTest {
         }
     }
 
+    /** The Video suite redesign (plans/design/suite-redesign): Camera Body's lifted dark from the approved dark frame. */
+    @Test fun suiteTokensMatchTheDarkFrameAndStayReadable() {
+        for (t in listOf('a', 'c', 'd')) assertEquals(DesignTokens.roles(t), DesignTokens.suite(t))
+        val r = DesignTokens.suite('b')
+        assertEquals(0x17191BL, r.canvas); assertEquals(0x212427L, r.raised); assertEquals(0x1D2022L, r.field)
+        for ((name, bg) in listOf("canvas" to r.canvas, "raised" to r.raised, "field" to r.field)) {
+            atLeast(4.5, r.ink, bg, "suite b ink on $name"); atLeast(4.5, r.ink2, bg, "suite b ink2 on $name")
+        }
+        atLeast(4.5, r.onAction, r.action, "suite b onAction")
+    }
+
     @Test fun bagIsDarkAndReadable() {
         val b = DesignTokens.bag
         assertTrue("bag is dark", DesignTokens.luminance(b.raised) < 0.02)

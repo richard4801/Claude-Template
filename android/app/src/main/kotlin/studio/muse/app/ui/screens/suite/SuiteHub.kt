@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.setValue
 import studio.muse.app.data.Job
 import studio.muse.app.data.SuiteRules
 import studio.muse.app.ui.LocalContainer
@@ -62,6 +63,9 @@ import studio.muse.app.ui.screens.creditLabel
 import studio.muse.app.ui.theme.Ic
 import studio.muse.app.ui.theme.muse
 import studio.muse.app.ui.theme.scale
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.radii
+import kotlin.math.roundToInt
 
 /** A mode of the Video suite: each opens the composer on its tool (Storyboard has its own screen). [soon] = no backend yet. */
 data class SuiteMode(val id: String, val title: String, val sub: String, val render: String, val route: String, val soon: Boolean = false)
@@ -76,12 +80,15 @@ val SUITE_MODES = listOf(
     SuiteMode("extend", "Extend & upscale", "Longer, sharper", "stock-03-sensor", Routes.suiteCompose("extend"), soon = true),
 )
 
-/** M1 · the Video suite hub: mode tiles, the camera stage, Edit, recent takes. Suite off: the owner's or member's state. */
+/**
+ * Suite home (redesign frame "Suite home", owner decision 1): the header and tabs, the quick prompt bar whose one button
+ * opens the Shot composer with the words carried over (it never generates), recent takes as portrait cards, and what is
+ * running. Suite off or not loaded: the owner's or member's state, as before.
+ */
 @Composable
 fun SuiteHubScreen() {
     val c = LocalContainer.current
     val nav = LocalNav.current
-    val m = muse
     val store = c.suite
     val cat by store.catalog.collectAsState()
     val err by store.catalogError.collectAsState()
@@ -89,20 +96,15 @@ fun SuiteHubScreen() {
     val prefs by c.prefs.collectAsState()
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { store.load() }
-    ScreenBox {
+    SuiteTokens {
+    val m = muse
+    ScreenBox(bg = m.roles.canvas) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-        // Tablets: three mode tiles a row (two would be 400 dp wide strips) and a readable column.
-        val cols = if (maxWidth >= 600.dp) 3 else 2
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 10.dp, bottom = 110.dp)
-            .widthIn(max = 960.dp).align(Alignment.TopCenter), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // The wordmark alone: a bell here did nothing when tapped (Home's bell is the one with the render status).
-            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) { Wordmark() }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                T("Video suite", m.scale.display, m.t.ink, Modifier.weight(1f), maxLines = 1)
-                Pill(creditLabel(st.wallet, st.balance))
-            }
+        val wide = maxWidth >= 720.dp
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = if (wide) 24.dp else 16.dp).padding(top = 12.dp, bottom = 110.dp)
+            .widthIn(max = 1120.dp).align(Alignment.TopCenter), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            SuiteHeader(current = null) { Pill(creditLabel(st.wallet, st.balance)) }
             val catalog = cat
-            if (catalog?.test == true) Pill("Test renders · free", "good")
             if (catalog != null && !catalog.enabled) {
                 SuiteOff(store.owner || prefs.owner)
             } else {
@@ -113,29 +115,140 @@ fun SuiteHubScreen() {
                         T("Try again", m.type.tiny.copy(fontWeight = FontWeight.Bold), m.link)
                     }
                 }
-                SUITE_MODES.chunked(cols).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        // "Coming soon" follows the catalog's `tools` (an older catalog: the built-in list).
-                        row.forEach { mode -> ModeTile(mode.copy(soon = !(catalog?.toolAvailable(if (mode.id == "ugc") "ugc_ad" else mode.id, !mode.soon) ?: !mode.soon)), Modifier.weight(1f)) { nav.go(mode.route) } }
-                        repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
+                val running = st.jobs.filter { it.state == "running" || it.state == "queued" }.take(5)
+                if (wide) Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.Top) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(28.dp)) {
+                        QuickBar(wide = true) { nav.go(it) }
+                        RecentTakes(st.jobs, st.takes, wide = true, open = { j -> nav.go(Routes.suiteTake(j)) }, library = { nav.tab(Routes.GALLERY) })
                     }
-                }
-                LinkCard("cube", "Camera stage", "Direct the camera in Blender · Directed mode") { nav.go(Routes.CAMERA_STAGE) }
-                LinkCard("scissors", "Edit", "Cut, colour and captions on your takes") { nav.go(Routes.EDIT) }
-                val recent = st.jobs.filter { it.request.engine == SuiteRules.ENGINE }.take(8)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    SLbl("Recent takes", Modifier.weight(1f))
-                    Box(Modifier.heightIn(min = 48.dp).widthIn(min = 48.dp).press { nav.tab(Routes.GALLERY) }.semantics { contentDescription = "All takes"; role = Role.Button },
-                        contentAlignment = Alignment.CenterEnd) { T("All →", m.type.tiny, m.t.muted) }
-                }
-                if (recent.isEmpty()) Tiny("Your shots show up here while they render and when they're ready.")
-                else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    recent.forEach { j -> RecentTile(j, st.takes.filter { it.jobId == j.id }) { nav.go(Routes.suiteTake(j.id)) } }
+                    RunningPanel(running, Modifier.width(294.dp)) { nav.go(Routes.QUEUE) }
+                } else {
+                    QuickBar(wide = false) { nav.go(it) }
+                    RecentTakes(st.jobs, st.takes, wide = false, open = { j -> nav.go(Routes.suiteTake(j)) }, library = { nav.tab(Routes.GALLERY) })
+                    RunningPanel(running, Modifier.fillMaxWidth()) { nav.go(Routes.QUEUE) }
                 }
             }
         }
         }
         TabBar(Routes.SUITE)
+    }
+    }
+}
+
+/**
+ * The quick prompt: plain words here (the composer adds @ and #), the length and shape it will use, and "Open in
+ * composer": the Shot composer with these words added to its prompt. No price because nothing here spends.
+ */
+@Composable
+private fun QuickBar(wide: Boolean, go: (String) -> Unit) {
+    val m = muse
+    val c = LocalContainer.current
+    val d by c.suite.composer.collectAsState()
+    var words by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().suitePanel().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 44.dp)) {
+            if (words.isEmpty()) T("Describe a shot. Add @ and # in the composer.", m.scale.body, m.roles.ink2, maxLines = 2)
+            androidx.compose.foundation.text.BasicTextField(words, { words = it }, Modifier.fillMaxWidth().semantics { contentDescription = "Describe a shot" },
+                textStyle = m.scale.body.copy(color = m.roles.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(m.roles.accent))
+        }
+        val open = {
+            val text = words.trim()
+            if (text.isNotEmpty()) c.suite.composer.value = c.suite.composer.value.let { cur ->
+                val next = (cur.tokens.parts.maxOfOrNull { it.key } ?: 0) + 1
+                val lead = if (cur.tokens.isEmpty) text else " $text"
+                cur.copy(tokens = studio.muse.app.ui.screens.suite.composer.PromptTokens(cur.tokens.parts + studio.muse.app.ui.screens.suite.composer.PromptPart.Text(lead, next)))
+            }
+            words = ""
+            go(Routes.SUITE_SHOT)
+        }
+        val button = @Composable { mod: Modifier ->
+            val shape = RoundedCornerShape(m.radii.control)
+            Box(mod.heightIn(min = 48.dp).clip(shape).background(m.roles.action).press(onClick = open).padding(horizontal = 16.dp)
+                .semantics { role = Role.Button; contentDescription = "Open in composer. Nothing is generated until you press Generate there." },
+                contentAlignment = Alignment.Center) {
+                T("Open in composer", m.scale.label.copy(fontWeight = FontWeight.SemiBold), m.roles.onAction, maxLines = 1)
+            }
+        }
+        // Phones: the chips, then the button across the bar (it never truncates); wide: one row.
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SuitePill("video-camera", "Shot")
+            SuitePill("clock", "${d.duration} s")
+            SuitePill("device-mobile", d.aspect)
+            if (wide) { Spacer(Modifier.weight(1f)); button(Modifier) }
+        }
+        if (!wide) button(Modifier.fillMaxWidth())
+    }
+}
+
+/** The newest finished Suite takes, one portrait card per job ("Kept" on kept takes), and Open Library. */
+@Composable
+private fun RecentTakes(jobs: List<Job>, takes: List<studio.muse.app.data.Take>, wide: Boolean, open: (String) -> Unit, library: () -> Unit) {
+    val m = muse
+    val done = jobs.filter { it.state == "done" }.mapNotNull { j -> takes.firstOrNull { it.jobId == j.id }?.let { j to it } }.take(10)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            T("Recent takes", m.scale.title, m.roles.ink, Modifier.weight(1f), maxLines = 1)
+            Row(Modifier.heightIn(min = 48.dp).press(onClick = library).semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Open Library" },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SIc("squares-four", 16.dp, m.roles.ink2); T("Open Library", m.scale.label, m.roles.ink2, maxLines = 1)
+            }
+        }
+        if (done.isEmpty()) T("Your takes show up here as they finish. Describe a shot above to start.", m.scale.body, m.roles.ink2)
+        else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            done.forEach { (j, t) -> TakeCard(j, t, if (wide) 110.dp else 96.dp) { open(j.id) } }
+        }
+    }
+}
+
+@Composable
+private fun TakeCard(j: Job, take: studio.muse.app.data.Take, w: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
+    val m = muse
+    val kind = take.durationSec?.takeIf { it > 0 }?.let { "Video, ${it.roundToInt()} s" } ?: "Photo"
+    Column(Modifier.width(w).press(onClick = onClick).semantics(mergeDescendants = true) { contentDescription = "${j.title}, $kind${if (take.status == "final") ", kept" else ""}" },
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(Modifier.width(w).height(w * 16 / 9).clip(RoundedCornerShape(m.radii.container))) {
+            RefImage(take.thumb ?: j.thumb, Modifier.fillMaxSize(), 20)
+            if (take.status == "final") Box(Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(m.radii.chip)).background(m.roles.raised)
+                .padding(horizontal = 7.dp, vertical = 2.dp)) { T("Kept", m.scale.micro, m.roles.ink) }
+        }
+        T(j.title, m.scale.label, m.roles.ink, maxLines = 1)
+        T(kind, m.scale.caption, m.roles.ink2, maxLines = 1)
+    }
+}
+
+/** What is rendering or waiting: its picture, title, model, progress and time; Queue opens the whole list. */
+@Composable
+private fun RunningPanel(running: List<Job>, modifier: Modifier, queue: () -> Unit) {
+    val m = muse
+    Column(modifier.suitePanel().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            T("Running", m.scale.title, m.roles.ink, Modifier.weight(1f), maxLines = 1)
+            Row(Modifier.heightIn(min = 48.dp).press(onClick = queue).semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Open the queue" },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SIc("list-bullets", 16.dp, m.roles.ink2); T("Queue", m.scale.label, m.roles.ink2, maxLines = 1)
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(m.roles.hairline))
+        if (running.isEmpty()) T("Nothing is rendering. Takes you start show here with their progress.", m.scale.caption, m.roles.ink2)
+        running.forEach { j ->
+            Row(Modifier.fillMaxWidth().press(onClick = queue), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(30.dp, 52.dp).clip(RoundedCornerShape(m.radii.chip))) { RefImage(j.thumb, Modifier.fillMaxSize(), 20) }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    T(j.title, m.scale.label, m.roles.ink, maxLines = 1)
+                    T(j.serverEngineLabel ?: j.modelName, m.scale.caption, m.roles.ink2, maxLines = 1)
+                    val p = if (j.state == "running") (j.progress / 100).toFloat().coerceIn(0f, 1f) else 0f
+                    Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(m.roles.field)) {
+                        Box(Modifier.fillMaxWidth(p).height(3.dp).background(m.roles.ink))
+                    }
+                    val line = when {
+                        j.state != "running" -> if ((j.queuePosition ?: 2) <= 1) "Starts next" else "Waiting for a slot"
+                        (j.etaSeconds ?: j.secondsLeft) > 0 -> "About ${maxOf(1, ((j.etaSeconds ?: j.secondsLeft) / 60).roundToInt())} min left"
+                        else -> "Rendering"
+                    }
+                    T(line, m.scale.caption, m.roles.ink2, maxLines = 1)
+                }
+            }
+        }
     }
 }
 

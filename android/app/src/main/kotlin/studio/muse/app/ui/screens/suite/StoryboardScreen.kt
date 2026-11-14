@@ -1,5 +1,6 @@
 package studio.muse.app.ui.screens.suite
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -91,6 +92,10 @@ fun SuiteStoryboardScreen() {
                     val s = StoryShot("s" + System.nanoTime(), shot.title.ifBlank { scene.take(32).ifBlank { "New shot" } }, scene, shot.tokens.moves.firstOrNull()?.id ?: "static", shot.duration)
                     store.board.update { b -> (b ?: Storyboard("Untitled storyboard", listOfNotNull(shot.characterId))).let { it.copy(shots = it.shots + s) } }
                 }))
+            }
+            // The suite redesign: the Video suite's tabs (Storyboard selected).
+            androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
+                SuiteTabs(SuiteTab.STORYBOARD) { nav.go(it) }
             }
             if (board == null || board.shots.isEmpty()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

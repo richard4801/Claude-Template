@@ -87,7 +87,7 @@ data class MuseType(
 )
 
 @Immutable
-data class Muse(val id: ThemeId, val t: Tokens, val type: MuseType) {
+data class Muse(val id: ThemeId, val t: Tokens, val type: MuseType, /** The Video suite's own roles (SuiteTokens); null elsewhere. */ val rolesOverride: MuseRoles? = null) {
     val isA get() = id == ThemeId.A
     val isB get() = id == ThemeId.B
     val isC get() = id == ThemeId.C

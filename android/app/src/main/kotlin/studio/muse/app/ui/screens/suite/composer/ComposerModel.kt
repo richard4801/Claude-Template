@@ -488,7 +488,7 @@ object ComposerPrice {
     /** A full Generate button: "Generate · —", "Generate · Pricing…" while estimating, "Generate · Free", else the estimate's `buttonLabel`. */
     fun button(e: SuiteEstimate?, pricing: Boolean = false): String = when {
         e == null -> if (pricing) "Generate · Pricing…" else "Generate · —"
-        e.test -> "Generate · Free"
+        e.test -> "Test render · Free" // owner decision 5 (suite redesign): a free test render says so
         else -> e.buttonLabel.ifBlank { "Generate · ${Pricing.money(e.estimate)}" }
     }
 

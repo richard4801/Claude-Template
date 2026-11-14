@@ -59,6 +59,8 @@ import studio.muse.app.ui.components.TopBar
 import studio.muse.app.ui.components.press
 import studio.muse.app.ui.screens.BlurredStageArt
 import studio.muse.app.ui.screens.ScreenBox
+import studio.muse.app.ui.theme.roles
+import studio.muse.app.ui.theme.radii
 import studio.muse.app.ui.screens.StagePhase
 import studio.muse.app.ui.screens.StageVideo
 import studio.muse.app.ui.theme.Ic
@@ -107,8 +109,25 @@ fun SuiteResultScreen(jobId: String) {
                     if (store.owner) MenuItem("quality", "Models and prices (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                 ))
             }
-            // Bottom: room for the action row (92 dp up, ~68 dp tall) so the takes strip is never under it.
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 172.dp),
+                // Owner decision 2 (suite redesign): Keep · Vary · Edit · Extend · Upscale · Share sit above the video, Keep the one
+                // highlighted action (outlined; Generate stays the one filled button).
+            val canExtend = take != null && TakeActions.canExtend(take, c.repo.demo)
+            val canUpscale = take != null && UpscaleOffer.canUpscale(take, c.repo.demo)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Action("check", if (take?.final == true) "Kept" else "Keep", take != null, highlight = true) { take?.let { t -> scope.launch { c.repo.setTakeStatus(t.id, if (t.final) "test" else "final") } } }
+                // Vary: this take's settings back in the composer; nothing renders until Generate (which shows the price).
+                Action("shuffle", "Vary", take != null) { take?.let { t -> store.vary(t)?.let { tool -> nav.go(Routes.suiteCompose(tool.id)) } } }
+                Action("scissors", "Edit", take != null) { take?.let { nav.go(Routes.editTake(it.id)) } }
+                Action("extend", "Extend", canExtend) {
+                    take?.let { t ->
+                        if (store.catalog.value?.toolAvailable("extend", true) == false) c.repo.toast("Extend is coming soon")
+                        else if (store.startExtend(t)) nav.go(Routes.suiteCompose("extend"))
+                    }
+                }
+                Action("upscale", "Upscale", canUpscale) { take?.let { store.openUpscale(it.id) } }
+                Action("share", "Share", take != null) { take?.let { nav.go(Routes.post(it.id)) } }
+            }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 110.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (job == null) { Tiny("This shot isn't here any more."); return@Column }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -144,24 +163,6 @@ fun SuiteResultScreen(jobId: String) {
                 }
             }
         }
-        // Keep · Retake · Edit · Extend · Upscale · Share above the tab bar.
-        val canExtend = take != null && TakeActions.canExtend(take, c.repo.demo)
-        val canUpscale = take != null && UpscaleOffer.canUpscale(take, c.repo.demo)
-        Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 92.dp).fillMaxWidth().background(m.t.bg).drawBehind {
-            drawLine(m.t.line, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }.padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Action("heart", if (take?.final == true) "Kept" else "Keep", take != null) { take?.let { t -> scope.launch { c.repo.setTakeStatus(t.id, if (t.final) "test" else "final") } } }
-            // Vary: this take's settings back in the composer; nothing renders until Generate (which shows the price).
-            Action("shuffle", "Vary", take != null) { take?.let { t -> store.vary(t)?.let { tool -> nav.go(Routes.suiteCompose(tool.id)) } } }
-            Action("scissors", "Edit", take != null) { take?.let { nav.go(Routes.editTake(it.id)) } }
-            Action("extend", "Extend", canExtend) {
-                take?.let { t ->
-                    if (store.catalog.value?.toolAvailable("extend", true) == false) c.repo.toast("Extend is coming soon")
-                    else if (store.startExtend(t)) nav.go(Routes.suiteCompose("extend"))
-                }
-            }
-            Action("upscale", "Upscale", canUpscale) { take?.let { store.openUpscale(it.id) } }
-            Action("share", "Share", take != null) { take?.let { nav.go(Routes.post(it.id)) } }
-        }
         TabBar(Routes.SUITE)
         upscaleFor?.let { id -> UpscaleSheet(id, androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 600) { j -> nav.go(Routes.suiteTake(j.id)) } }
         if (collecting) take?.let { t -> CollectionsSheet(t.id) { collecting = false } }
@@ -185,11 +186,14 @@ object TakeActions {
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.RowScope.Action(icon: String, label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun androidx.compose.foundation.layout.RowScope.Action(icon: String, label: String, enabled: Boolean, highlight: Boolean = false, onClick: () -> Unit) {
     val m = muse
     // Six actions (Keep, Retake, Edit, Extend, Upscale, Share): an equal share on a phone, at most 72 dp each on a tablet
     // (WS4 audit), spread by the row's SpaceBetween.
-    Column(Modifier.weight(1f).widthIn(max = 72.dp).heightIn(min = 48.dp).press(enabled = enabled, onClick = onClick).semantics(mergeDescendants = true) { contentDescription = label },
+    val shape = RoundedCornerShape(m.radii.control)
+    Column(Modifier.weight(1f).widthIn(max = 72.dp).heightIn(min = 48.dp)
+        .let { if (highlight) it.clip(shape).background(m.roles.raised).border(1.dp, m.roles.ink.copy(alpha = .35f), shape) else it }
+        .press(enabled = enabled, onClick = onClick).semantics(mergeDescendants = true) { contentDescription = label },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
         SIc(icon, 20.dp, if (enabled) m.t.ink else m.t.muted.copy(alpha = .5f))
         T(label, m.scale.micro, if (enabled) m.t.muted else m.t.muted.copy(alpha = .5f))

@@ -1,5 +1,7 @@
 package studio.muse.app.ui.screens.suite.composer
 
+import studio.muse.app.ui.screens.suite.suiteStage
+import studio.muse.app.ui.screens.suite.suitePanel
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -369,12 +371,13 @@ fun SuiteComposerScreen(toolId: String? = null) {
     LaunchedEffect(d, req, screenInputs, screenSettings, assist?.id) {
         if (assist != null) { delay(600); store.pushComposerToAssist { at -> studio.muse.app.ui.screens.suite.SuiteScreen.json(d.tool.id, req, screenInputs, at, screenSettings) } }
     }
+    studio.muse.app.ui.screens.suite.SuiteTokens {
     ScreenBox {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = ComposerLayout.wide(maxWidth.value.toInt())
             Column(Modifier.fillMaxSize()) {
-                TopBar(if (showFeed) "Takes" else if (wide) "" else d.tool.title, onBack = { if (showFeed) showFeed = false else nav.back() },
-                    onTitle = if (wide || showFeed) null else ({ open(ComposerSheet(SheetKind.TOOLS)) })) {
+                // The suite redesign: the tabs are the mode switch (phones: under the top bar; wide: WideComposer's header).
+                TopBar(if (showFeed) "Takes" else "", onBack = { if (showFeed) showFeed = false else nav.back() }, onTitle = null) {
                     Box(Modifier.heightIn(min = 48.dp).press { showFeed = !showFeed }.padding(horizontal = 12.dp).semantics { role = Role.Button },
                         contentAlignment = Alignment.Center) { T(if (showFeed) "Composer" else "Takes", muse.scale.label, muse.t.ink, maxLines = 1) }
                     if (canClaude && !showFeed && d.tool in ComposerDraft.PROMPT_TOOLS) Box(Modifier.heightIn(min = 48.dp)
@@ -388,6 +391,9 @@ fun SuiteComposerScreen(toolId: String? = null) {
                         MenuItem("grid", "Storyboard") { nav.go(Routes.SUITE_STORYBOARD) },
                         if (owner) MenuItem("quality", "Models and prices (owner)") { nav.go(Routes.SUITE_ENGINES) } else null,
                     ))
+                }
+                if (!wide && !showFeed) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
+                    studio.muse.app.ui.screens.suite.SuiteTabs(studio.muse.app.ui.screens.suite.SuiteTab.ofTool(d.tool.id)) { nav.go(it) }
                 }
                 if (showFeed) SuiteFeedView(photo = d.tool == ComposerTool.PHOTO, wide = wide, onOpen = { j -> nav.go(Routes.suiteTake(j)) }, modifier = Modifier.weight(1f))
                 else if (wide) WideComposer(ui, job, recent, st.takes) { j -> nav.go(Routes.suiteTake(j)) }
@@ -454,6 +460,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
             }
         }
     }
+}
 }
 
 /** Everything the composer's layouts draw. */
@@ -663,8 +670,8 @@ private fun SettingRows(ui: ComposerUi) {
                 else -> sum.value
             }
             val (icon, name) = when (chip) {
-                ComposerChip.CAMERA -> "film" to "Camera"; ComposerChip.LIGHTING -> "light" to "Light"; ComposerChip.LOOK -> "palette" to "Look"
-                ComposerChip.STYLE -> "sliders" to "Style"; ComposerChip.REFERENCES -> "image" to "References"
+                ComposerChip.CAMERA -> "camera" to "Camera"; ComposerChip.LIGHTING -> "sun" to "Light"; ComposerChip.LOOK -> "palette" to "Look"
+                ComposerChip.STYLE -> "sliders-horizontal" to "Style"; ComposerChip.REFERENCES -> "images" to "References"
             }
             SettingRow(icon, name, value, auto = sum.auto && !directed) {
                 ui.open(ComposerSheet(when (chip) { ComposerChip.REFERENCES -> SheetKind.REFERENCES; ComposerChip.STYLE -> SheetKind.STYLE; ComposerChip.CAMERA -> SheetKind.CAMERA; ComposerChip.LOOK -> SheetKind.LOOK; ComposerChip.LIGHTING -> SheetKind.LIGHTING }))
@@ -697,9 +704,11 @@ private fun RigsRow(ui: ComposerUi) {
 @Composable
 private fun SettingRow(icon: String, name: String, value: String, auto: Boolean, onClick: () -> Unit) {
     val m = muse
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).press(onClick = onClick).semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "$name: $value" },
+    // The redesign's row: icon, name, the value (quiet while Auto) and a caret, a hairline under it.
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).drawBehind { drawLine(m.roles.hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
+        .press(onClick = onClick).semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "$name: $value" },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        SIc(icon, 20.dp, m.t.muted)
+        SIc(icon, 20.dp, m.roles.ink)
         T(name, m.scale.label, m.t.muted, maxLines = 1)
         T(value, m.scale.label.copy(fontWeight = if (auto) FontWeight.Normal else FontWeight.Medium), if (auto) m.t.muted else m.t.ink, Modifier.weight(1f), maxLines = 1, align = TextAlign.End)
         SIc("chev", 16.dp, m.t.muted)
@@ -727,6 +736,7 @@ private fun PhoneBar(ui: ComposerUi) {
             }
         }
         Spacer(Modifier.width(4.dp))
+        studio.muse.app.ui.screens.suite.SuiteTestRenderSwitch(free = ui.est?.test == true, compact = true)
         GenerateButton(ui, Modifier.weight(1f))
     }
 }
@@ -1088,12 +1098,7 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
     val m = muse
     var presets by remember { mutableStateOf(ui.empty) }
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp).padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.TOOLS)) }.semantics { contentDescription = "${ui.d.tool.title}, change mode"; role = Role.Button },
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                T(ui.d.tool.title, m.scale.title, m.t.ink, maxLines = 1); SIc("chevd", 16.dp, m.t.muted)
-            }
-            Spacer(Modifier.weight(1f))
+        studio.muse.app.ui.screens.suite.SuiteHeader(studio.muse.app.ui.screens.suite.SuiteTab.ofTool(ui.d.tool.id)) {
             if (ui.photo == null) Box(Modifier.heightIn(min = 48.dp).press { presets = !presets }.semantics { role = Role.Button }.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
                 T(if (presets) "Hide presets" else "Presets", m.scale.label, m.t.muted, maxLines = 1)
             }
@@ -1101,13 +1106,17 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
         if (ui.catalogNote != null) CatalogNote(ui)
         else if (ui.photo != null) PhotoPresets(wide = true) // Photo tool (workstream 3)
         else if (presets || ui.d.collapsed) PresetRow(ui, tileW = 150.dp, tileH = 96.dp)
-        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            MediaHero(ui, job, takes, openTake, {}, Modifier.weight(1f).fillMaxHeight())
-            Column(Modifier.width(360.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            // The redesign: the stage on the field tone, the Rig panel raised with a hairline edge.
+            Box(Modifier.weight(1f).fillMaxHeight().then(Modifier.suiteStage()).padding(16.dp)) { MediaHero(ui, job, takes, openTake, {}, Modifier.fillMaxSize()) }
+            Column(Modifier.width(320.dp).fillMaxHeight().then(Modifier.suitePanel()).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (ui.d.collapsed) { CollapsedBody(ui, wide = false); return@Column }
-                T("Setup", m.scale.heading, m.t.ink)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    T("Rig", m.scale.title, m.roles.ink, maxLines = 1)
+                    T("How the shot is filmed. Applies to every take.", m.scale.caption, m.roles.ink2)
+                }
                 SettingRows(ui)
-                T("Inputs", m.scale.heading, m.t.ink, Modifier.padding(top = 8.dp))
+                T("Inputs", m.scale.caption, m.roles.ink2, Modifier.padding(top = 8.dp))
                 if (ui.photo != null) PhotoSlotRow(ui, wide = false) else SlotThumbs(ui) // Photo tool (workstream 3)
                 if (ui.d.tool == ComposerTool.SWAP) SwapPromptToggle(ui)
                 if (ui.d.tool == ComposerTool.EXTEND) { ExtendDirection(ui); ExtendLength(ui, Modifier.fillMaxWidth()) }
@@ -1115,11 +1124,11 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
                 ui.rigRow(true)
             }
         }
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(m.radii.control)).background(m.roles.raised).padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (ui.showPrompt) Prompt(ui, Modifier.fillMaxWidth(), maxHeight = 96.dp)
-            WideBar(ui)
+        // The prompt in its own raised box across the page; the bar under it on the canvas.
+        if (ui.showPrompt) Box(Modifier.fillMaxWidth().then(Modifier.suitePanel()).padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)) {
+            Prompt(ui, Modifier.fillMaxWidth(), maxHeight = 96.dp)
         }
+        WideBar(ui)
     }
 }
 
@@ -1157,6 +1166,7 @@ private fun WideBar(ui: ComposerUi) {
             }
         }
         ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.warn, Modifier.widthIn(max = 200.dp), maxLines = 2) }
+        studio.muse.app.ui.screens.suite.SuiteTestRenderSwitch(free = ui.est?.test == true)
         WideGenerate(ui)
     }
 }
@@ -1249,3 +1259,4 @@ private fun Modifier.barScrollFade(scroll: androidx.compose.foundation.ScrollSta
                 androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Transparent, Color.Black), startX = 0f, endX = w),
                 size = androidx.compose.ui.geometry.Size(w, size.height), blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
         }
+

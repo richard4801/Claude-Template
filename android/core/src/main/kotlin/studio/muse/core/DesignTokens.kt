@@ -37,6 +37,18 @@ object DesignTokens {
     }
 
     /**
+     * The Video suite redesign (owner-approved 2026-11-14, plans/design/suite-redesign/README.md): light themes keep their
+     * own roles; Camera Body is lifted one step, measured off the approved "Swap filled dark" frame (page = its raised tone,
+     * the stage one step up, panels its field tone; amber accent and action unchanged). Only the Suite's screens use it.
+     * Same values as the Mac's DesignTokens+Suite.swift.
+     */
+    fun suite(theme: Char): Roles {
+        val r = roles(theme)
+        if (theme.lowercaseChar() != 'b') return r
+        return r.copy(canvas = 0x17191B, raised = 0x212427, field = 0x1D2022, hairline = 0x2C3034)
+    }
+
+    /**
      * The camera bag (pickers, rig drums) is dark in every theme (§9, design/direction/render.py BAG). Accent and action
      * use Camera Body's amber, the one accent that reads on this dark.
      */

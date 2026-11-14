@@ -46,6 +46,9 @@ data class MuseRoles(
 
         /** The camera bag (pickers, rig drums) is dark in every theme (§9). */
         val bag: MuseRoles = from(DesignTokens.bag)
+
+        /** The Video suite redesign's roles (DesignTokens.suite): Camera Body's lifted dark, the light themes unchanged. */
+        fun suite(id: ThemeId): MuseRoles = if (id == ThemeId.B) from(DesignTokens.suite('b')) else of(id)
     }
 }
 
@@ -111,7 +114,7 @@ data class MuseRadii(val container: Dp, val control: Dp, val chip: Dp) {
     }
 }
 
-val Muse.roles: MuseRoles get() = MuseRoles.of(id)
+val Muse.roles: MuseRoles get() = rolesOverride ?: MuseRoles.of(id)
 val Muse.scale: MuseTypeScale get() = MuseTypeScale.of(id)
 val Muse.radii: MuseRadii get() = MuseRadii.of(id)
 
