@@ -46,7 +46,7 @@ struct ShotStageTake: View {
                 }
             }
             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "stage ready") } }
-            .background { if SnapshotRunner.probing && list.count > 1 { ComposerBarFrame(key: "stage carousel \(at + 1)/\(list.count)") } }
+            .background { if SnapshotRunner.probing && list.count > 1 { ComposerBarFrame(key: "stage carousel \(at + 1)/\(list.count)").id("stage carousel \(at + 1)/\(list.count)") } } // a new key is a new probe (run 635)
             .onChange(of: job.id) { page = 0 }
         }
     }

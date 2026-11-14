@@ -255,10 +255,10 @@ struct SuiteRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Space.s3) {
+            HStack(spacing: 10) {
                 Ph(icon, 15).frame(width: 18, height: 18).foregroundStyle(t.roles.ink)
                 Text(name).font(t.scale.label.font).foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
-                    .frame(minWidth: 84, alignment: .leading)
+                    .frame(minWidth: 70, alignment: .leading)
                 HStack(spacing: Space.s2) {
                     if let thumb {
                         MuseImage(ref: thumb).frame(width: 22, height: 22).clipShape(RoundedRectangle(cornerRadius: t.radii.chip))
@@ -266,8 +266,8 @@ struct SuiteRow: View {
                         RoundedRectangle(cornerRadius: t.radii.chip).strokeBorder(t.roles.hairline, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
                             .frame(width: 22, height: 22)
                     }
-                    Text(value).font(t.body(13.5, quiet ? .regular : .medium)).foregroundStyle(quiet ? t.roles.ink2 : t.roles.ink)
-                        .lineLimit(1).truncationMode(.tail)
+                    Text(value).font(t.body(13, quiet ? .regular : .medium)).foregroundStyle(quiet ? t.roles.ink2 : t.roles.ink)
+                        .lineLimit(1).minimumScaleFactor(0.85).truncationMode(.tail)
                 }
                 Spacer(minLength: Space.s2)
                 Ph("caret-down", 12).foregroundStyle(t.roles.ink2)
@@ -312,9 +312,11 @@ struct SuitePillLabel: View {
 struct SuiteTestRenderSwitch: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
+    /// This render is a free test render (its estimate says so): only then is the switch shown, beside "Test render · Free".
+    var free: Bool
 
     var body: some View {
-        if store.suite.catalog?.test == true {
+        if free && store.suite.catalog?.test == true {
             HStack(spacing: Space.s2) {
                 Text("Test render").font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
                 Toggle("Test render", isOn: .constant(true)).toggleStyle(.switch).labelsHidden().controlSize(.mini)

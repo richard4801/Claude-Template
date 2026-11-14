@@ -129,7 +129,8 @@ struct SuiteHubView: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 GeometryReader { g in
-                    let n = max(2, min(list.count, Int((g.size.width + Space.s3) / (110 + Space.s3))))
+                    // Always a row of portrait cards (five across at the frame's width), however few takes there are.
+                    let n = max(2, min(5, Int((g.size.width + Space.s3) / (110 + Space.s3))))
                     let w = (g.size.width - CGFloat(n - 1) * Space.s3) / CGFloat(n)
                     HStack(alignment: .top, spacing: Space.s3) {
                         ForEach(list.prefix(n), id: \.0.id) { item in tile(item.0, item.1, width: w) }
@@ -141,7 +142,7 @@ struct SuiteHubView: View {
     }
 
     private func tile(_ j: Job, _ take: Take, width: CGFloat) -> some View {
-        let h = min(200, width * 16 / 9)
+        let h = min(200, width * 16 / 9).rounded()
         return Button { store.openTake(take.id) } label: {
             VStack(alignment: .leading, spacing: 6) {
                 MuseImage(ref: take.thumb)

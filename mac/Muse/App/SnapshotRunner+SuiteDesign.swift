@@ -34,6 +34,7 @@ extension SnapshotRunner {
                 store.suite.remix.backgroundOn = true; store.suite.remix.backgroundMode = .describe
                 store.suite.remix.backgroundWords = "A rooftop at golden hour, city lights behind her"
                 store.suite.remix.outfitOn = true
+                store.suite.remix.outfitId = store.outfits(for: store.character(SampleData.demo)).first?.id // the frame's "Hoodie": one of her outfits
                 store.suite.remix.lookOn = false
                 Task { await store.useSampleClip(bad: false, quiet: true) } }),
         ]
@@ -52,6 +53,9 @@ extension SnapshotRunner {
                 state.generateLabel = nil
                 show()
                 try? await Task.sleep(for: .seconds(2))
+                // Only a Generate on screen now answers the probe tick (run 635: a frame left by the screen before read as drawn).
+                state.generateFrame = nil
+                state.generateLabel = nil
                 state.probeTick += 1
                 try? await Task.sleep(for: .seconds(0.3))
                 w.contentView?.layoutSubtreeIfNeeded()

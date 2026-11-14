@@ -379,7 +379,7 @@ struct NewSwapBar: View {
                 .overlay(RoundedRectangle(cornerRadius: t.radii.control).strokeBorder(t.roles.hairline, lineWidth: 1))
                 .fixedSize()
                 .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill model") } }
-            SuiteTestRenderSwitch()
+            SuiteTestRenderSwitch(free: price == .free)
             GenerateButton(label: label, accessibility: label, enabled: store.clip != nil && canGenerate, busy: store.suite.generating, height: 40) {
                 store.generateRemix()
             }
