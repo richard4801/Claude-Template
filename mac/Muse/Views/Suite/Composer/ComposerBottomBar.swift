@@ -41,7 +41,7 @@ struct ComposerBottomBar: View {
                 modelPill(compact: false)
                 pricingLink(compact: true)
                 queueButton(compact: true)
-                SuiteTestRenderSwitch(free: price == .free)
+                SuiteTestRenderSwitch(free: price == .free, compact: true)
                 generateButton(short: false)
             }
             HStack(spacing: 6) {
@@ -50,7 +50,6 @@ struct ComposerBottomBar: View {
                 modelPill(compact: true)
                 pricingLink(compact: true)
                 queueButton(compact: true)
-                SuiteTestRenderSwitch(free: price == .free)
                 generateButton(short: true)
             }
             HStack(spacing: 6) {
@@ -58,7 +57,6 @@ struct ComposerBottomBar: View {
                 modelPill(compact: true)
                 pricingLink(compact: true)
                 queueButton(compact: true)
-                SuiteTestRenderSwitch(free: price == .free)
                 generateButton(short: true)
             }
         }

@@ -314,13 +314,19 @@ struct SuiteTestRenderSwitch: View {
     @Environment(\.theme) private var t
     /// This render is a free test render (its estimate says so): only then is the switch shown, beside "Test render · Free".
     var free: Bool
+    /// A tight bar: the switch alone (its words are the tooltip and the accessibility label; the button says "Test render").
+    var compact = false
 
     var body: some View {
         if free && store.suite.catalog?.test == true {
             HStack(spacing: Space.s2) {
-                Text("Test render").font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
+                if !compact {
+                    Text("Test render").font(t.scale.label.font).foregroundStyle(t.roles.ink).lineLimit(1).fixedSize()
+                }
+                // A fixed size: the switch's own measured width ran past the bar at 1000 pt (run 641, Soft Tactile).
                 Toggle("Test render", isOn: .constant(true)).toggleStyle(.switch).labelsHidden().controlSize(.mini)
                     .disabled(true)
+                    .frame(width: 28, height: 18)
             }
             .fixedSize()
             .help(store.isOwner ? "The server makes free test-pattern renders (SUITE_MODE=mock). Switch the server to live for real renders."
