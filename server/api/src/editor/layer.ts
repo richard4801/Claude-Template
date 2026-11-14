@@ -105,11 +105,14 @@ export function cornerExprs(m: Motion, W: number, H: number, fw0: number, fh0: n
   const out: string[] = [];
   const fx = flipX ? -1 : 1, fy = flipY ? -1 : 1;
   for (const [px, py] of [[0, 0], [fw, 0], [0, fh], [fw, fh]] as const) {
+    // perspective puts the frame's corner coordinates on pixel positions, not pixel edges: so the affine map is taken at
+    // the pixel's centre (+ 0.5) and read back as a position (− 0.5). Without it a picture magnified k× sat 0.5 × (k − 1)
+    // px off (2026-11-14: −0.25 px when drawn 2× and shown 1×; +0.5 px at a 2× zoom drawn at source size).
     // the frame corner in the picture's own centred coordinates, scaled to canvas pixels at scale 1
-    const u = ((px - 1 - iw / 2) / iw) * fw0 * fx, v = ((py - 1 - ih / 2) / ih) * fh0 * fy;
+    const u = ((px + 0.5 - 1 - iw / 2) / iw) * fw0 * fx, v = ((py + 0.5 - 1 - ih / 2) / ih) * fh0 * fy;
     const r = `((${m.rotation})*PI/180)`;
-    out.push(`${n4(W)}*(${m.x})-${n4(ox)}+(${m.scale})*(${n4(u)}*cos(${r})-(${n4(v)})*sin(${r}))`);
-    out.push(`${n4(H)}*(${m.y})-${n4(oy)}+(${m.scale})*(${n4(u)}*sin(${r})+(${n4(v)})*cos(${r}))`);
+    out.push(`${n4(W)}*(${m.x})-${n4(ox + 0.5)}+(${m.scale})*(${n4(u)}*cos(${r})-(${n4(v)})*sin(${r}))`);
+    out.push(`${n4(H)}*(${m.y})-${n4(oy + 0.5)}+(${m.scale})*(${n4(u)}*sin(${r})+(${n4(v)})*cos(${r}))`);
   }
   return out;
 }

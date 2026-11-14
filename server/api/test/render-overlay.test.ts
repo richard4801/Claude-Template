@@ -44,10 +44,12 @@ describe('overlay expressions match model.ts (unit)', () => {
     const W = 1080, H = 1920, tr = { x: 0.3, y: 0.6, scale: 0.7, rotation: 25, flipX: true };
     const mo = L.motion({ transform: tr }, 1, 't'), iw = 400, ih = 300, fw = 1082, fh = 1922;
     const cs = L.cornerExprs(mo, W, H, 1080, 810, iw, ih, fw, fh, true, false).map(e => evalExpr(e, { t: 0 }));
-    // The picture's own corners (1, 1) … (iw + 1, ih + 1) by the same affine map as the frame's corners.
+    // The picture's own corners (1, 1) … (iw + 1, ih + 1) by the same affine map as the frame's corners. perspective's
+    // corner coordinates are pixel positions (centres): an edge e is the position e − 0.5, read back on the canvas + 0.5.
     const at = (px: number, py: number) => {
       const [x0, y0, x1, y1, x2, y2] = cs as [number, number, number, number, number, number];
-      return [x0 + (x1 - x0) * px / fw + (x2 - x0) * py / fh, y0 + (y1 - y0) * px / fw + (y2 - y0) * py / fh];
+      const u = px - 0.5, v = py - 0.5;
+      return [x0 + (x1 - x0) * u / fw + (x2 - x0) * v / fh + 0.5, y0 + (y1 - y0) * u / fw + (y2 - y0) * v / fh + 0.5];
     };
     const want = M.itemCorners({ width: W, height: H }, 4, 3, 'contain', tr);
     const got = [at(1, 1), at(iw + 1, 1), at(iw + 1, ih + 1), at(1, ih + 1)];

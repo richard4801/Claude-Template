@@ -6,14 +6,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import * as M from '../src/editor/model.js';
-import { renderProject } from '../src/editor/render.js';
+import { planRender, renderProject } from '../src/editor/render.js';
 import { detectResources, mediaProfile, setMediaResources } from '../src/lib/resources.js';
 
 const SEC = Number(process.argv[2] ?? 6), RUNS = Number(process.argv[3] ?? 2);
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-bench-'));
 const ff = (...a: string[]) => execFileSync('ffmpeg', ['-y', '-v', 'error', ...a]);
 const files: Record<string, string> = {};
-for (const [id, src] of [['a', 'testsrc2'], ['b', 'mandelbrot'], ['c', 'smptehdbars']] as const) {
+for (const [id, src] of [['a', 'testsrc2'], ['b', 'mandelbrot'], ['c', 'mandelbrot']] as const) {
   files[id] = path.join(dir, `${id}.mp4`);
   ff('-f', 'lavfi', '-i', `${src}=s=1080x1920:r=30`, '-f', 'lavfi', '-i', `sine=frequency=440:duration=${SEC}`, '-t', String(SEC), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', files[id]!);
 }
@@ -35,18 +35,26 @@ const project = (): M.EditProject => ({
 });
 
 const host = detectResources({});
+if (process.env.BENCH_GRAPH) { // print the picture pass's filter graph, one filter chain a line, and stop
+  const sizes = Object.fromEntries(['a', 'b', 'c'].map(k => [k, { width: 1080, height: 1920, hasAudio: true }]));
+  const plan = planRender(project(), files, { ...sizes, m: { width: 0, height: 0, hasAudio: true } }, path.join(dir, 'g.mp4'), { quality: 'export' });
+  for (const c of plan.chunks) { const g = c[c.indexOf('-filter_complex') + 1]!; console.log(c.filter(x => x !== g).join(' ')); console.log(g.split(';').join('\n')); }
+  fs.rmSync(dir, { recursive: true, force: true });
+  process.exit(0);
+}
 const one = async (tag: string) => {
   const t0 = Date.now();
   const r = await renderProject({ ffmpeg: 'ffmpeg', ffprobe: 'ffprobe' }, project(), files, path.join(dir, `${tag}.mp4`), { quality: 'export' });
   return { ms: Date.now() - t0, sec: r.durationSec };
 };
 const out: string[] = [`host: ${host.cpus} CPUs, ${host.memMB} MB; edit ${SEC * 3}s at 1080×1920, export quality`];
-for (const [name, res] of [['SMALL (trial)', { cpus: host.cpus, memMB: 1024 }], ['LARGE', host]] as const) {
+for (const [name, res] of ([['SMALL (trial)', { cpus: host.cpus, memMB: 1024 }], ['LARGE', host]] as const).filter(([n]) => !process.env.BENCH_ONLY || n.toLowerCase().startsWith(process.env.BENCH_ONLY))) {
   setMediaResources(res);
   const p = mediaProfile();
   const times: number[] = [];
   let sec = 0;
   for (let i = 0; i < RUNS; i++) { const r = await one(`${p.name}${i}`); times.push(r.ms); sec = r.sec; }
+  if (process.env.BENCH_OUT) fs.copyFileSync(path.join(dir, `${p.name}0.mp4`), `${process.env.BENCH_OUT}.${p.name}.mp4`); // for a before/after picture check
   // Two renders at the profile's render budget (one after the other on SMALL, side by side on LARGE ≥ 4 GB).
   const t0 = Date.now();
   if (p.renderConcurrency >= 2) await Promise.all([one(`${p.name}p0`), one(`${p.name}p1`)]);

@@ -362,8 +362,13 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
       const mo = L.motion(it, len, `((in+${skip})/${FPS})`);
       const still = [mo.x, mo.y, mo.scale, mo.rotation].map(L.constant);
       const sprite = !o.canvas && still.every(v => v !== null) && Math.abs(((still[3]! % 360) + 360) % 360) < 1e-9;
-      // Drawn at the size it reaches on the canvas: its own size when still, else its largest scale.
-      const big = sprite ? still[2]! : Math.min(L.maxScale(it), (2 * Math.max(W, H)) / Math.max(fw0, fh0));
+      // Drawn at the size it reaches on the canvas: its own size when still, else its largest scale, but never beyond the
+      // source's own pixels (1 / kf) when that is at least its size at scale 1: a 1080 × 1920 clip zoomed to 2× was drawn
+      // 2160 × 3840 (4× the pixels through the colour, the look and perspective) for no detail it doesn't have; perspective
+      // then magnifies it with cubic interpolation, as the scale filter's bicubic upscale did (2026-11-14, render speed).
+      const most = Math.min(L.maxScale(it), (2 * Math.max(W, H)) / Math.max(fw0, fh0));
+      const big = sprite ? still[2]! : Math.min(most, Math.max(1, 1 / kf));
+      const magnified = !sprite && big < most - 1e-6;
       const iw = even(fw0 * big), ih = even(fh0 * big);
       const cropF = l || t || r || b ? `crop=w=iw*${n6(1 - l - r)}:h=ih*${n6(1 - t - b)}:x=iw*${n6(l)}:y=ih*${n6(t)},` : '';
       // Kept in yuv (half the memory of RGB) until a step needs RGB.
@@ -505,7 +510,7 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
         const cs = L.cornerExprs(mo, W, H, fw0, fh0, iw, ih, fw, fh, flipX, flipY, bx, by);
         const moving = still.some(v => v === null);
         // (perspective in gbrap: its yuva420p alpha plane comes out wrong.)
-        g.push(`[${s}]format=gbrap,pad=${fw}:${fh}:1:1:color=black@0,perspective=sense=destination:eval=${moving ? 'frame' : 'init'}:${cs.map((e, j) => `${['x', 'y'][j % 2]}${Math.floor(j / 2)}='${e}'`).join(':')},crop=${bw}:${bh}:0:0${o.canvas ? `,pad=${W}:${H}:${bx}:${by}:color=black@0` : ',format=yuva420p'}[${tag}pl]`);
+        g.push(`[${s}]format=gbrap,pad=${fw}:${fh}:1:1:color=black@0,perspective=sense=destination:eval=${moving ? 'frame' : 'init'}${magnified ? ':interpolation=cubic' : ''}:${cs.map((e, j) => `${['x', 'y'][j % 2]}${Math.floor(j / 2)}='${e}'`).join(':')},crop=${bw}:${bh}:0:0${o.canvas ? `,pad=${W}:${H}:${bx}:${by}:color=black@0` : ',format=yuva420p'}[${tag}pl]`);
         s = `${tag}pl`;
         if (!o.canvas) { x = bx; y = by; ow = bw; oh = bh; }
       }
