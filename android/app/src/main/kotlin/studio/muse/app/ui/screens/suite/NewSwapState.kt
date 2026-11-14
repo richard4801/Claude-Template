@@ -20,8 +20,8 @@ import studio.muse.app.data.Take
  * here spends: [generate] runs only from the Generate button, which shows the estimate's price.
  */
 class NewSwapState(private val c: AppContainer, private val store: SuiteStore) {
-    /** The Swap tab shows New Swap (true) or the classic Swap. The Mac's default: classic. */
-    val on = MutableStateFlow(false)
+    /** The Swap tab shows New Swap (true, the default: the approved frames; coordinator 2026-11-14) or the classic Swap (the ··· menu). */
+    val on = MutableStateFlow(true)
     val draft = MutableStateFlow(RemixDraft())
     val clip = MutableStateFlow<Clip?>(null)
     val estimate = MutableStateFlow<SuiteEstimate?>(null)

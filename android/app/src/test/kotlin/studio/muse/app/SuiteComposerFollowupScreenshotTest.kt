@@ -59,6 +59,7 @@ class SuiteComposerFollowupScreenshotTest(private val theme: String, private val
         val scope = MainScope()
         val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
         val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, useFake = true, token = "t", studioName = "Jenne Studio", role = "owner", email = "jenne@studio.com")), fake, null)
+        c.suite.newSwap.on.value = false // the classic Swap screen (New Swap has SuiteNewSwapScreenshotTest)
         val s = c.suite
         when (screen) {
             "faces" -> {

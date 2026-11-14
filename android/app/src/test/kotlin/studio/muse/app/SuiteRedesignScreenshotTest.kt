@@ -49,6 +49,7 @@ class SuiteRedesignScreenshotTest(private val theme: String, private val screen:
         val scope = MainScope()
         val fake = FakeMuseApi(scope, null, speed = 0.0, genDelayMs = 0)
         val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, useFake = true, token = "t", studioName = "Jenne Studio", role = "owner", email = "jenne@studio.com")), fake, null)
+        c.suite.newSwap.on.value = false // the classic Swap screen (New Swap has SuiteNewSwapScreenshotTest)
         val cat = fake.suite.camera
         if (screen == "shot") {
             var t = PromptTokens().withText(" dances on a rooftop at golden hour, hair catching the backlight. ")

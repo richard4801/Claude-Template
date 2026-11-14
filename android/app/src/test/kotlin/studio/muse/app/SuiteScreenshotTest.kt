@@ -75,6 +75,7 @@ class SuiteScreenshotTest(private val theme: String, private val screen: String,
         fake.suiteEnabled = !screen.startsWith("hub_off")
         val c = AppContainer(scope, MemoryPrefs(AppPrefs(theme = theme, useFake = true, token = "t", studioName = "Jenne Studio", role = if (member) "member" else "owner",
             email = if (member) "maya@studio.com" else "jenne@studio.com")), fake, null)
+        c.suite.newSwap.on.value = false // the classic Swap screen (New Swap has SuiteNewSwapScreenshotTest)
         val now = System.currentTimeMillis()
         runBlocking {
             when (screen) {
