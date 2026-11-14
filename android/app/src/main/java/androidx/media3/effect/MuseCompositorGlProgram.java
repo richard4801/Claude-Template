@@ -68,6 +68,8 @@ public final class MuseCompositorGlProgram
           + "  if (uMode == 5) return min(b, s);\n"
           + "  if (uMode == 6) return max(b, s);\n"
           + "  if (uMode == 7) return min(1.0, b + s);\n"
+          + "  if (uMode == 8) return abs(b - s);\n"
+          + "  if (uMode == 9) return b + s - 2.0 * b * s;\n"
           + "  return s;\n"
           + "}\n"
           + "void main() {\n"

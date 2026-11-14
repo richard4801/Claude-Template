@@ -1,5 +1,6 @@
 package studio.muse.core.edit
 
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -36,6 +37,8 @@ fun blendChannel(mode: BlendMode, top: Double, below: Double): Double {
         BlendMode.DARKEN -> min(b, s)
         BlendMode.LIGHTEN -> max(b, s)
         BlendMode.ADD -> min(1.0, b + s)
+        BlendMode.DIFFERENCE -> abs(b - s)
+        BlendMode.EXCLUSION -> b + s - 2 * b * s
     }
 }
 
