@@ -66,6 +66,8 @@ public enum ChatLeakFilter {
         let l = r.lowercased()
         if r.isEmpty { return "Claude couldn't finish this reply. Try again." }
         // The server's silent-turn timeout (same check as Android), before the owner's own Stop.
+        // The chat no longer fits (MUSE's auto-compact already tried a fresh session): plain words; the chat offers New chat.
+        if ClaudeAutoCompact.isContextOverflow(r) { return ClaudeAutoCompact.fullError }
         if l.contains("stopped answering") { return "Claude on this Mac stopped answering. Try again." }
         if l.contains("stopped") || l.contains("interrupt") || l.contains("cancel") || l.contains("aborted") { return "Stopped. Send a message to carry on." }
         if l.contains("isn't ready") || l.contains("not installed") || l.contains("enoent") || l.contains("command not found") {
