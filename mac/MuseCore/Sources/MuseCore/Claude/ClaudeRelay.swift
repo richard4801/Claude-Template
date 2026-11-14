@@ -276,9 +276,34 @@ public actor ClaudeRelay {
         req.files = job.turnId == nil ? await files() : false
         req.uploadIds = job.files.map(\.uploadId).filter { !$0.isEmpty }
         if !images.isEmpty { req.readDirectory = ClaudeAttachmentCache.directory(threadId: tid).path }
+        // Auto-compact (ClaudeAutoCompact): a resumed chat past 75% of its window is compacted with MUSE's instructions
+        // first; if Claude Code's compact doesn't work, the turn starts a fresh session with MUSE's handoff instead.
+        if ClaudeAutoCompact.shouldCompact(usage[tid] ?? runner.savedUsage(threadId: tid), resuming: req.resume != nil) {
+            if await runner.compact(req) {
+                usage[tid] = runner.savedUsage(threadId: tid)
+            } else if !runner.isStopping {
+                req.startFresh = true
+            }
+        }
         let onEvent = self.onEvent
         let turnId = job.turnId
-        let outcome = await runner.run(req) { e in onEvent(tid, turnId, e) }
+        let outcome = await runner.run(req, handoff: handoff(threadId: tid, latest: job.text)) { e in onEvent(tid, turnId, e) }
         if let s = outcome.sessionId { sessions[tid] = s }
+        if let u = outcome.usage { usage[tid] = u }
+    }
+
+    /// How full each chat's Claude Code context was after its last turn (also kept on disk by the runner).
+    private var usage: [String: ClaudeContextUsage] = [:]
+
+    /// MUSE's summary of a chat for a fresh Claude Code session: its title and place, its recent messages with lyrics and
+    /// long quotes left out, and the person's memory. The thread's brief still goes as the system prompt.
+    private func handoff(threadId: String, latest: String) -> @Sendable () async -> String {
+        let api = self.api
+        return {
+            let d = try? await api.threadDetail(threadId)
+            let memory = (try? await api.memory())?.rules ?? []
+            return ClaudeAutoCompact.handoff(title: d?.thread.title, contextKind: d?.thread.contextKind, contextId: d?.thread.contextId,
+                                             messages: d?.messages ?? [], memory: memory, excluding: latest)
+        }
     }
 }
