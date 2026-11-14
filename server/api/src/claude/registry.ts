@@ -13,6 +13,7 @@ import { SONG_TOOLS } from './songNotes.js';
 import { SYNC_MAP_TOOLS } from './syncMap.js';
 import { SYNC_TOOLS } from '../editor/syncHits.js';
 import { ISSUE_TOOLS } from './issues.js';
+import { TEMPLATE_PACK_TOOLS } from '../editor/templatePacks.js';
 import { CARD_TOOLS } from './cards.js';
 import { APP_TOOLS } from './appTools.js';
 import { ACTION_TOOLS, SETTINGS_TOOLS } from './actions.js';
@@ -47,6 +48,8 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(SYNC_MAP_TOOLS, ['any'], () => true),
   // Claude reports what stopped it (claude/issues.ts): everyone, every page, free.
   ...tag(ISSUE_TOOLS, ['any'], () => true),
+  // Template pack intake (editor/templatePacks.ts, plans/edit-templates.md §1): the owner's, free.
+  ...tag(TEMPLATE_PACK_TOOLS, ['any'], () => false),
   // Chat cards (claude/cards.ts): a plan checklist and a clip's key moments, drawn as cards in the person's panel; free.
   ...tag(CARD_TOOLS, ['any'], () => true),
   // Full control B1 (claude/appTools.ts): the screens' free read/organise actions, as the person (routes decide what members may do).

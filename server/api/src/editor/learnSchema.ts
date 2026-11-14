@@ -80,3 +80,22 @@ export const editGaps = pgTable('edit_gaps', {
   firstAt: ms('first_at').notNull(),
   lastAt: ms('last_at').notNull(),
 }, t => [uniqueIndex('edit_gaps_key_idx').on(t.studioId, t.key)]);
+
+/** A template pack MUSE Claude made outside the editor (migration 0037, plans/edit-templates.md §1): the pack's
+ * manifest, its scripts and notes as text, and preview uploads per template. The team reads it to build each template
+ * into Edit's library; nothing here renders. One row per (studio, pack name); repeated submits merge. */
+export const editTemplatePacks = pgTable('edit_template_packs', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  name: text('name').notNull(),
+  /** The pack's templates.json (or the part sent so far), as sent. */
+  manifest: jsonb('manifest').$type<Record<string, unknown> | unknown[] | null>(),
+  /** path → { text, bytes, at } for scripts, README and notes (text only, credentials redacted). */
+  files: jsonb('files').$type<Record<string, { text: string; bytes: number; at: number }>>().notNull().default({}),
+  /** [{templateId, uploadId, role: preview|final|source, note?}] uploads made with upload_local_file. */
+  media: jsonb('media').$type<{ templateId: string; uploadId: string; role: string; note?: string }[]>().notNull().default([]),
+  status: text('status').notNull().default('received'),
+  createdBy: text('created_by'),
+  createdAt: ms('created_at').notNull(),
+  updatedAt: ms('updated_at').notNull(),
+}, t => [uniqueIndex('edit_template_packs_name_idx').on(t.studioId, t.name)]);
