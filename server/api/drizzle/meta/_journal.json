@@ -260,6 +260,13 @@
       "when": 1794575683686,
       "tag": "0036_claude_effort",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794688043566,
+      "tag": "0037_template_packs",
+      "breakpoints": true
     }
   ]
 }
