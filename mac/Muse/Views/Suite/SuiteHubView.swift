@@ -294,9 +294,8 @@ struct SuiteRunningPanel: View {
             }
             Rectangle().fill(t.roles.hairline).frame(height: 1)
             if list.isEmpty {
-                Text("Nothing is rendering. Takes you start show here with their progress.")
+                Text("Nothing running") // no helper sentence (owner, coordinator 2026-11-14)
                     .font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, Space.s1)
             }
             ForEach(Array(list.enumerated()), id: \.element.id) { i, j in
