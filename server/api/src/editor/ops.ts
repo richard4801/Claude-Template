@@ -6,7 +6,7 @@ import * as M from './model.js';
 import type { Look } from './look.js';
 import { CAPTION_STYLES, HOOKS } from './presets.js';
 import { packLook } from './lookpack.js';
-import { applyPatch, PatchError, type PatchOp } from './jsonpatch.js';
+import { applyClaudePatch } from './patchInput.js';
 
 export type EditOp = { op: string; [k: string]: unknown };
 type P = M.EditProject;
@@ -83,13 +83,64 @@ export function applyOps(project: P, ops: EditOp[]): { project: P; labels: strin
   const labels: string[] = [];
   ops.forEach((o, i) => {
     if (!o || typeof o !== 'object' || typeof o.op !== 'string') throw badRequest(`ops.${i}: needs "op"`);
-    try { labels.push(applyOne(p, o, next => { p = next; })); } catch (e) {
+    const mode = o.onOverlap;
+    if (mode !== undefined && mode !== 'fit' && mode !== 'ripple') throw badRequest(`ops.${i}.onOverlap: "fit" (nudge/shorten the item into its gap, up to ${FIT_MAX_SEC} s) or "ripple" (push the later items on its track along)`);
+    const before = mode ? JSON.parse(JSON.stringify(p)) as P : null;
+    try {
+      let label = applyOne(p, o, next => { p = next; });
+      if (before && settleOverlaps(before, p, mode as 'fit' | 'ripple')) label += mode === 'fit' ? ' · fitted' : ' · rippled';
+      labels.push(label);
+    } catch (e) {
       const err = e as Error & { message: string };
       if ((err as { code?: string }).code === 'bad_request' && !err.message.startsWith('ops.')) throw badRequest(`ops.${i}.${err.message}`);
       throw e;
     }
   });
   return { project: p, labels };
+}
+
+/** How far onOverlap "fit" may nudge or shorten an item: a slight overlap is fixed, a real clash is still refused. */
+export const FIT_MAX_SEC = 1;
+const SLACK = M.LIMITS.overlapSlackSec;
+/** Sets an item's timeline length (text, image, adjust: durationSec; clips: outSec in proportion, so speed curves keep). */
+function setLength(p: P, t: M.Track, it: M.Item, len: number) {
+  if ('inSec' in it) { const c = it as M.VideoClip | M.AudioClip, sp = M.itemSpan(p, t, it), old = sp.endSec - sp.startSec; c.outSec = r6(c.inSec + (c.outSec - c.inSec) * len / old); }
+  else (it as M.TextItem).durationSec = r6(len);
+}
+const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
+/**
+ * onOverlap (ci_2f7027203409): after an op, each item it added or changed on a non-main track that overlaps a neighbour is
+ * "fit": moved to start where the one before ends and/or shortened to end where the next begins (each by at most
+ * FIT_MAX_SEC), or "ripple": moved past the one before (at most FIT_MAX_SEC) and every later item on its track pushed
+ * along by the overlap. Overlaps it can't settle are left for the validator to name. True when anything moved.
+ */
+function settleOverlaps(before: P, p: P, mode: 'fit' | 'ripple'): boolean {
+  const old = new Map(before.tracks.flatMap(t => t.items.map(i => [i.id, JSON.stringify(i)] as const)));
+  let moved = false;
+  for (const t of p.tracks) {
+    if (t.kind === 'main' || t.kind === 'caption') continue;
+    sortTrack(t);
+    for (let k = 0; k < t.items.length; k++) {
+      const it = t.items[k]!;
+      if (old.get(it.id) === JSON.stringify(it) || (it as { transitionIn?: unknown }).transitionIn) continue;
+      const prev = t.items[k - 1], next = t.items[k + 1];
+      if (prev) {
+        const pe = M.itemSpan(p, t, prev).endSec, me = M.itemSpan(p, t, it);
+        if (me.startSec < pe - SLACK && pe - me.startSec <= FIT_MAX_SEC) { (it as { startSec: number }).startSec = r6(pe); moved = true; }
+      }
+      if (!next || (next as { transitionIn?: unknown }).transitionIn) continue;
+      const me = M.itemSpan(p, t, it), ns = M.itemSpan(p, t, next).startSec, over = me.endSec - ns;
+      if (over <= SLACK) continue;
+      if (mode === 'fit') {
+        const len = me.endSec - me.startSec - over;
+        if (over <= FIT_MAX_SEC && len >= M.LIMITS.minItemSec) { setLength(p, t, it, len); moved = true; }
+      } else {
+        for (const later of t.items.slice(k + 1)) (later as { startSec: number }).startSec = r6((later as { startSec: number }).startSec + over);
+        moved = true;
+      }
+    }
+  }
+  return moved;
 }
 
 function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
@@ -179,10 +230,10 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
       return `Added ${hook ? 'hook' : 'text'} “${text.slice(0, 32)}”`;
     }
     case 'edit_text': {
-      const it = find(p, str(o, 'itemId', true)!).item as M.TextItem;
+      const { track, item } = find(p, str(o, 'itemId', true)!), it = item as M.TextItem;
       if (typeof it.text !== 'string') throw badRequest('edit_text.itemId: not a text item');
       const tx = str(o, 'text'); if (tx !== undefined) it.text = tx;
-      const s = num(o, 'startSec'); if (s !== undefined) it.startSec = s;
+      const s = num(o, 'startSec'); if (s !== undefined) { it.startSec = s; sortTrack(track); }
       const d = num(o, 'durationSec'); if (d !== undefined) it.durationSec = d;
       if (o.style && typeof o.style === 'object') it.style = { ...it.style, ...(o.style as object) } as M.TextStyle;
       if (o.transform && typeof o.transform === 'object') it.transform = { ...it.transform, ...(o.transform as object) };
@@ -241,7 +292,11 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
       const list = (v.keyframes ??= {})[prop] ??= [];
       const k = list.findIndex(x => Math.abs(x.t - t) < 1e-3);
       if (o.op === 'remove_keyframe') { if (k < 0) throw badRequest('remove_keyframe: no key at t'); list.splice(k, 1); }
-      else { const kf: M.Keyframe = { t, v: num(o, 'v', true)!, ...(o.ease ? { ease: o.ease as M.Ease } : {}) }; if (k >= 0) list[k] = kf; else list.push(kf); list.sort((a, b) => a.t - b.t); }
+      else {
+        // "value" is read as v (owner report ci_9e908e5947d3: Claude sent value, the op wants v).
+        const vo = o.v ?? o.value;
+        if (vo === undefined || vo === null) throw badRequest(`keyframe.v: required, the ${prop} value at t (e.g. {"op":"keyframe","itemId":"${v.id}","prop":"${prop}","t":${t},"v":${prop === 'scale' ? 1.2 : prop === 'opacity' ? 0.5 : 0}})`);
+        const kf: M.Keyframe = { t, v: num({ op: 'keyframe', v: vo }, 'v', true)!, ...(o.ease ? { ease: o.ease as M.Ease } : {}) }; if (k >= 0) list[k] = kf; else list.push(kf); list.sort((a, b) => a.t - b.t); }
       if (!list.length) delete v.keyframes![prop];
       return o.op === 'keyframe' ? `Keyframe · ${prop} at ${t2(t)}` : `Removed ${prop} keyframe`;
     }
@@ -331,7 +386,7 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
     case 'blend': {
       const { track, item } = find(p, str(o, 'itemId', true)!);
       const mode = str(o, 'mode', true)! as M.BlendMode;
-      if (!M.BLEND_MODES.includes(mode)) throw badRequest(`blend.mode: one of ${M.BLEND_MODES.join(', ')}`);
+      if (!M.BLEND_MODES.includes(mode)) throw badRequest(`blend.mode: ${M.blendRefusal(mode)}`);
       if (track.kind !== 'video' && track.kind !== 'image') throw badRequest('blend: only overlays (video and image tracks) blend');
       const v = item as M.VideoClip | M.ImageItem;
       if (mode === 'normal') delete v.blend; else v.blend = mode;
@@ -346,12 +401,9 @@ function applyOne(p: P, o: EditOp, replace: (next: P) => void): string {
       return kind === 'blur' ? 'Blurred background' : 'Background colour';
     }
     case 'patch': {
-      // Claude sometimes sends the patch as a JSON string, or one operation on its own (owner report ci_d17956dab5c5).
-      let ops: unknown = o.patch;
-      if (typeof ops === 'string') { try { ops = JSON.parse(ops); } catch { throw badRequest('patch.patch: a JSON Patch array, e.g. [{"op":"replace","path":"/canvas/background","value":"#111111"}] (this text isn\'t JSON)'); } }
-      if (ops && typeof ops === 'object' && !Array.isArray(ops) && typeof (ops as { op?: unknown }).op === 'string') ops = [ops];
-      if (!Array.isArray(ops) || !ops.length) throw badRequest('patch.patch: a JSON Patch array, e.g. [{"op":"replace","path":"/canvas/background","value":"#111111"}]');
-      try { replace(applyPatch(p, ops as PatchOp[])); } catch (e) { if (e instanceof PatchError) throw badRequest(`patch.patch: ${e.message}`); throw e; }
+      // Claude sometimes sends the patch as a JSON string, or one operation on its own (owner report ci_d17956dab5c5);
+      // RFC 6902 move/copy/test and common near-misses are read too (patchInput.ts, ci_a801154189c0).
+      replace(applyClaudePatch(p, o.patch));
       return 'Changed the project';
     }
     case 'set_layer': {

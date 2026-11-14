@@ -22,7 +22,7 @@ export type Keyframes = Partial<Record<KfProp, Keyframe[]>>;
 /** flipX / flipY (wave 1, mirror): the picture mirrored about its own centre, after the crop and before scale and rotation. */
 export type Transform = { x?: number; y?: number; scale?: number; rotation?: number; flipX?: boolean; flipY?: boolean };
 /** Wave 1: how a picture on an overlay track combines with the layers below it (blendPixel). */
-export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'softLight' | 'darken' | 'lighten' | 'add';
+export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'softLight' | 'darken' | 'lighten' | 'add' | 'difference' | 'exclusion';
 export type Crop = { left?: number; top?: number; right?: number; bottom?: number };
 export type Adjust = { exposure?: number; contrast?: number; saturation?: number; temperature?: number;
   /** Green (−1) ↔ magenta (+1), right after temperature in the colour matrix. */ tint?: number;
@@ -201,7 +201,20 @@ export const V1_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export const TRANSITIONS: TransitionKind[] = ['fade', 'black', 'white', 'slideLeft', 'slideRight', 'slideUp', 'slideDown', 'zoom', 'whip', 'spin', 'glitch',
   'zoomOut', 'whipRight', 'coverLeft', 'coverRight', 'coverUp', 'coverDown', 'splitFade'];
 export const MASK_SHAPES: MaskShape[] = ['linear', 'mirror', 'circle', 'rect', 'heart', 'star'];
-export const BLEND_MODES: BlendMode[] = ['normal', 'multiply', 'screen', 'overlay', 'softLight', 'darken', 'lighten', 'add'];
+/** Every blend mode the reference draws (render.ts, blendChannel); difference and exclusion: live-negative overlays (ci_25ae7588d6c5). */
+export const ALL_BLEND_MODES: BlendMode[] = ['normal', 'multiply', 'screen', 'overlay', 'softLight', 'darken', 'lighten', 'add', 'difference', 'exclusion'];
+/**
+ * Gate: the installed apps (Mac 562, Android 27) decode blend as a closed enum and refuse the whole project on a mode they
+ * don't know, so difference/exclusion are refused until builds with them ship (like maxAssets). Flip to true then; the
+ * shared fixtures already cover all of ALL_BLEND_MODES once the app parts land.
+ */
+export const BLEND_NEXT_LIVE = false;
+/** The blend modes a project may use today. */
+export const BLEND_MODES: BlendMode[] = BLEND_NEXT_LIVE ? ALL_BLEND_MODES : ALL_BLEND_MODES.filter(m => m !== 'difference' && m !== 'exclusion');
+/** Why a blend mode is refused: the gated ones say when they come. */
+export const blendRefusal = (m: unknown) => (typeof m === 'string' && (ALL_BLEND_MODES as string[]).includes(m)
+  ? `${m} comes with the next app update (the installed apps can't draw it yet); one of ${BLEND_MODES.join(', ')} for now`
+  : `one of ${BLEND_MODES.join(', ')}`);
 /** Freeze frame: a hold lasts 0.1–30 s. */
 export const HOLD_MIN_SEC = 0.1, HOLD_MAX_SEC = 30;
 export const VOICE_EFFECTS: VoiceEffect[] = ['none', 'warm', 'radio', 'phone', 'deep'];
@@ -226,6 +239,7 @@ export const CAPTION_PRESETS: CaptionPreset[] = ['plain', 'highlight', 'box', 'k
 export const CAPTION_GAP_SEC = 0.6, CAPTION_TAIL_SEC = 0.4, SPEECH_JOIN_SEC = 0.4;
 
 const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 // ------------------------------------------------------------------ easing and keyframes
@@ -611,6 +625,31 @@ export function itemSpan(p: EditProject, track: Track, item: Item): { startSec: 
   return { startSec: r6(start), endSec: r6(start + len) };
 }
 
+/**
+ * The start nearest to `item`'s own where it fits on `track` without overlapping the track's other items (same length),
+ * or null when it fits nowhere before 600 s. Used to tell Claude where an overlapping item could go (ci_2f7027203409).
+ */
+export function nearestFreeStart(p: EditProject, track: Track, item: Item): number | null {
+  const me = itemSpan(p, track, item), len = me.endSec - me.startSec, slack = LIMITS.overlapSlackSec;
+  const others = track.items.filter(x => x.id !== item.id).map(x => itemSpan(p, track, x));
+  const fits = (s: number) => s >= 0 && s + len <= 600 && others.every(o => o.endSec <= s + slack || o.startSec >= s + len - slack);
+  const cands = [0, me.startSec, ...others.flatMap(o => [o.endSec, o.startSec - len])].filter(fits);
+  if (!cands.length) return null;
+  return r3(cands.reduce((a, b) => (Math.abs(b - me.startSec) < Math.abs(a - me.startSec) ? b : a)));
+}
+/** Why `track.items[ii]` breaks "in order and not overlap": both items with their times, and the nearest free start. */
+export function overlapMessage(p: EditProject, track: Track, ii: number): string {
+  const it = track.items[ii]!, prev = track.items[ii - 1]!;
+  const me = itemSpan(p, track, it), ps = itemSpan(p, track, prev), f = (x: number) => `${r3(x)}`;
+  const what = me.startSec < ps.startSec - LIMITS.overlapSlackSec
+    ? `${it.id} (${f(me.startSec)}–${f(me.endSec)} s) is listed after ${prev.id} (${f(ps.startSec)}–${f(ps.endSec)} s), which starts later: list a track's items by startSec`
+    : `${it.id} (${f(me.startSec)}–${f(me.endSec)} s) starts ${f(ps.endSec - me.startSec)} s before ${prev.id} (${f(ps.startSec)}–${f(ps.endSec)} s) ends`;
+  const nx = track.items[ii + 1], ns = nx ? itemSpan(p, track, nx) : null;
+  const free = nearestFreeStart(p, track, it);
+  return `items on a track must be in order and not overlap: ${what}${ns ? `; next is ${nx!.id} (${f(ns.startSec)}–${f(ns.endSec)} s)` : ''}` +
+    ` · ${free !== null ? `nearest free startSec for ${it.id} on this track: ${free}` : 'no free place on this track for its length'}; or put it on another ${track.kind} track, shorten it, or send the op with "onOverlap":"fit" (nudge/shorten it into the gap) or "onOverlap":"ripple" (push later items on this track along)`;
+}
+
 // ------------------------------------------------------------------ v1 <-> v2
 export function fromV1(v1: EditListV1, info: { width: number; height: number; fps: number; hasAudio?: boolean }): EditProject {
   const asset: Asset = { id: 'src', kind: 'video', take: v1.sourceTakeId, durationSec: v1.sourceDurationSec, width: info.width, height: info.height, hasAudio: info.hasAudio ?? true };
@@ -941,6 +980,8 @@ export function blendChannel(mode: BlendMode, top: number, below: number): numbe
     case 'darken': return Math.min(b, s);
     case 'lighten': return Math.max(b, s);
     case 'add': return Math.min(1, b + s);
+    case 'difference': return Math.abs(b - s);
+    case 'exclusion': return b + s - 2 * b * s;
   }
 }
 /**
@@ -1432,7 +1473,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
   };
   const blend = (f: string, b: BlendMode | undefined, overlay: boolean) => {
     if (b === undefined) return;
-    if (!BLEND_MODES.includes(b)) bad(`${f}.blend`, `one of ${BLEND_MODES.join(', ')}`);
+    if (!BLEND_MODES.includes(b)) bad(`${f}.blend`, blendRefusal(b));
     if (!overlay) bad(`${f}.blend`, 'only on overlay tracks (video, image)');
   };
   const loop = (f: string, l: AnimLoop | undefined) => {
@@ -1450,8 +1491,10 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
     if (!a) bad(`${f}.asset`, 'is not in assets');
     if (!kinds.includes(a!.kind)) bad(`${f}.asset`, `must be ${kinds.join(' or ')}`);
     num(`${f}.inSec`, c.inSec, 0, 36_000, false); num(`${f}.outSec`, c.outSec, 0, 36_000, false);
-    if (c.outSec - c.inSec < LIMITS.minClipSourceSec - 1e-9) bad(`${f}.outSec`, `a clip must keep at least ${LIMITS.minClipSourceSec} s of its source`);
-    if (a!.durationSec != null && c.outSec > a!.durationSec + LIMITS.endSlackSec) bad(`${f}.outSec`, 'is past the end of its source');
+    // The clip, its in/out and its source's length named (owner report ci_b21886fc9e4c); in/out are source seconds.
+    const src = `${a!.id}${a!.durationSec != null ? `, ${r3(a!.durationSec)} s long` : ''}`;
+    if (c.outSec - c.inSec < LIMITS.minClipSourceSec - 1e-9) bad(`${f}.outSec`, `a clip must keep at least ${LIMITS.minClipSourceSec} s of its source: ${c.id} has inSec ${r3(c.inSec)} and outSec ${r3(c.outSec)} (${r3(c.outSec - c.inSec)} s) of ${src} · inSec/outSec are source seconds (not timeline seconds); keep outSec ≥ inSec + ${LIMITS.minClipSourceSec}, or delete the clip`);
+    if (a!.durationSec != null && c.outSec > a!.durationSec + LIMITS.endSlackSec) bad(`${f}.outSec`, `is past the end of its source: ${c.id} has outSec ${r3(c.outSec)} but ${src}`);
     num(`${f}.volume`, c.volume, 0, 2); num(`${f}.fadeInSec`, c.fadeInSec, 0, 10); num(`${f}.fadeOutSec`, c.fadeOutSec, 0, 10);
     if (c.muted !== undefined && typeof c.muted !== 'boolean') bad(`${f}.muted`, 'must be true or false');
     if (c.voiceEffect !== undefined && !VOICE_EFFECTS.includes(c.voiceEffect)) bad(`${f}.voiceEffect`, `one of ${VOICE_EFFECTS.join(', ')}`);
@@ -1615,7 +1658,7 @@ export function validate(p: EditProject, presets: FilterPreset[] = [], lookIds: 
           const prev = t.items[ii - 1]!; const ps = itemSpan(p, t, prev); const me = itemSpan(p, t, it);
           if (Math.abs(s - (ps.endSec - tr.durationSec)) > 0.01) bad(`${g}.transitionIn.durationSec`, 'must overlap the previous item by its length');
           if (tr.durationSec > (me.endSec - me.startSec) / 2 + 1e-9 || tr.durationSec > (ps.endSec - ps.startSec) / 2 + 1e-9) bad(`${g}.transitionIn.durationSec`, 'at most half of each item');
-        } else if (s < prevEnd - LIMITS.overlapSlackSec) bad(`${g}.startSec`, 'items on a track must be in order and not overlap');
+        } else if (s < prevEnd - LIMITS.overlapSlackSec) bad(`${g}.startSec`, overlapMessage(p, t, ii));
         if ((t.kind === 'text' || t.kind === 'music' || t.kind === 'voice' || t.kind === 'sfx') && (it as { transitionIn?: unknown }).transitionIn !== undefined) bad(`${g}.transitionIn`, 'transitions are on the main track and overlays only');
         const span = itemSpan(p, t, it);
         prevEnd = span.endSec;
