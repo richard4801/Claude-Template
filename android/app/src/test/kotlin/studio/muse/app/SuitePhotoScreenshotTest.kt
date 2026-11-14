@@ -43,7 +43,7 @@ import studio.muse.app.ui.screens.suite.composer.SheetKind
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-xhdpi")
 class SuitePhotoScreenshotTest(private val theme: String, private val screen: String, private val width: Int) {
     companion object {
-        val SCREENS = listOf("empty", "filled", "preset", "references", "camera")
+        val SCREENS = listOf("empty", "filled", "results", "preset", "references", "camera")
 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}_{1}_{2}")
@@ -68,6 +68,13 @@ class SuitePhotoScreenshotTest(private val theme: String, private val screen: St
         when (screen) {
             "empty" -> c.suite.composer.value = ComposerDraft(tool = ComposerTool.PHOTO)
             "preset" -> { c.suite.composer.value = filled; c.suite.photo.draft.value = PhotoDraft(count = 2, presetId = "tpl_mirror-selfie") }
+            // The Photo tab (owner 2026-11-14): this session's run of 4 on the stage, the strip under it.
+            "results" -> {
+                c.suite.composer.value = filled; c.suite.photo.draft.value = PhotoDraft(aspect = "4:5")
+                c.suite.photo.lastRun.value = listOf("c_front", "c_tq", "g_front", "g_tq").mapIndexed { i, a ->
+                    studio.muse.app.data.Take("s_r$i", "shot", null, i + 1, 4, "Photo · Rooftop, golden hour", "Rooftop · ${i + 1}", "", 0.04, 0, "test", ImageRef.asset(a))
+                }
+            }
             else -> { c.suite.composer.value = filled; c.suite.photo.draft.value = PhotoDraft(refs = refs, product = ImageRef.asset("hero")) }
         }
         c.suite.sheet.value = when (screen) {
@@ -80,12 +87,16 @@ class SuitePhotoScreenshotTest(private val theme: String, private val screen: St
         repeat(8) { idle(); compose.mainClock.advanceTimeBy(400) }
         idle()
         if (screen == "filled" || screen == "empty") {
-            // The bar: one Photos list, no Quality, Shape, Length, Sound, Speaking or Takes.
-            assertEquals(1, compose.onAllNodesWithContentDescription("Photos: ", substring = true).fetchSemanticsNodes().size)
+            // The bar (the Photo tab, owner 2026-11-14): the Preset chip and Photos 1–4; no Quality, Shape, Length, Sound,
+            // Speaking, Takes or Settings, and no "Start from a preset" row.
+            assertEquals(1, compose.onAllNodesWithContentDescription("Preset: ", substring = true).fetchSemanticsNodes().size)
+            assertEquals(1, compose.onAllNodesWithContentDescription("4 photos").fetchSemanticsNodes().size)
+            assertTrue(compose.onAllNodesWithContentDescription("Photo stage, empty").fetchSemanticsNodes().isNotEmpty())
             listOf("Quality", "Shape:", "Length:", "Sound:", "Speaking:", "Takes:", "Settings").forEach { k ->
                 assertTrue(k, compose.onAllNodesWithContentDescription(k, substring = true).fetchSemanticsNodes().isEmpty())
             }
         }
+        if (screen == "results") assertTrue(compose.onAllNodesWithContentDescription("Photo stage, 4 photos").fetchSemanticsNodes().isNotEmpty())
         compose.onRoot().captureRoboImage("build/outputs/roborazzi/suite_photo_${theme}_${screen}_$width.png")
     }
 }

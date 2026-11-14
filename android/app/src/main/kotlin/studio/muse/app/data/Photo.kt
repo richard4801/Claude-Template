@@ -35,7 +35,20 @@ data class PhotoRequest(
     val draft: SuiteDraft? = null,
     /** WS5/WS7: owner only (403 for members), the image model for this run: "owner/name" or a custom `c_…`. Null = the studio's photo model. */
     val imageModel: String? = null,
+    /** The photo's shape (owner 2026-11-14): "4:5", "1:1"…; null = the server's 9:16 (left out, so an older server never sees it). */
+    val aspect: String? = null,
 )
+
+/** One shape on the Size pill and what the model makes for it: the nearest ratio it takes, or null (no size choice). */
+@Serializable
+data class PhotoAspectOption(val id: String, val makes: String? = null) {
+    /** "4:5", "4:5 · makes 3:4", "4:5 · model's size". */
+    val label: String get() = when (makes) { null -> "$id · model's size"; id -> id; else -> "$id · makes $makes" }
+}
+
+/** The model this runs on (owner 2026-11-14: "Auto · <model>"). [name] null: hidden from this member. */
+@Serializable
+data class PhotoModelRef(val id: String? = null, val name: String? = null, val auto: Boolean = true)
 
 /** The preset a Photo estimate ran with (a photo template). */
 @Serializable
@@ -61,6 +74,13 @@ data class PhotoEstimate(
     /** The still's prompt (absent with a preset). */
     val prompt: String? = null,
     val preset: PhotoPresetRef? = null,
+    /** Size (owner 2026-11-14; absent from an older server: the Size pill stays hidden): the shape asked, what the model
+     *  makes for it, and every shape with its mapping. */
+    val aspect: String? = null,
+    val makes: String? = null,
+    val aspects: List<PhotoAspectOption> = emptyList(),
+    /** The model (owner 2026-11-14): the bar's "Auto · <name>". */
+    val model: PhotoModelRef? = null,
 )
 
 /** POST /v1/suite/photos: the stills, saved as takes (`kind: "shot"`, titled "Photo · …"). */
@@ -77,6 +97,9 @@ object PhotoRules {
     const val NO_MOVEMENT = "Movement doesn’t apply to photos"
     const val NO_TEMPO = "Tempo doesn’t apply to photos"
     const val PRESET_RIG = "The preset sets its own camera and light"
+    /** The Size pill's shapes when the server doesn't list them (server suite/photo.ts PHOTO_ASPECTS); 9:16 is its default. */
+    val ASPECTS = listOf("9:16", "4:5", "3:4", "2:3", "1:1", "3:2", "4:3", "16:9")
+    const val DEFAULT_ASPECT = "9:16"
 
     fun noun(count: Int) = "$count photo${if (count == 1) "" else "s"}"
 

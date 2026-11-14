@@ -41,7 +41,7 @@ enum class ComposerTool(
         "Describe the scene · type @ for your characters, # for a camera move"),
     /** Photo tool (workstream 3): Photoshoot on the composer (PhotoTool.kt). Stills: no moves, no tempo. */
     PHOTO("photo", "Photo", "Stills of your character", "lens-01-clean-prime", true, PhotoComposer.CHIPS,
-        "Describe the scene and what she does · type @ for your characters"),
+        "Describe the photo: the place, the pose, the mood · type @ for a model"), // owner 2026-11-14: no "she"
     SWAP("swap", "Character swap", "Your character into a real clip", "palette-01-naturalistic", true, listOf(ComposerChip.LOOK),
         "What changes in the clip (optional)"),
     RECAST("recast", "Recast", "Swap up to 4 people in a clip", "palette-02-teal-orange", true, emptyList(), ""),

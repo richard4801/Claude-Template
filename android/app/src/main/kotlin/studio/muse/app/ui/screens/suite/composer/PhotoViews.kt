@@ -110,7 +110,7 @@ fun rememberPhotoTool(d: ComposerDraft): PhotoUi? {
     val problem = PhotoComposer.problem(d, p, busy) // ComposerModel.problem no longer asks for a character on Photo
     return PhotoUi(p, req, est.first?.let { PhotoComposer.asEstimate(it) }, est.first, problem ?: est.second, busy, store::setCount, store::setImageModel) {
         val r = req ?: return@PhotoUi
-        scope.launch { store.generate(r)?.firstOrNull()?.let { nav.go(Routes.result(it.id)) } }
+        scope.launch { store.generate(r) } // the Photo tab (owner 2026-11-14): the run lands on the stage, the page stays
     }
 }
 

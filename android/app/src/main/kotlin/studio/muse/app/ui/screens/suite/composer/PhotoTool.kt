@@ -31,7 +31,10 @@ data class PhotoDraft(
     val uploading: String? = null,
     /** Owner only (WS5/WS7): the image model for this run ("owner/name" or a custom `c_…`); null = the studio's photo model. */
     val imageModel: String? = null,
+    /** The Size pill (owner 2026-11-14); null = 9:16, the server's default (not sent). */
+    val aspect: String? = null,
 ) {
+    val shownAspect: String get() = aspect ?: PhotoRules.DEFAULT_ASPECT
     val canAddRef: Boolean get() = refs.size < ShootRef.MAX
 }
 
@@ -68,7 +71,7 @@ object PhotoComposer {
             references = p.refs.take(ShootRef.MAX).ifEmpty { null }, title = d.title.trim().ifBlank { null },
             // Reuse settings: the composer as it was, stored on every still.
             draft = ComposerDrafts.draft(d, photoCount = p.count, presetId = p.presetId),
-            imageModel = p.imageModel,
+            imageModel = p.imageModel, aspect = p.aspect,
         )
     }
 
@@ -120,12 +123,21 @@ object PhotoComposer {
 class PhotoStore(private val c: AppContainer) {
     val draft = MutableStateFlow(PhotoDraft())
     val busy = MutableStateFlow(false)
+    /** The Photo tab (owner 2026-11-14): this session's latest run, on the stage (never an older result); empty before one. */
+    val lastRun = MutableStateFlow<List<Take>>(emptyList())
+    /** The last estimate's shapes and Auto's model, kept while the next estimate is on its way. */
+    val seenAspects = MutableStateFlow<List<studio.muse.app.data.PhotoAspectOption>>(emptyList())
+    val seenModel = MutableStateFlow<String?>(null)
 
     private val owner: Boolean get() = c.repo.state.value.wallet?.owner ?: c.prefs.value.owner
 
     /** The price, notes and still rig check (free; holds nothing); a member never gets engine words. */
     suspend fun estimate(req: PhotoRequest): Pair<PhotoEstimate?, String?> {
         val (e, err) = c.repo.attemptInline { photoEstimate(req) }
+        if (e != null) {
+            if (e.aspects.isNotEmpty()) seenAspects.value = e.aspects
+            seenModel.value = e.model?.name
+        }
         return (e?.let { if (owner) it else PhotoComposer.memberSafe(it) }) to err?.let { safe(it) }
     }
 
@@ -137,6 +149,7 @@ class PhotoStore(private val c: AppContainer) {
             val (r, err) = c.repo.createPhotos(req)
             if (err != null) c.repo.toast(safe(err))
             val takes = r?.takes?.takeIf { it.isNotEmpty() } ?: return null
+            lastRun.value = takes // the stage shows them (the Photo tab, owner 2026-11-14)
             c.drafts.freshShots.value = takes.size
             c.drafts.galleryTab.value = "tests"
             return takes
@@ -167,6 +180,10 @@ class PhotoStore(private val c: AppContainer) {
     fun removeRef(i: Int) = draft.update { d -> d.copy(refs = d.refs.filterIndexed { k, _ -> k != i }) }
     fun clearProduct() = draft.update { it.copy(product = null) }
     fun setCount(n: Int) = draft.update { it.copy(count = n.coerceIn(1, PhotoRules.MAX_COUNT)) }
+    /** The Size pill: 9:16 is the server's default, so it is never sent. */
+    fun setAspect(a: String?) = draft.update { it.copy(aspect = a?.takeIf { s -> s != PhotoRules.DEFAULT_ASPECT }) }
+    /** A kept still (Keep on the stage) reads as kept on the stage too. */
+    fun replaceTake(t: Take) = lastRun.update { l -> l.map { if (it.id == t.id) t else it } }
     /** Owner only: pin an image model for the next runs (null = the studio's photo model). */
     fun setImageModel(id: String?) = draft.update { it.copy(imageModel = id) }
     /** Picks a photo preset; picking the same one again clears it. */

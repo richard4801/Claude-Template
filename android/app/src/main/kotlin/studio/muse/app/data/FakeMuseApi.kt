@@ -1731,7 +1731,11 @@ class FakeMuseApi(
         val preset = req.presetId?.let { PhotoPresetRef(it, tpl.name(it)) }
         return PhotoEstimate(count = count, perPhoto = total / count, estimate = total, priceLine = "${PhotoPricing.about(total)} · ${PhotoRules.noun(count)}",
             buttonLabel = PhotoRules.button(count, Pricing.money(total)), warnings = notes, rig = rig, look = look,
-            prompt = if (preset == null) prompt else null, preset = preset)
+            prompt = if (preset == null) prompt else null, preset = preset,
+            // Size and the model (the server's estimate, owner 2026-11-14): demo mode's model takes every shape.
+            aspect = req.aspect ?: PhotoRules.DEFAULT_ASPECT, makes = req.aspect ?: PhotoRules.DEFAULT_ASPECT,
+            aspects = PhotoRules.ASPECTS.map { PhotoAspectOption(it, it) },
+            model = PhotoModelRef("demo/photo", if (req.imageModel == null) "Nano Banana" else null, req.imageModel == null))
     }
 
     /** POST /v1/suite/photos: holds and makes the stills as a shoot does, saved as "Photo · …" takes. */

@@ -533,8 +533,11 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
     val m = muse
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // Photo tool (workstream 3): the library's recent stills and the photo presets (templates) in place of the hero.
-            if (ui.photo != null) { PhotoRecent(ui, takes, wide = false); PhotoPresets(wide = false) }
+            // The Photo tab (owner 2026-11-14): this session's run on the stage, or the empty state (never older results).
+            if (ui.photo != null) {
+                val run by LocalContainer.current.suite.photo.lastRun.collectAsState()
+                PhotoStage(ui, Modifier.fillMaxWidth().height(if (run.isEmpty() && !ui.photo.busy) 200.dp else 460.dp).then(Modifier.suiteStage()).padding(12.dp), wide = false)
+            }
             else MediaHero(ui, job, takes, openTake, retry, Modifier.fillMaxWidth().aspectRatio(4f / 3f))
             if (ui.catalogNote != null) CatalogNote(ui)
             else if (ui.photo == null && (ui.empty || ui.d.collapsed)) PresetRow(ui, tileW = 120.dp, tileH = 76.dp)
@@ -544,10 +547,10 @@ private fun PhoneComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent
             // The prompt sits on the raised tone, as in the render.
             if (ui.showPrompt) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(m.radii.control)).background(m.roles.raised).padding(horizontal = 14.dp, vertical = 12.dp)) { Prompt(ui) }
             if (ui.photo == null && ui.d.references.isNotEmpty()) ui.refChips()
-            if (ui.photo != null) PhotoSlotRow(ui, wide = false) // Photo tool (workstream 3)
+            if (ui.photo != null) PhotoPanel(ui) // the Photo tab: Inputs, then the Rig for a still
             else SlotThumbs(ui)
             if (ui.d.tool == ComposerTool.EXTEND) ExtendLength(ui, Modifier.fillMaxWidth())
-            SettingRows(ui)
+            if (ui.photo == null) SettingRows(ui)
             if (ui.addons.isNotEmpty()) AddonPills(ui)
             ui.rigRow(false)
         }
@@ -724,12 +727,22 @@ private fun SettingRow(icon: String, name: String, value: String, auto: Boolean,
 private fun PhoneBar(ui: ComposerUi) {
     val m = muse
     if (!ui.live) { ComingSoonLine(ui); return }
-    ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.muted, maxLines = 2) }
+    if (ui.photo == null) ui.blocker?.takeIf { !ui.empty }?.let { T(it, m.type.tiny, m.t.muted, maxLines = 2) }
+    if (ui.photo != null) {
+        // The Photo tab (owner 2026-11-14): Preset, Photos 1–4 and Size; the reason (if any) beside the model; one
+        // full-width Generate.
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            PhotoPresetChip(ui); PhotoCountControl(ui, words = false); PhotoSizePill(ui)
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            T(ui.blocker?.takeIf { !ui.empty } ?: "", m.type.tiny, m.t.muted, Modifier.weight(1f), maxLines = 2)
+            PhotoModelPill(ui)
+        }
+        GenerateButton(ui, Modifier.fillMaxWidth())
+        return
+    }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        // Photo tool (workstream 3): one Photos 1–4 list in place of Quality and sound.
-        val p = ui.photo
-        if (p != null) { MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; PhotoModelPill(ui) }
-        else {
+        run {
             Row(Modifier.heightIn(min = 48.dp).press { ui.open(ComposerSheet(SheetKind.SETTINGS)) }.semantics { contentDescription = "Quality ${SuiteRules.tierLabel(ui.d.quality)}"; role = Role.Button }
                 .padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 T(SuiteRules.tierLabel(ui.d.quality), m.scale.label, m.t.ink, maxLines = 1); SIc("chevd", 14.dp, m.t.muted)
@@ -749,7 +762,9 @@ private fun PhoneBar(ui: ComposerUi) {
 @Composable
 private fun GenerateButton(ui: ComposerUi, modifier: Modifier) {
     val m = muse
-    val label = ComposerPrice.button(ui.est, ui.pricing)
+    // The Photo tab: no price yet reads "Generate · 4 photos" (greyed, the reason above it), never "Generate · —".
+    val label = ui.photo?.takeIf { ui.est == null && !ui.pricing }?.let { "Generate · ${studio.muse.app.data.PhotoRules.noun(it.draft.count)}" }
+        ?: ComposerPrice.button(ui.est, ui.pricing)
     Box(modifier.height(48.dp).alpha(if (ui.canGo) 1f else .5f).clip(RoundedCornerShape(m.radii.control)).background(m.roles.action).press(onClick = ui.onGenerate)
         .semantics { contentDescription = label; role = Role.Button }, contentAlignment = Alignment.Center) {
         T(label, m.scale.label.copy(fontWeight = FontWeight.SemiBold), m.roles.onAction, maxLines = 1)
@@ -1108,13 +1123,16 @@ private fun WideComposer(ui: ComposerUi, job: studio.muse.app.data.Job?, recent:
             }
         }
         if (ui.catalogNote != null) CatalogNote(ui)
-        else if (ui.photo != null) PhotoPresets(wide = true) // Photo tool (workstream 3)
-        else if (presets || ui.d.collapsed) PresetRow(ui, tileW = 150.dp, tileH = 96.dp)
+        else if (ui.photo == null && (presets || ui.d.collapsed)) PresetRow(ui, tileW = 150.dp, tileH = 96.dp)
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             // The redesign: the stage on the field tone, the Rig panel raised with a hairline edge.
-            Box(Modifier.weight(1f).fillMaxHeight().then(Modifier.suiteStage()).padding(16.dp)) { MediaHero(ui, job, takes, openTake, {}, Modifier.fillMaxSize()) }
+            Box(Modifier.weight(1f).fillMaxHeight().then(Modifier.suiteStage()).padding(16.dp)) {
+                if (ui.photo != null) PhotoStage(ui, Modifier.fillMaxSize(), wide = true) // the Photo tab (owner 2026-11-14)
+                else MediaHero(ui, job, takes, openTake, {}, Modifier.fillMaxSize())
+            }
             Column(Modifier.width(320.dp).fillMaxHeight().then(Modifier.suitePanel()).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (ui.d.collapsed) { CollapsedBody(ui, wide = false); return@Column }
+                if (ui.photo != null) { PhotoPanel(ui); ui.rigRow(true); return@Column } // the Photo tab: Inputs, then the Rig for a still
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     T("Rig", m.scale.title, m.roles.ink, maxLines = 1)
                     T("How the shot is filmed. Applies to every take.", m.scale.caption, m.roles.ink2)
@@ -1153,7 +1171,8 @@ private fun WideBar(ui: ComposerUi) {
         val scroll = rememberScrollState()
         Row(Modifier.weight(1f).barScrollFade(scroll).horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             // Photo tool (workstream 3): one Photos 1–4 list; no Quality, Shape, Length, Sound, Speaking or Takes (stills render at the shoot's size).
-            ui.photo?.let { p -> MenuPill("layers", photoCountLabel(p.draft.count), "Photos", PhotoComposer.countItems(p.draft.count)) { i -> p.setCount(i + 1) }; PhotoModelPill(ui); return@Row }
+            // The Photo tab (owner 2026-11-14): Preset, Photos 1–4, Size and the model.
+            if (ui.photo != null) { PhotoPresetChip(ui); PhotoCountControl(ui, words = true); PhotoSizePill(ui); PhotoModelPill(ui); return@Row }
             val tiers = ui.catalog?.tiers?.ifEmpty { null }?.map { it.id } ?: SuiteRules.TIERS
             MenuPill("gauge", SuiteRules.tierLabel(d.quality), "Quality", tiers.map { t -> "${SuiteRules.tierLabel(t)} · ${ComposerPrice.short(ui.tierEstimates[t])}" to (t == d.quality) }) { i -> ui.update { it.copy(quality = tiers[i]).fit(ui.catalog) } }
             // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".

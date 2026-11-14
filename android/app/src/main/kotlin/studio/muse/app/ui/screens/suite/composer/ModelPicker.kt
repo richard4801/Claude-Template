@@ -286,16 +286,20 @@ private fun ModelRow(name: String, detail: String, chips: List<Pair<String?, Str
 @Composable
 fun PhotoModelPill(ui: ComposerUi) {
     val p = ui.photo ?: return
-    if (!ui.owner) return
-    val list = ModelPicker.engines(ui.catalog, "image")
-    if (list.isEmpty()) return
+    // The Photo tab (owner 2026-11-14): "Auto · <the model Auto picked>", from the estimate (the name the person may see).
+    val auto = photoModelName(ui)
+    val list = if (ui.owner) ModelPicker.engines(ui.catalog, "image") else emptyList()
+    if (list.isEmpty()) {
+        if (auto != null) studio.muse.app.ui.screens.suite.SuitePill("cube", auto)
+        return
+    }
     val cur = list.firstOrNull { it.id == p.draft.imageModel }
     // Shared copy with the Mac: Auto is "the studio's photo model"; then "Photo models" and "Your providers" (custom marked).
     val ordered = list.filterNot { it.custom } + list.filter { it.custom }
     val items = listOf("Auto, the studio's photo model" to (p.draft.imageModel == null)) + ordered.map { e ->
         (listOf(e.name, e.price).filter { it.isNotBlank() }.joinToString(", ") + if (e.custom) " (yours)" else "") to (e.id == p.draft.imageModel)
     }
-    MenuPill("cube", cur?.name ?: "Model", "Model, only you see models", items) { i -> p.setImageModel(ordered.getOrNull(i - 1)?.id) }
+    MenuPill("cube", cur?.name ?: auto ?: "Auto", "Model, only you see models", items) { i -> p.setImageModel(ordered.getOrNull(i - 1)?.id) }
 }
 
 /** WS13's purpose for a composer tool (its model list): Shot, Talking and UGC ad each have their own. */

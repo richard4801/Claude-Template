@@ -145,6 +145,36 @@ class SuitePhotoTest {
         assertEquals(SampleData.NOOR, PhotoComposer.request(d.copy(tokens = t), PhotoDraft())!!.modelId)
     }
 
+    // ---------------------------------------------------------------- the Photo tab (owner 2026-11-14)
+
+    @Test fun `the size is sent only when picked, and the estimate's shapes and model decode`() {
+        val d = draft()
+        assertNull(PhotoComposer.request(d, PhotoDraft())!!.aspect)
+        assertEquals("9:16", PhotoDraft().shownAspect)
+        assertEquals("4:5", PhotoComposer.request(d, PhotoDraft(aspect = "4:5"))!!.aspect)
+        val o = json.encodeToJsonElement(PhotoRequest.serializer(), PhotoComposer.request(d, PhotoDraft())!!).jsonObject
+        assertFalse("9:16 is the server's default: an older server never sees aspect", "aspect" in o.keys)
+        assertEquals(listOf("9:16", "4:5", "3:4", "2:3", "1:1", "3:2", "4:3", "16:9"), PhotoRules.ASPECTS) // server PHOTO_ASPECTS
+        val body = """{"count":2,"perPhoto":0.1,"aspect":"4:5","makes":"3:4","aspects":[{"id":"9:16","makes":"9:16"},{"id":"4:5","makes":"3:4"},{"id":"1:1","makes":null}],
+            "model":{"id":"black-forest-labs/flux-2-pro","name":"FLUX.2 [pro]","auto":true}}"""
+        val e = json.decodeFromString(PhotoEstimate.serializer(), body)
+        assertEquals(listOf("9:16", "4:5 · makes 3:4", "1:1 · model's size"), e.aspects.map { it.label })
+        assertEquals("FLUX.2 [pro]", e.model?.name)
+        val old = json.decodeFromString(PhotoEstimate.serializer(), """{"count":2,"perPhoto":0.1}""")
+        assertTrue(old.aspects.isEmpty())
+        assertNull(old.model)
+        assertFalse(ComposerTool.PHOTO.placeholder.contains("she"))
+    }
+
+    @Test fun `demo mode's estimate lists the shapes and names Auto's model`(): Unit = runBlocking {
+        val api = FakeMuseApi(kotlinx.coroutines.MainScope(), null, speed = 0.0, genDelayMs = 0)
+        val e = api.photoEstimate(PhotoComposer.request(draft(), PhotoDraft(aspect = "1:1"))!!)
+        assertEquals("1:1", e.aspect)
+        assertEquals(PhotoRules.ASPECTS, e.aspects.map { it.id })
+        assertEquals(true, e.model?.auto)
+        assertTrue(e.model?.name?.isNotBlank() == true)
+    }
+
     @Test fun `the request's JSON carries only fields the strict server knows`() {
         val r = PhotoComposer.request(draft(ComposerSettings(body = "phone"), moves = listOf("dolly_in")), PhotoDraft(presetId = null, refs = listOf(ref("c_front", "pose"))))!!
         val o = json.encodeToJsonElement(PhotoRequest.serializer(), r).jsonObject
