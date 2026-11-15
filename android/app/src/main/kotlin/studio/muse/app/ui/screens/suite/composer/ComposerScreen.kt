@@ -300,6 +300,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
         lead = st.model(d.characterId), clipFrame = clipFrame, clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
         models = st.models, outfits = st.outfitsOf(d.characterId),
         catalogNote = if (catalog == null) catalogError ?: "" else null, onRetryCatalog = { scope.launch { store.load() } },
+        toast = { c.repo.toast(it) },
         photo = photo, // Photo tool (workstream 3)
         onPromptEmptied = { if (d.tool == ComposerTool.PHOTO) c.suite.photo.clearPreset() else update { it.unselectingPreset() } },
         refChips = { SuiteReferenceChips(d.references, { r -> store.removeDraftReference(r.uploadId, r.url) }) },
@@ -410,7 +411,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
                     setTab = { t -> store.sheet.update { it?.copy(tab = t) } }, open = { open(it) }, close = { open(null) }, onMove = ::onMove,
                     onPickSlot = { id -> pickFile(id) }, onClearSlot = { id -> store.composerSlots.update { it.clear(id) } },
                     onPickCharacter = { id, o -> pickCharacter(id, o) }, onGenerate = ::generate, onStoryboard = { nav.go(Routes.SUITE_STORYBOARD) }, onCameraStage = { nav.go(Routes.CAMERA_STAGE) },
-                    frame = frame, onTapFace = ::tapFace,
+                    frame = frame, onTapFace = ::tapFace, toast = { c.repo.toast(it) },
                     takes = ExtendSlot.candidates(st.takes, c.repo.demo), extendKey = extendSlots[ToolSlots.EXTEND_VIDEO]?.media?.key,
                     onPickTake = { t -> if (store.pickExtendTake(t)) open(null) else c.repo.toast("This take has no video to extend yet") },
                     onUploadVideo = { open(null); pickExtendUpload(ToolSlots.EXTEND_VIDEO) },
@@ -513,6 +514,8 @@ class ComposerUi(
     val onRetryCatalog: () -> Unit = {},
     /** Backspace cleared the prompt (owner decision 2026-11-08): the preset is unselected. */
     val onPromptEmptied: () -> Unit = {},
+    /** A short notice ("Kling 4.0 makes 720p, 1080p · using 720p"). */
+    val toast: (String) -> Unit = {},
 ) {
     /** No price yet and no reason why: the estimate is on its way (the button says "Pricing…"). */
     val pricing: Boolean get() = live && est == null && blocker == null
@@ -1180,7 +1183,7 @@ private fun WideBar(ui: ComposerUi) {
             // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
             val groups = ModelPicker.groups(ui.catalog, d.quality, purpose = d.pickPurpose)
             if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
-                MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
+                MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> val e = groups.all.getOrNull(i - 1); d.pinNote(e)?.let(ui.toast); ui.update { it.pinEngine(e).fit(ui.catalog) } }
             }
             // Shape, length and takes are in the Settings row (as on the phone); the bar keeps sound and speaking.
             if (d.tool != ComposerTool.EXTEND) {
