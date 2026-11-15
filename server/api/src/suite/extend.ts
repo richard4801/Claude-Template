@@ -5,7 +5,6 @@ import { DEFAULT_TEXTS, fill, type PromptTexts } from '../prompt/library.js';
 import { stripMoveTokens } from './camera.js';
 import { billedSeconds, perSecond, token, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { EXTEND_LADDER, modelById, refFor, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type Tier } from './registry.js';
-import { routesAt, unionResolutions } from './routes.js';
 
 export type Direction = 'after' | 'before';
 export type ExtendMethod = 'clip' | 'reference' | 'frame';
@@ -48,10 +47,7 @@ export function adaptedExtend(m: ModelSpec): { model: ModelSpec; note: string } 
 }
 
 export function pickExtend(tier: Tier, n: ExtendNeed, o: { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; resolution?: string }): ExtendPick | { error: string; tried: ExtendPick['tried'] } {
-  const ladder0: LadderStep[] = o.engineModel ? [{ model: o.engineModel, resolution: o.resolution ?? unionResolutions(o.engineModel).at(-1)?.id ?? modelById(o.engineModel)?.resolutions.at(-1)?.id ?? '' }] : EXTEND_LADDER[tier];
-  // Owner 2026-11-14: a step runs on the cheapest route of its model that makes its resolution (Seedance 2.5 1080p on
-  // Higgsfield), else on the model as named.
-  const ladder: LadderStep[] = ladder0.flatMap(s => { const at = routesAt(s.model, s.resolution, m => !!m.extend && o.providers.has(m.provider)); return at.length ? at.map(m => ({ model: m.id, resolution: s.resolution })) : [s]; });
+  const ladder: LadderStep[] = o.engineModel ? [{ model: o.engineModel, resolution: o.resolution ?? modelById(o.engineModel)?.resolutions.at(-1)?.id ?? '' }] : EXTEND_LADDER[tier];
   const tried: ExtendPick['tried'] = [];
   for (const step of ladder) {
     const m0 = modelById(step.model);

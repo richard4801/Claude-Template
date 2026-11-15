@@ -130,7 +130,7 @@ describe.skipIf(!hasFfmpeg)('Character swap · Higgsfield / Replicate job across
     } finally { await b?.close(); await db.close(); fs.rmSync(uploads, { recursive: true, force: true }); }
   });
 
-  it('a take that moved to Replicate (Higgsfield out of credit) resumes on Replicate after a restart, with no new generation', async () => {
+  it('a take that moved to Replicate (Higgsfield out of credit, fallback opted in) resumes on Replicate after a restart, with no new generation', async () => {
     reset();
     fake.hfNoCredit = true;
     const db = await openDb('pglite://memory'), uploads = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-up-'));
@@ -138,6 +138,7 @@ describe.skipIf(!hasFfmpeg)('Character swap · Higgsfield / Replicate job across
     let b: App | undefined;
     try {
       const { owner } = await people(a, 0, { topUp: 100 });
+      await owner.req('PATCH', '/v1/suite/settings', { providerFallback: true }); // owner 2026-11-15: off by default
       const id = await start(a, owner);
       await until(async () => (await saved(a, id))?.id ? true : null, 15_000);
       expect(await saved(a, id)).toMatchObject({ provider: 'replicate', id: 'p1' });

@@ -112,13 +112,9 @@ describe('refusals say exactly why', () => {
     if (!('error' in a)) return;
     expect(refusalLine(a.refusals[0]!)).toBe("Veo 3.1 Lite · Replicate: can't use an audio reference; needs an image or video with the audio reference");
   });
-  it('a provider that isn\'t set up is said plainly', () => {
-    const a = pickAdapted('hd', req(), null, { providers: new Set(['replicate']), engineModel: 'wan-3.0' });
+  it('a provider that isn\'t set up is said plainly (each provider stands on its own: no switch to Replicate)', () => {
+    const a = pickAdapted('hd', req(), null, { providers: new Set(['replicate']), engineModel: 'h3-hf' });
     if (!('error' in a)) throw new Error('should refuse');
-    expect(refusalLine(a.refusals[0]!)).toBe('Wan 3.0 · Higgsfield: is not set up in this studio yet');
-    // MiniMax H3 is one model on two providers (owner 2026-11-14): its old Higgsfield id runs on Replicate without the key.
-    const h = pickAdapted('hd', req(), null, { providers: new Set(['replicate']), engineModel: 'h3-hf' });
-    if ('error' in h) throw new Error(JSON.stringify(h.refusals));
-    expect([h.pick.model.id, h.pick.resolution.id]).toEqual(['h3', '2K']);
+    expect(refusalLine(a.refusals[0]!)).toBe('MiniMax H3 · Higgsfield: is not set up in this studio yet');
   });
 });

@@ -12,7 +12,7 @@ import { DEFAULT_TEXTS, type PromptTexts } from '../prompt/library.js';
 import { run } from '../prompt/scripts/builders.js';
 import { sanitizeDirection } from '../prompt/engine.js';
 import { billedSeconds, extraPerTake, joinTokens, perSecond, planRefSent, token, type Character, type RemixToggles, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
-import { MODELS, customModelsOf, isRoute, modelById, refFor, type EditDo, type EditToggle, type ModelSpec, type ProviderId } from './registry.js';
+import { MODELS, customModelsOf, modelById, refFor, type EditDo, type EditToggle, type ModelSpec, type ProviderId } from './registry.js';
 
 /** The toggles that are on, in the order the apps show them (character "face" is the optional face swap). */
 export function togglesOn(x: RemixToggles): EditToggle[] {
@@ -151,9 +151,8 @@ const ROUTE_RANK: Record<RemixRoute, number> = { edit: 0, reference: 1, frames: 
  * run at all, why.
  */
 export function remixModels(x: RemixToggles, o: PickOpts): (RemixCandidate & { unavailable: string | null })[] {
-  // New Swap prices each entry at one resolution, so it keeps one entry per provider for H3 (h3-hf, Auto's pick for her)
-  // and leaves out the other provider routes (registry `family`), which the shot pickers merge into their model.
-  const all = [...MODELS.filter(m => m.status !== 'removed' && (!isRoute(m) || m.id === 'h3-hf')), ...(o.studioId ? customModelsOf(o.studioId) : [])];
+  // One entry per provider (owner 2026-11-15): "Seedance 2.5 · Higgsfield" is listed next to "Seedance 2.5 · Replicate".
+  const all = [...MODELS.filter(m => m.status !== 'removed'), ...(o.studioId ? customModelsOf(o.studioId) : [])];
   const order = autoOrder(x);
   const rank = (m: ModelSpec) => { const i = order.indexOf(m.id); return i >= 0 ? i : 100 + ROUTE_RANK[routeOf(m)] * 100 + (m.byo ? 50 : 0); };
   return all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i)
