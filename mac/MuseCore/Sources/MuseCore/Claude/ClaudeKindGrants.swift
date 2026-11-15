@@ -30,6 +30,8 @@ public struct ClaudeShellCheck: Hashable, Sendable {
     public var why: String?
     /// Folders outside the allowed ones it reaches (scoped only); "Allow always" adds them.
     public var needFolders: [String] = []
+    /// It runs code Claude wrote (typed in, or fed by a here-document) or installs Python packages with uv.
+    public var code: Bool = false
     public var clean: Bool { why == nil && needFolders.isEmpty }
 }
 
@@ -95,52 +97,134 @@ public enum ClaudeKindGrants {
     static let embeddedPath = try! NSRegularExpression(pattern: #"(?:^|[\s"'(=,:|<>\[{])(~/[^\s"'),;|\]}]*|/[A-Za-z][^\s"'),;|\]}]*)"#,
                                                          options: [.anchorsMatchLines])
 
-    /// What "Allow always: shell commands" makes of `command`. Chains, pipes, loops, variables, interpreters and scripts
-    /// are all the one kind; what still asks is what can hurt beyond the folders: admin rights, deleting, moving, the
-    /// network and installs, stopping programs, other apps and system settings, ~/Library, keys, and (scoped) paths
-    /// outside the folders. `folders` are the allowed folders; the chat's folder (`cwd`) and temporary files always count.
+    /// Programs that run code given to them: the code typed into the command (`-c`, `-e`) or fed in by a here-document is
+    /// "code Claude wrote" (bundle-24). Shells' code is shell, checked like the command itself.
+    static func isInterpreter(_ name: String) -> Bool {
+        name.hasPrefix("python") || ["node", "nodejs", "ruby", "perl", "deno", "bun", "bash", "sh", "zsh"].contains(name)
+    }
+    static func isShell(_ name: String) -> Bool { ["bash", "sh", "zsh"].contains(name) }
+    static let codeFlags: Set<String> = ["-c", "-e", "-p", "--eval", "--print", "-ce", "-pe"]
+
+    /// Calls in code Claude wrote that still ask with "Let Claude run code it writes" on (owner, bundle-24).
+    static let codeRisks: [(String, String)] = [
+        ("subprocess", "runs other programs"), ("os.system", "runs other programs"), ("os.popen", "runs other programs"),
+        ("os.exec", "runs other programs"), ("os.spawn", "runs other programs"), ("child_process", "runs other programs"),
+        ("execsync", "runs other programs"), ("pty.spawn", "runs other programs"), ("system(", "runs other programs"),
+        ("shutil.rmtree", "deletes files"), ("rmtree(", "deletes files"), ("os.remove", "deletes files"), ("os.unlink", "deletes files"),
+        ("os.rmdir", "deletes files"), (".unlink(", "deletes files"), (".rmdir(", "deletes files"), ("fs.rm", "deletes files"),
+        ("fs.unlink", "deletes files"), ("unlinksync", "deletes files"), ("file.delete", "deletes files"),
+        ("urllib", "uses the network"), ("requests", "uses the network"), ("http.client", "uses the network"), ("httpx", "uses the network"),
+        ("aiohttp", "uses the network"), ("socket", "uses the network"), ("ftplib", "uses the network"), ("smtplib", "uses the network"),
+        ("fetch(", "uses the network"), ("require('http", "uses the network"), ("require(\"http", "uses the network"), ("net/http", "uses the network"),
+        ("https.get", "uses the network"), ("http.get", "uses the network"),
+        ("osascript", "controls other apps"), ("appscript", "controls other apps"), ("applescript", "controls other apps"),
+        ("sudo ", "needs admin rights"),
+    ]
+
+    public static let codeReason = "it runs code Claude wrote (Settings → Claude can allow this)"
+    public static let codeAndPackagesReason = "it runs code Claude wrote and installs Python packages (Settings → Claude can allow this)"
+    public static let packagesReason = "it installs Python packages with uv (Settings → Claude can allow this)"
+
+    /// What "Allow always: shell commands" makes of `command`. Chains, pipes, loops, variables and script files are all
+    /// the one kind; what still asks is what can hurt beyond the folders: admin rights, deleting, moving, the network and
+    /// installs, stopping programs, other apps and system settings, ~/Library, keys, and (scoped) paths outside the folders.
+    /// Code Claude typed into the command (`python3 -c`, `node -e`, a here-document fed to python or bash, `uv run … python`)
+    /// is its own kind: it asks "it runs code Claude wrote" unless `runCode` ("Let Claude run code it writes") is on, and
+    /// then still asks when that code deletes, runs programs, uses the network or controls apps. Risk words count only in
+    /// the shell itself, never inside such code (the owner's `open(p)` in Python is not the macOS `open`). `folders` are
+    /// the allowed folders; the chat's folder (`cwd`) and temporary files always count.
     public static func shellCheck(_ command: String, scope: ClaudeShellScope, folders: [String], cwd: String, home: String,
-                                  isDirectory: (String) -> Bool = { _ in false }, readScript: (String) -> String? = { _ in nil }) -> ClaudeShellCheck {
+                                  runCode: Bool = false, isDirectory: (String) -> Bool = { _ in false },
+                                  readScript: (String) -> String? = { _ in nil }, depth: Int = 0) -> ClaudeShellCheck {
         var r = ClaudeShellCheck()
+        guard depth < 4 else { r.why = "MUSE can't read this command"; return r }
         guard let tokens = ClaudeAlwaysRules.lex(command) else { r.why = "MUSE can't read this command"; return r }
-        // The programs: the first word of each command (after ; && || | ( and the shell's own keywords).
-        var programs: Set<String> = []
-        var atStart = true
         let keywords: Set<String> = ["do", "then", "else", "elif", "if", "while", "until", "for", "in", "!", "{", "}", "done", "fi", "time"]
-        for t in tokens {
+        func base(_ w: String) -> String { (w as NSString).lastPathComponent.lowercased() }
+        func isAssign(_ w: String) -> Bool {
+            guard let eq = w.firstIndex(of: "="), !w.hasPrefix("=") else { return false }
+            return w[..<eq].allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+        }
+        // Shell functions (`R() { uv run … python -I "$@"; }`): the interpreter each one runs.
+        var functions: [String: String] = [:]
+        for k in tokens.indices where k + 2 < tokens.count {
+            guard case .word(let f) = tokens[k], tokens[k + 1] == .op("("), tokens[k + 2] == .op(")") else { continue }
+            var interp: String?
+            for t in tokens[(k + 3)...] {
+                guard case .word(let w) = t else { continue }
+                if w.text == "}" { break }
+                if interp == nil, isInterpreter(base(w.text)) { interp = base(w.text) }
+            }
+            if let interp { functions[f.text.lowercased()] = interp }
+        }
+        // One pass: the programs, the code typed in (`-c CODE`), and what each here-document feeds.
+        var programs: Set<String> = []
+        var codeArgs: [Int: Bool] = [:]          // token index → it is shell code
+        var heredocTargets: [String?] = []       // per `<<`, in order: the interpreter it feeds (nil: data, e.g. `cat > x`)
+        var codes: [(String, Bool)] = []         // (code, is shell)
+        var dataHeredocs: [String] = []
+        var atStart = true
+        var segInterp: String?
+        var prevWord: String?
+        var heredocIndex = 0
+        for (idx, t) in tokens.enumerated() {
             switch t {
             case .op(let op):
+                if op == "<<" || op == "<<-" { heredocTargets.append(segInterp); continue }
                 if op.contains(">") || op.contains("<") { continue }   // a redirect: the same command goes on
-                atStart = true
+                atStart = true; segInterp = nil; prevWord = nil
+            case .heredoc(let body):
+                let target = heredocIndex < heredocTargets.count ? heredocTargets[heredocIndex] : nil
+                heredocIndex += 1
+                if let target { codes.append((body, isShell(target))) } else { dataHeredocs.append(body) }
             case .word(let w):
+                let name = base(w.text)
                 if atStart {
-                    let name = (w.text as NSString).lastPathComponent.lowercased()
-                    if keywords.contains(name) { continue }
-                    // `VAR=value cmd`: the program comes after.
-                    if let eq = w.text.firstIndex(of: "="), w.text[..<eq].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }), !w.text.hasPrefix("=") { continue }
+                    if keywords.contains(name) || isAssign(w.text) { continue }
                     programs.insert(name)
                     atStart = false
+                    if let f = functions[name] { segInterp = f }
                 }
+                if segInterp == nil, isInterpreter(name) { segInterp = name }
+                if let interp = segInterp, let pw = prevWord, codeFlags.contains(pw) {
+                    codeArgs[idx] = isShell(interp)
+                    codes.append((w.text, isShell(interp)))
+                }
+                prevWord = w.text
             }
         }
-        // The hard kinds: wherever the word is (a `bash -c "rm …"` too), except plain code words outside a command's start.
-        let words = Set(ClaudeAlwaysRules.words(command)).subtracting(codeWords).union(programs)
+        // A here-document saved to a file in a command that also runs an interpreter (`cat > a.py <<EOF … EOF; python3 a.py`)
+        // is code Claude wrote too.
+        if !dataHeredocs.isEmpty, programs.contains(where: isInterpreter) || !functions.isEmpty {
+            codes += dataHeredocs.map { ($0, false) }
+        }
+        // The shell itself: every word but the code typed in.
+        let shellWords = tokens.enumerated().compactMap { (i, t) -> String? in
+            if case .word(let w) = t, codeArgs[i] == nil { return w.text }
+            return nil
+        }
+        let shellText = shellWords.joined(separator: " ")
+        let words = Set(ClaudeAlwaysRules.words(shellText)).subtracting(codeWords).union(programs)
         for (set, why) in ClaudeAlwaysRules.riskWords where !words.isDisjoint(with: set) { r.why = why; return r }
-        for p in programs where ["git"].contains(p) {
+        if programs.contains("git") {
             // git: history-changing subcommands still ask, as before.
-            let parts = ClaudeAlwaysRules.words(command)
+            let parts = ClaudeAlwaysRules.words(shellText)
             if let i = parts.firstIndex(of: "git"), parts.dropFirst(i + 1).contains(where: { ClaudeAlwaysRules.gitRisky.contains($0) }) {
                 r.why = "it can change or send your git history"; return r
             }
         }
-        if programs.contains("find"), command.contains("-delete") { r.why = "it deletes files"; return r }
-        // Network addresses anywhere.
-        for case .word(let w) in tokens {
-            if w.text.contains("://") { r.why = "it uses the network or installs software"; return r }
-            if let c = w.text.firstIndex(of: ":"), ClaudeAlwaysRules.networkSchemes.contains(w.text[..<c].lowercased()) {
+        if programs.contains("find"), shellWords.contains("-delete") { r.why = "it deletes files"; return r }
+        // Network addresses in the shell's words.
+        for w in shellWords {
+            if w.contains("://") { r.why = "it uses the network or installs software"; return r }
+            if let c = w.firstIndex(of: ":"), ClaudeAlwaysRules.networkSchemes.contains(w[..<c].lowercased()) {
                 r.why = "it uses the network or installs software"; return r
             }
         }
+        // `uv run --with numpy …` downloads packages from PyPI: allowed only with "Let Claude run code it writes".
+        let lowerWords = shellWords.map { $0.lowercased() }
+        let uvInstall = (programs.contains("uv") || programs.contains("uvx") || functions.values.contains { _ in lowerWords.contains("uv") })
+            && lowerWords.contains { $0 == "--with" || $0.hasPrefix("--with=") || $0.hasPrefix("--with-requirements") || $0.hasPrefix("--with-editable") }
 
         if scope == .folders, ["expanduser", "path.home", "getenv", "environ"].contains(where: { command.lowercased().contains($0) }) {
             r.why = "it works outside your allowed folders"; return r
@@ -170,7 +254,7 @@ public enum ClaudeKindGrants {
             return nil
         }
         atStart = true
-        for t in tokens {
+        for (idx, t) in tokens.enumerated() {
             guard case .word(let w) = t else {
                 if case .op(let op) = t, !(op.contains(">") || op.contains("<")) { atStart = true; prevProgram = nil }
                 prevWasCd = false
@@ -212,7 +296,7 @@ public enum ClaudeKindGrants {
                     if let why = consider(ClaudeFilePolicy.resolve(p, cwd: runCwd, home: home)) { r.why = why; return r }
                 }
             }
-            if let prog = prevProgram, !isProgram, ClaudeAlwaysRules.interpreters.contains(prog), !text.hasPrefix("-"),
+            if codeArgs[idx] == nil, let prog = prevProgram, !isProgram, ClaudeAlwaysRules.interpreters.contains(prog), !text.hasPrefix("-"),
                !text.contains("$"), text.contains(".") {
                 scripts.append(ClaudeFilePolicy.resolve(text, cwd: runCwd, home: home))
                 prevProgram = nil
@@ -224,6 +308,27 @@ public enum ClaudeKindGrants {
         for sp in scripts {
             guard let text = readScript(sp) else { continue }
             if let why = scriptCheck(text, scope: scope, folders: allowed + need, cwd: cwd, home: home) { r.why = "the script \(why.replacingOccurrences(of: "it ", with: ""))"; return r }
+        }
+        // Code Claude wrote: shell code is checked like the command; other code for what still asks with the switch on.
+        for (code, shell) in codes {
+            if shell {
+                let inner = shellCheck(code, scope: scope, folders: allowed + need, cwd: runCwd, home: home, runCode: true,
+                                       isDirectory: isDirectory, readScript: readScript, depth: depth + 1)
+                if let why = inner.why { r.why = why; return r }
+                for f in inner.needFolders where !need.contains(where: { ClaudeFilePolicy.inside(f, $0) }) { need.append(f) }
+            } else {
+                let lower = code.lowercased()
+                for (needle, why) in codeRisks where lower.contains(needle) { r.why = "the code Claude wrote \(why)"; return r }
+                if let why = scriptCheck(code, scope: scope, folders: allowed + need, cwd: runCwd, home: home) {
+                    r.why = "the code Claude wrote \(why.replacingOccurrences(of: "it ", with: ""))"; return r
+                }
+            }
+        }
+        r.needFolders = need
+        r.code = !codes.isEmpty || uvInstall
+        if r.code, !runCode {
+            r.why = codes.isEmpty ? packagesReason : (uvInstall ? codeAndPackagesReason : codeReason)
+            r.needFolders = []
         }
         return r
     }

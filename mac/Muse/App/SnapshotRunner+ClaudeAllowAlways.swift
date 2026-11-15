@@ -149,6 +149,45 @@ extension SnapshotRunner {
         check("five_more_across_a_new_chat_ask_nothing", prompts.isEmpty, "\(prompts.count) prompts: \(prompts)")
         for a in service.fileAsks(threadId: newChat) { service.answerFile(a.id, .deny) }
 
+        note("START run_code")
+        // Bundle-24 (owner): the card for code Claude wrote says so (not "controls other apps" for Python's open(p)), and
+        // "Let Claude run code it writes" lets it run; the shell's own `open` still flags. The owner's command, verbatim.
+        let ownerCmd = ["cd /tmp/grwm_match/plat && R() { uv run -q --no-project --with numpy --with pillow python -I \"$@\"; }; R - <<'EOF'",
+                        "p='plat2.py'; s=open(p).read()", "s = s.replace('SCALE = 1.0', 'SCALE = 1.08')", "open(p, 'w').write(s)", "EOF"].joined(separator: "\n")
+        let codeAsk = ask("perm_review_code", "Bash", ["command": .string(ownerCmd)])
+        _ = service.reviewShowAsk(codeAsk, threadId: tid)
+        let codeCard = card(codeAsk.id)
+        check("code_card_reason", codeCard?.alwaysAsksBecause == "Always asks: \(ClaudeKindGrants.codeAndPackagesReason)" && codeCard?.alwaysLabel == nil,
+              "why \(codeCard?.alwaysAsksBecause ?? "none"), label \(codeCard?.alwaysLabel ?? "none")")
+        if let codeCard {
+            let r = ImageRenderer(content: ClaudeFileCardView(card: codeCard, id: "shot", answer: { _ in })
+                .frame(width: 300).padding(8).background(Color(nsColor: .windowBackgroundColor)))
+            r.scale = 2
+            if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: dir.appendingPathComponent("mac_a_claude_allow_card_code.png"))
+            } else { note("FAIL card_shot_code: couldn't draw the card") }
+        }
+        let openAsk = ask("perm_review_open", "Bash", ["command": .string("open '\(out)'")])
+        let openV = service.reviewShowAsk(openAsk, threadId: tid)
+        if case .ask(let c) = openV { check("shell_open_flags", c.alwaysAsksBecause == "Always asks: it changes system settings or controls other apps", c.alwaysAsksBecause ?? "none") }
+        else { check("shell_open_flags", false, "\(openV)") }
+        try? await Task.sleep(for: .seconds(0.5))
+        capture(dir.appendingPathComponent("mac_a_claude_allow_code_card_chat.png"))
+        service.setRunCode(true)
+        check("code_card_went_through", card(codeAsk.id) == nil, "the code card is still open")
+        let runs = service.reviewShowAsk(ask("perm_review_code2", "Bash", ["command": .string(ownerCmd)]), threadId: tid)
+        check("code_runs_with_switch", runs == .allow, "\(runs)")
+        check("shell_open_still_asks", card(openAsk.id) != nil)
+        let rmCode = service.reviewShowAsk(ask("perm_review_code_rm", "Bash", ["command": .string("python3 - <<'EOF'\nimport shutil\nshutil.rmtree('/tmp/grwm_match')\nEOF")]), threadId: tid)
+        if case .ask(let c) = rmCode { check("risky_code_asks", c.alwaysAsksBecause == "Always asks: the code Claude wrote deletes files", c.alwaysAsksBecause ?? "none") }
+        else { check("risky_code_asks", false, "\(rmCode)") }
+        service.setAskEverything(true)
+        let pausedCode = service.reviewShowAsk(ask("perm_review_code3", "Bash", ["command": .string(ownerCmd)]), threadId: tid)
+        if case .ask = pausedCode { check("ask_all_pauses_code", true) } else { check("ask_all_pauses_code", false, "\(pausedCode)") }
+        service.setAskEverything(false)
+        for a in service.fileAsks(threadId: tid) { service.answerFile(a.id, .deny) }
+
         note("START ask_before_anything")
         service.setAskEverything(true)
         let paused = service.reviewShowAsk(ask("perm_review_paused", "Bash", ["command": .string("ffmpeg -i '\(clip)' '\(out)'")]), threadId: tid)
@@ -189,6 +228,9 @@ extension SnapshotRunner {
         check("settings_shows_always_allowed", heading.0, "the Always allowed heading \(heading.1)")
         check("settings_shows_rule", rule.0, "the Shell commands row \(rule.1); rows drawn \(frames.keys.filter { $0.hasPrefix("settings ") }.sorted())")
         check("settings_shows_tool", toolRow.0, "the suite_add_reference row \(toolRow.1)")
+        let runRow = whole("settings run code"), runRowY = shown("settings run code")
+        check("settings_shows_run_code", runRow.0 && runRowY.0 && service.fileSettings.runsCode, "the Let Claude run code it writes row \(runRow.1), \(runRowY.1), on \(service.fileSettings.runsCode)")
+        capture(dir.appendingPathComponent("mac_a_claude_allow_run_code_setting.png"))
         let remove = whole("settings shell remove"), scope = whole("settings shell scope")
         check("settings_shell_remove_whole", remove.0, "the Shell commands Remove button \(remove.1)")
         check("settings_shell_scope_whole", scope.0, "the Where picker \(scope.1)")
@@ -196,9 +238,11 @@ extension SnapshotRunner {
         capture(dir.appendingPathComponent("mac_a_claude_allow_settings.png"))
         SnapshotRunner.state.scrollTo = nil
         service.removeShellCommands()
+        service.setRunCode(false)
         service.removeAlwaysTool("mcp__muse__suite_add_reference")
         service.removeAllowedFolder(shoot.path)
-        check("settings_remove", service.fileSettings.shellScope == nil && service.fileSettings.tools.isEmpty && service.fileSettings.allowedFolders.isEmpty)
+        check("settings_remove", service.fileSettings.shellScope == nil && service.fileSettings.tools.isEmpty && service.fileSettings.allowedFolders.isEmpty
+              && !service.fileSettings.runsCode)
         // Removed: the same command asks again.
         let after = service.reviewShowAsk(ask("perm_review_after", "Bash", ["command": .string("ffmpeg -i '\(clip)' '\(out)'")]), threadId: tid)
         if case .ask = after { check("asks_again_after_remove", true) } else { check("asks_again_after_remove", false, "\(after)") }

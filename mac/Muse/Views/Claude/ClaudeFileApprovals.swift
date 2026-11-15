@@ -107,6 +107,14 @@ struct ClaudeFileSettingsSection: View {
                     .accessibilityIdentifier("settings.claude.askEverything")
             }
             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings ask before anything") } }
+            // Bundle-24 (owner): off by default; "Ask before anything" pauses it like the list.
+            SettingRow("Let Claude run code it writes", hint: ClaudeFileSettings.runCodeHint) {
+                Toggle("Let Claude run code it writes", isOn: Binding(get: { s.runsCode }, set: { service.setRunCode($0) }))
+                    .labelsHidden().toggleStyle(.switch)
+                    .accessibilityIdentifier("settings.claude.runCode")
+            }
+            .opacity(s.askAll ? 0.6 : 1)
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings run code") } }
         }
         SettingRow("When results arrive", hint: s.resultMode == .look
                    ? "When something you started from a chat finishes, Claude looks at it and tells you in that chat (a notification too)."

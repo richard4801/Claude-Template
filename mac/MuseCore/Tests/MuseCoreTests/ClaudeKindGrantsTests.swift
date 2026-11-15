@@ -19,7 +19,7 @@ final class ClaudeKindGrantsTests: XCTestCase {
     func verdict(_ a: ClaudePermissionAsk, _ s: ClaudeFileSettings, chat: String = "ct_1", script: String? = nil,
                  dirs: Set<String> = []) -> ClaudeFileVerdict {
         ClaudeFilePolicy.verdict(a, mode: s.mode, folders: s.activeFolders, cwd: cwd(chat), home: home, rules: s.activeRules,
-                                 askAll: s.askAll, shell: s.activeShell, tools: s.activeTools,
+                                 askAll: s.askAll, shell: s.activeShell, tools: s.activeTools, runCode: s.activeRunCode,
                                  isDirectory: { dirs.contains($0) }, readScript: { _ in script })
     }
 
@@ -59,6 +59,8 @@ final class ClaudeKindGrantsTests: XCTestCase {
         XCTAssertEqual(tool.action, "Use suite_add_reference")
         always(tool, into: &s)
 
+        // 4. Code Claude types into a command is its own opt-in (bundle-24): the owner turns it on in Settings.
+        s.runCode = true
         // The settings survive a relaunch (they're stored as JSON in the app's defaults).
         let saved = try JSONDecoder().decode(ClaudeFileSettings.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(saved, s)
@@ -222,5 +224,143 @@ final class ClaudeKindGrantsTests: XCTestCase {
         guard case .ask = verdict(ask("Read", ["file_path": .string("/tmp/a.mp4")]), s) else { return XCTFail("temp ran after Remove") }
         s.removeFolder(project)
         guard case .ask = verdict(ask("Upload", ["file_path": .string("\(project)/a.mp4")]), s) else { return XCTFail("upload ran after Remove") }
+    }
+}
+
+/// Bundle-24 (owner): risk words count only in the shell itself, never inside code Claude wrote (the Python `open(p)` read as
+/// the macOS `open`), and "Let Claude run code it writes" (off by default) lets that code run when nothing else asks.
+final class ClaudeRunCodeTests: XCTestCase {
+    let home = "/Users/me"
+    let cwd = "/Users/me/MUSE/Claude/ct_1"
+    let project = "/Users/me/Desktop/GRWM"
+    /// The owner's card, verbatim.
+    let ownerCommand = """
+    cd /tmp/grwm_match/plat && R() { uv run -q --no-project --with numpy --with pillow python -I "$@"; }; R - <<'EOF'
+    p='plat2.py'; s=open(p).read()
+    s = s.replace('SCALE = 1.0', 'SCALE = 1.08')
+    open(p, 'w').write(s)
+    print(len(s))
+    EOF
+    """
+
+    func verdict(_ cmd: String, shell: ClaudeShellScope? = .folders, runCode: Bool = false, askAll: Bool = false,
+                 script: String? = nil) -> ClaudeFileVerdict {
+        let a = ClaudePermissionAsk(id: "perm_1", toolName: "Bash", input: .object(["command": .string(cmd)]), toolUseId: "t")
+        return ClaudeFilePolicy.verdict(a, mode: .ask, folders: askAll ? [] : [project], cwd: cwd, home: home, askAll: askAll,
+                                        shell: askAll ? nil : shell, runCode: askAll ? false : runCode, readScript: { _ in script })
+    }
+    func why(_ v: ClaudeFileVerdict, file: StaticString = #filePath, line: UInt = #line) -> String? {
+        guard case .ask(let c) = v else { XCTFail("ran: \(v)", file: file, line: line); return nil }
+        return c.alwaysAsksBecause
+    }
+
+    func testTheHeredocIsReadAsOneBlockNotAsShellWords() throws {
+        let t = try XCTUnwrap(ClaudeAlwaysRules.lex(ownerCommand))
+        let bodies = t.compactMap { if case .heredoc(let b) = $0 { return b } else { return nil } }
+        XCTAssertEqual(bodies.count, 1)
+        XCTAssertTrue(bodies[0].hasPrefix("p='plat2.py'; s=open(p).read()"))
+        XCTAssertTrue(bodies[0].hasSuffix("print(len(s))"))
+        XCTAssertFalse(t.contains(.word(.init(text: "open", expands: false))))
+        // <<- strips tabs before the delimiter; two here-documents on one line; a here-string isn't one.
+        let two = try XCTUnwrap(ClaudeAlwaysRules.lex("cat <<A > /tmp/a; cat <<-B > /tmp/b\nx\nA\n\ty\n\tB\nls"))
+        XCTAssertEqual(two.compactMap { if case .heredoc(let b) = $0 { return b } else { return nil } }, ["x", "\ty"])
+        XCTAssertTrue(two.contains(.word(.init(text: "ls", expands: false))))
+        XCTAssertFalse(try XCTUnwrap(ClaudeAlwaysRules.lex("grep x <<< 'open me'")).contains { if case .heredoc = $0 { return true } else { return false } })
+    }
+
+    func testTheOwnersCommandGivesTheHonestReasonAndRunsWithTheSwitch() {
+        XCTAssertEqual(why(verdict(ownerCommand)), "Always asks: \(ClaudeKindGrants.codeAndPackagesReason)")
+        guard case .ask(let c) = verdict(ownerCommand) else { return XCTFail() }
+        XCTAssertNil(c.alwaysLabel)
+        // Without "shell commands" too: the same honest reason (not "controls other apps").
+        XCTAssertEqual(why(verdict(ownerCommand, shell: nil)), "Always asks: \(ClaudeKindGrants.codeAndPackagesReason)")
+        // The switch on: it runs (uv may fetch numpy and pillow; /tmp is in scope), with or without "shell commands".
+        XCTAssertEqual(verdict(ownerCommand, runCode: true), .allow)
+        XCTAssertEqual(verdict(ownerCommand, shell: nil, runCode: true), .allow)
+        // "Ask before anything" overrides it.
+        XCTAssertEqual(why(verdict(ownerCommand, runCode: true, askAll: true)), "You chose Ask before anything (Settings → Claude)")
+    }
+
+    func testTheShellOpenStillFlagsAndOtherShellRisksStillAskWithTheSwitch() {
+        for (cmd, reason) in [
+            ("open \(project)/out/l1.mp4", "it changes system settings or controls other apps"),
+            ("python3 - <<'EOF'\nprint(1)\nEOF\nopen /tmp/x.mp4", "it changes system settings or controls other apps"),
+            ("rm -rf /tmp/grwm && python3 -c 'print(1)'", "it deletes files"),
+            ("python3 -c 'print(1)' && mv /tmp/a /tmp/b", "it moves or renames files"),
+            ("sudo python3 -c 'print(1)'", "it needs admin rights"),
+            ("chmod +x /tmp/a.py && python3 /tmp/a.py", "it changes file permissions"),
+            ("python3 -c 'print(1)'; killall Finder", "it stops programs"),
+            ("curl -s https://x.example | python3 -", "it uses the network or installs software"),
+            ("pip install numpy && python3 -c 'import numpy'", "it uses the network or installs software"),
+            ("osascript -e 'tell app \"Finder\" to quit'", "it changes system settings or controls other apps"),
+            ("python3 - <<'EOF'\nopen('/Users/me/Documents/taxes.txt').read()\nEOF", "the code Claude wrote works outside your allowed folders"),
+            ("cd /Users/me/Documents && python3 -c 'print(1)'", "it reaches a folder that can't be always allowed (your whole home folder is too wide to always allow)"),
+            ("bash <<'EOF'\nrm -rf /tmp/x\nEOF", "it deletes files"),
+            ("bash -c 'cp /tmp/a ~/.zshrc'", "it reaches a folder that can't be always allowed (your whole home folder is too wide to always allow)"),
+        ] {
+            XCTAssertEqual(why(verdict(cmd, runCode: true)), "Always asks: \(reason)", cmd)
+        }
+        // Outside the folders but in an allowable one: asks, offering shell commands + that folder.
+        guard case .ask(let c) = verdict("python3 -c \"open('/Users/me/Movies/Old/a.txt').read()\"", runCode: true) else { return XCTFail() }
+        XCTAssertEqual(c.ruleFolders, ["/Users/me/Movies/Old"])
+    }
+
+    func testCodeThatDeletesRunsProgramsReachesTheNetworkOrControlsAppsStillAsks() {
+        let cases: [(String, String)] = [
+            ("import subprocess\nsubprocess.run(['ffmpeg', '-i', 'a.mp4', 'b.mp4'])", "runs other programs"),
+            ("import os\nos.system('ls')", "runs other programs"),
+            ("import shutil\nshutil.rmtree('/tmp/grwm')", "deletes files"),
+            ("import os\nos.remove('/tmp/a.png')", "deletes files"),
+            ("from pathlib import Path\nPath('/tmp/a').unlink()", "deletes files"),
+            ("import urllib.request\nurllib.request.urlopen('x')", "uses the network"),
+            ("import requests\nrequests.get('x')", "uses the network"),
+            ("import http.client", "uses the network"),
+            ("import os\nos.popen('osascript -e beep')", "runs other programs"),
+            ("print('osascript')", "controls other apps"),
+        ]
+        for (code, what) in cases {
+            for cmd in ["python3 - <<'EOF'\n\(code)\nEOF", "python3 -c \"\(code.replacingOccurrences(of: "\n", with: "; "))\""] {
+                XCTAssertEqual(why(verdict(cmd, runCode: true)), "Always asks: the code Claude wrote \(what)", cmd)
+                // Off: its risk is still the reason (before "it runs code Claude wrote").
+                XCTAssertEqual(why(verdict(cmd)), "Always asks: the code Claude wrote \(what)", cmd)
+            }
+        }
+        // node -e and a here-document saved then run.
+        XCTAssertEqual(why(verdict("node -e \"require('child_process').execSync('ls')\"", runCode: true)), "Always asks: the code Claude wrote runs other programs")
+        XCTAssertEqual(why(verdict("cat > /tmp/a.py <<'EOF'\nimport shutil; shutil.rmtree('/tmp/x')\nEOF\npython3 /tmp/a.py", runCode: true)),
+                       "Always asks: the code Claude wrote deletes files")
+    }
+
+    func testPlainCodeRunsOnlyWithTheSwitch() {
+        let ok = [
+            "python3 -c \"from PIL import Image; print(Image.open('/tmp/grwm/a.png').size)\"",
+            "cd \(project) && python3 - <<'EOF'\nimport json\nd = json.load(open('beats.json'))\nprint(len(d))\nEOF",
+            "node -e \"console.log(require('fs').readFileSync('/tmp/a.txt', 'utf8').length)\"",
+            "bash <<'EOF'\nfor f in /tmp/grwm/*.png; do sips -Z 512 \"$f\"; done\nEOF",
+            "uv run --with numpy python /tmp/beats.py",
+            "cat > /tmp/a.py <<'EOF'\nprint(open('/tmp/a.txt').read())\nEOF\npython3 /tmp/a.py",
+        ]
+        for cmd in ok {
+            guard case .ask(let c) = verdict(cmd) else { return XCTFail("ran without the switch: \(cmd)") }
+            XCTAssertNil(c.alwaysLabel, cmd)
+            XCTAssertTrue(c.alwaysAsksBecause?.contains("Settings → Claude can allow this") == true, "\(cmd): \(c.alwaysAsksBecause ?? "")")
+            XCTAssertEqual(verdict(cmd, runCode: true), .allow, cmd)
+        }
+        XCTAssertEqual(why(verdict("uv run --with numpy python /tmp/beats.py", script: "print(1)")), "Always asks: \(ClaudeKindGrants.packagesReason)")
+        // A data here-document with no interpreter is just a file being written: the shell kind covers it.
+        XCTAssertEqual(verdict("cat <<'EOF' > /tmp/notes.txt\nopen the door\nEOF"), .allow)
+    }
+
+    func testTheSwitchIsStoredOffByDefaultAndPausedByAskBeforeAnything() throws {
+        var s = ClaudeFileSettings()
+        XCTAssertFalse(s.runsCode)
+        let old = try JSONDecoder().decode(ClaudeFileSettings.self, from: Data(#"{"mode":"ask","folders":[],"shellScope":"folders"}"#.utf8))
+        XCTAssertFalse(old.runsCode)
+        s.runCode = true
+        XCTAssertTrue(s.activeRunCode)
+        XCTAssertEqual(try JSONDecoder().decode(ClaudeFileSettings.self, from: JSONEncoder().encode(s)), s)
+        s.askEverything = true
+        XCTAssertFalse(s.activeRunCode)
+        XCTAssertTrue(s.runsCode)   // kept for when the pause ends
     }
 }

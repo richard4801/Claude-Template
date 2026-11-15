@@ -131,14 +131,23 @@ public enum ClaudeAlwaysRules {
         /// It expands at run time: a variable, `$( )`, backticks or braces (outside single quotes).
         var expands: Bool
     }
-    enum Token: Equatable { case word(Word), op(String) }
+    /// `heredoc`: the text a here-document feeds in (bundle-24: it is data or code, never shell words; the owner's
+    /// `R - <<'EOF'` Python read `open(p)` as the macOS `open` command).
+    enum Token: Equatable { case word(Word), op(String), heredoc(String) }
 
-    /// The command as the shell splits it (quotes removed), or nil when it can't be read (an open quote).
+    /// The command as the shell splits it (quotes removed), or nil when it can't be read (an open quote). A here-document's
+    /// lines come back as one `.heredoc` token after the newline that starts them.
     static func lex(_ s: String) -> [Token]? {
         var out: [Token] = []
         var cur = "", inWord = false, expands = false, quotedAny = false
+        // Here-documents opened on this line: their delimiters (and `<<-`: leading tabs stripped), read at the newline.
+        var awaitDelim: Bool?
+        var pending: [(String, Bool)] = []
         func flush() {
-            if inWord { out.append(.word(Word(text: cur, expands: expands))) }
+            if inWord {
+                out.append(.word(Word(text: cur, expands: expands)))
+                if let strip = awaitDelim { pending.append((cur, strip)); awaitDelim = nil }
+            }
             cur = ""; inWord = false; expands = false; quotedAny = false
         }
         let cs = Array(s)
@@ -147,7 +156,29 @@ public enum ClaudeAlwaysRules {
             let c = cs[i]
             switch c {
             case " ", "\t": flush()
-            case "\n", "\r": flush(); out.append(.op(";"))
+            case "\n", "\r":
+                flush(); out.append(.op(";"))
+                guard !pending.isEmpty, c == "\n" else { break }
+                // The bodies, one after another, each up to its delimiter line.
+                var j = i + 1
+                for (delim, strip) in pending {
+                    var body: [String] = []
+                    while j <= cs.count {
+                        let k = cs[j...].firstIndex(of: "\n") ?? cs.count
+                        var line = String(cs[j..<k])
+                        if line.hasSuffix("\r") { line.removeLast() }
+                        let bare = strip ? String(line.drop(while: { $0 == "\t" })) : line
+                        j = k + 1
+                        if bare == delim { break }
+                        body.append(line)
+                        if k == cs.count { break }
+                    }
+                    out.append(.heredoc(body.joined(separator: "\n")))
+                }
+                pending = []
+                // Go on at the newline after the last delimiter (it ends that command), or the end.
+                i = min(j - 1, cs.count)
+                continue
             case "'":
                 inWord = true; quotedAny = true
                 guard let end = cs[(i + 1)...].firstIndex(of: "'") else { return nil }
@@ -184,7 +215,9 @@ public enum ClaudeAlwaysRules {
                 while i + 1 < cs.count, pairs.contains(String(op.last!) + String(cs[i + 1])) || (op.hasSuffix("<<") && cs[i + 1] == "<") || (op == "&>" && cs[i + 1] == ">") {
                     op.append(cs[i + 1]); i += 1
                 }
+                if op.hasSuffix("<<"), op != "<<<", i + 1 < cs.count, cs[i + 1] == "-" { op.append("-"); i += 1 }
                 out.append(.op(op))
+                if op == "<<" || op == "<<-" { awaitDelim = op == "<<-" }
             default:
                 inWord = true; cur.append(c)
             }
@@ -243,6 +276,7 @@ public enum ClaudeAlwaysRules {
         while i < tokens.count {
             switch tokens[i] {
             case .word(let w): argv.append(w)
+            case .heredoc: return .failure(Why(text: "it feeds text into the command"))
             case .op(let op):
                 let redirect = op.last == ">" || op.last == "<" || op == ">|" || op.hasSuffix(">>") || op == "<>"
                 if op.hasPrefix("<<") { return .failure(Why(text: "it feeds text into the command")) }

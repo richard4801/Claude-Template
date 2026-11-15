@@ -47,6 +47,8 @@ public struct ClaudeFileSettings: Codable, Hashable, Sendable {
     public var shellScope: ClaudeShellScope?
     /// MUSE tools (full names, `mcp__muse__get_frame`) that run without a card.
     public var alwaysTools: [String]?
+    /// "Let Claude run code it writes" (owner, bundle-24): off (nil) by default.
+    public var runCode: Bool?
 
     public init(mode: ClaudeFileMode = .ask, folders: [ClaudeAllowedFolder] = []) {
         self.mode = mode
@@ -63,6 +65,11 @@ public struct ClaudeFileSettings: Codable, Hashable, Sendable {
     public var activeRules: [ClaudeCommandRule] { askAll ? [] : rules }
     public var activeShell: ClaudeShellScope? { askAll ? nil : shellScope }
     public var activeTools: [String] { askAll ? [] : tools }
+    public var runsCode: Bool { runCode ?? false }
+    /// The one sentence under the switch in Settings → Claude.
+    public static let runCodeHint = "Python or other code Claude writes into a command runs without asking inside your folders and temporary files, and uv may download Python packages for it; code that deletes files, runs other programs, uses the network or controls other apps still asks."
+    /// "Ask before anything" pauses it too.
+    public var activeRunCode: Bool { askAll ? false : runsCode }
 
     /// "Allow always: shell commands" (a wider scope already granted stays).
     public mutating func allowShell(_ scope: ClaudeShellScope = .folders) {
@@ -297,6 +304,7 @@ public enum ClaudeFilePolicy {
     /// and `readScript` look at the Mac (a command's folder arguments, an interpreter's script).
     public static func verdict(_ ask: ClaudePermissionAsk, mode: ClaudeFileMode, folders: [String], cwd: String, home: String,
                                rules: [ClaudeCommandRule] = [], askAll: Bool = false, shell: ClaudeShellScope? = nil, tools: [String] = [],
+                               runCode: Bool = false,
                                isDirectory: (String) -> Bool = { _ in false }, readScript: (String) -> String? = { _ in nil }) -> ClaudeFileVerdict {
         guard mode == .ask else { return .deny(offRefusal) }
         // A folder too wide to always allow (the disk, home, ~/Library) never counts, however it got on the list.
@@ -311,9 +319,11 @@ public enum ClaudeFilePolicy {
             let c = ClaudeAlwaysRules.check(cmd, folders: folders, cwd: cwd, home: home, isDirectory: isDirectory, readScript: readScript)
             if c.clean, let r = c.rule, rules.contains(r) { return .allow }
             // The kind: shell commands, inside the folders and temporary files (or anywhere).
-            let k = ClaudeKindGrants.shellCheck(cmd, scope: shell ?? .folders, folders: folders, cwd: cwd, home: home,
+            let k = ClaudeKindGrants.shellCheck(cmd, scope: shell ?? .folders, folders: folders, cwd: cwd, home: home, runCode: runCode,
                                                 isDirectory: isDirectory, readScript: readScript)
-            if shell != nil, k.clean { return .allow }
+            // "Let Claude run code it writes" covers a command whose only reason to ask was its code (inside the folders and
+            // temporary files, or the shell scope given); everything else needs "shell commands".
+            if k.clean, shell != nil || (runCode && k.code) { return .allow }
             if let why = k.why { return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: "Always asks: \(why)")) }
             return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: nil, ruleFolders: k.needFolders, shell: true))
         }

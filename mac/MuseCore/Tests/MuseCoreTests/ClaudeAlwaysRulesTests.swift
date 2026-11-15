@@ -200,9 +200,6 @@ final class ClaudeAlwaysRulesTests: XCTestCase {
             ("cat $(echo \(movies)/a.txt)", "it uses shell variables or substitutions"),
             ("cat `echo a`", "it uses shell variables or substitutions"),
             ("cat <<EOF > \(movies)/a.txt\nhi\nEOF", "it feeds text into the command"),
-            ("python3 -c 'import os; print(1)'", "it runs code typed into the command"),
-            ("node -e 'require(1)'", "it runs code typed into the command"),
-            ("bash -c 'ls'", "it runs code typed into the command"),
             ("xargs ls", "it runs other commands"),
             ("env FOO=1 ls", "it runs other commands"),
             ("FOO=1 ffmpeg -i a.mp4 b.mp4", "it sets environment variables"),
@@ -217,6 +214,14 @@ final class ClaudeAlwaysRulesTests: XCTestCase {
             guard case .ask(let card) = verdict(cmd, rules: [ffmpeg], folders: [movies]) else { return XCTFail("ran without the kind: \(cmd)") }
             XCTAssertEqual(card.alwaysLabel, "Allow always: shell commands", cmd)
             XCTAssertEqual(verdict(cmd, rules: [], folders: [movies], shell: .folders), .allow, cmd)
+        }
+        // Code typed into the command is its own kind (bundle-24): it asks until "Let Claude run code it writes" is on.
+        for cmd in ["python3 -c 'import os; print(1)'", "node -e 'require(1)'", "bash -c 'ls'"] {
+            XCTAssertEqual(check(cmd).why, "it runs code typed into the command", cmd)
+            guard case .ask(let card) = verdict(cmd, rules: [], folders: [movies], shell: .folders) else { return XCTFail("ran: \(cmd)") }
+            XCTAssertNil(card.alwaysLabel, cmd)
+            XCTAssertEqual(card.alwaysAsksBecause, "Always asks: \(ClaudeKindGrants.codeReason)", cmd)
+            XCTAssertEqual(ClaudeFilePolicy.verdict(bash(cmd), mode: .ask, folders: [movies], cwd: cwd, home: home, shell: .folders, runCode: true), .allow, cmd)
         }
     }
 
