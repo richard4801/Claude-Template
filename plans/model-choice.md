@@ -101,3 +101,16 @@ apps keep working unchanged.
 - **App follow-up (not built)**: show `resolutions[i].modelLabel` in the pill and chips instead of the entry label;
   Android: show live-priced chips ("priced at Generate") instead of hiding perSec 0; Mac `snapResolution`: nearest
   resolution before the ladder's, with `resolutionFit.note`.
+
+### REVERSED (owner 2026-11-15, branch claude/model-per-provider): each provider stands on its own
+"Why do we have Higgsfield + Replicate? They should stand on their own! Higgsfield has 480p."
+- One picker entry per provider again: `seedance-2.5` = Seedance 2.5 · Replicate (480p/720p), `seedance-2.5-hf` =
+  Seedance 2.5 · Higgsfield (480p/720p/1080p), likewise `seedance-2.0(-hf)`, `kling-v3-omni(-hf)`, `wan-2.7(-hf)`,
+  `h3` / `h3-hf`; `kling-v3` is Higgsfield only. Each has only its own resolutions and price; a pick never moves to the
+  other provider (no cheapest-route switching; ladders and engineModel run exactly the spec named).
+- Higgsfield prices: every resolution chip is quoted live (free /estimate, 2.5 s budget); no quote back in time →
+  `perSec` 0 with `livePrice` → the apps show "priced at Generate" (app patches on claude/model-picker-patches).
+- No silent fallback: a provider that refuses at start fails the job, refunded, e.g. "Higgsfield is out of credit ·
+  you weren't charged · pick MiniMax H3 · Replicate". Opt-in per studio: PATCH /v1/suite/settings
+  `{providerFallback: true}` (stored as `suite_settings.models._providerFallback`, no migration; GET shows it), which
+  restores the same-resolution move (suite shots and the classic Higgsfield swap).

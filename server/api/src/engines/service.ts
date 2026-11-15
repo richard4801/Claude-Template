@@ -115,16 +115,8 @@ export class ModelChoice {
   }
 
   /** The quote for a swap on a chosen engine: its `RenderReq` (priced like /v1/jobs prices it) for `takes` of a clip. */
-  /**
-   * Owner 2026-11-14 (one model, several providers): MiniMax H3's swap at HD (2K) runs on Higgsfield (half Replicate's
-   * 2K rate) when its key is set, it hasn't refused in the last 30 minutes and the owner hasn't switched it off; a clip
-   * shorter than Higgsfield's 5 s minimum stays on Replicate (padding would bill seconds that aren't there).
-   */
-  swapRoute(id: string, quality: string | undefined, prefs: { models?: Record<string, { enabled?: boolean }> }, clipSeconds?: number | null): string {
-    if (id !== 'h3' || quality !== 'hd' || (clipSeconds != null && clipSeconds < HF_SWAP_MIN_SEC)) return id;
-    const hf = this.ctx.suite.providers.higgsfield;
-    return hf.configured() && !this.ctx.suite.isDown('higgsfield') && prefs.models?.['h3-hf']?.enabled !== false ? 'h3-hf' : id;
-  }
+  /** The swap engine a pick runs on: exactly the one picked (owner 2026-11-15: no switching between providers). */
+  swapRoute(id: string, _quality?: string, _prefs?: unknown, _clipSeconds?: number | null): string { return id; }
 
   async swapQuote(studioId: string, id0: string, quality: string | undefined, clipSeconds: number | null | undefined, takes = 1) {
     const prefs = await this.ctx.suite.prefs(studioId);
@@ -156,9 +148,9 @@ export class ModelChoice {
     const p = await suite.prefs(studioId);
     // Every model is listed (owner 2026-11-12): a provider that refused recently stays (Auto skips it, not the picker).
     const avail = suite.mode === 'off' ? new Set() : suite.configured();
-    const ladderRes = (id: string) => { for (const t of ['draft', 'standard', 'hd', 'cinema'] as const) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => familyOf(x.model) === id); if (s) return s.resolution; } return undefined; };
+    const ladderRes = (id: string) => { for (const t of ['draft', 'standard', 'hd', 'cinema'] as const) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };
     const out = new Map<string, Engine>();
-    // Owner 2026-11-14: one entry per model, its resolutions across its providers (suite/service.ts pickerModels).
+    // Owner 2026-11-15: one entry per provider, its own resolutions and prices (suite/service.ts pickerModels).
     for (const f of suite.mode === 'off' ? [] : await suite.pickerModels(studioId, p, avail as Set<ModelSpec['provider']>, quotes)) {
       // Every video model is listed (owner 2026-11-12), also one made only for New Swap (Wan 2.7 Edit): its purposes
       // are the ones it's made for; the others adapt (candidates).
@@ -167,14 +159,13 @@ export class ModelChoice {
       out.set(f.head.id, { ...e, inputs: inputSlotsOf(f.routes) });
     }
     // Character swap (and Recreate swap fills): the hosted H3 family joins with "swap"; Edit / Fast on our GPU are added.
-    // A provider route of a listed model (MiniMax H3 on Higgsfield) gives that model "swap" instead of a second entry.
     for (const e of this.swapUsable(p)) {
-      const fam = familyOf(e.id), cur = out.get(fam);
+      const fam = e.id, cur = out.get(fam);
       if (e.runs !== 'gpu') {
         const m = modelById(fam)!, sp = this.swapPrice(e.id, 'standard', null, p.models?.[e.id]?.priceScale ?? 1);
         // A swap-only model (Genjutsu) is listed at its swap resolution and price.
         const base = cur && cur.purposes.length ? cur : this.videoEntry(m, cur?.purposes ?? [], p.models?.[e.id]?.priceScale ?? 1, sp.resolution ?? undefined);
-        const hf = e.runs === 'higgsfield' && fam === e.id;
+        const hf = e.runs === 'higgsfield';
         out.set(fam, { ...base, purposes: PURPOSES.filter(x => base.purposes.includes(x) || x === 'swap' || x === 'fill'),
           ...(e.genjutsu ? { keeps: GENJUTSU_KEEPS, bestFor: 'Same moves, new look or scene: a new outfit or background, added characters or products' } : {}),
           limits: { ...base.limits, minSeconds: e.genjutsu?.minSec ?? (hf ? HF_SWAP_MIN_SEC : cur?.limits.minSeconds ?? P.REPLICATE_MIN_SEC), maxInputSeconds: e.genjutsu?.maxSec ?? P.REPLICATE_MAX_SEC } });
@@ -288,7 +279,7 @@ export class ModelChoice {
     if (LADDER_PURPOSES.includes(purpose)) {
       const prefs = await this.ctx.suite.prefs(u.studioId);
       const steps = purpose === 'recast' ? RECAST_LADDER.draft : purpose === 'extend' ? EXTEND_LADDER.draft : (prefs.ladder?.draft?.length ? prefs.ladder.draft : DEFAULT_LADDER.draft);
-      return { model: steps.map(s => familyOf(s.model)).find(has) ?? null, rule: 'ladder' };
+      return { model: steps.map(s => s.model).find(has) ?? null, rule: 'ladder' };
     }
     if (purpose === 'swap') {
       const id = SWAP_ENGINES.find(e => e.ref === this.ctx.config.REPLICATE_VIDEO_MODEL)?.id ?? 'h3';
@@ -396,7 +387,7 @@ export class ModelChoice {
     const m = e.kind === 'video' ? modelById(e.model) : undefined;
     const prefs = m ? await this.ctx.suite.prefs(u.studioId) : undefined;
     const scale = (m && prefs?.models?.[m.id]?.priceScale) ?? 1;
-    const tiers = m ? (['draft', 'standard', 'hd', 'cinema'] as const).filter(t => (prefs?.ladder?.[t]?.length ? prefs.ladder[t]! : DEFAULT_LADDER[t]).some(s => familyOf(s.model) === m.id)) : [];
+    const tiers = m ? (['draft', 'standard', 'hd', 'cinema'] as const).filter(t => (prefs?.ladder?.[t]?.length ? prefs.ladder[t]! : DEFAULT_LADDER[t]).some(s => s.model === m.id)) : [];
     return { tier: tiers[0] ?? null, tiers,
       resolutions: e.resolutions ?? (m ? m.resolutions.map(r => ({ id: r.id, label: r.label, perSec: r4(r.perSec * scale) })) : e.limits.resolutions.map(r => ({ ...r, perSec: null }))),
       perSec: e.price?.basis === 'per_second' ? e.price.usd : null, perRun: e.price?.basis === 'per_run' ? e.price.usd : null,
@@ -413,7 +404,7 @@ export class ModelChoice {
     for (const p of only ? [only] : PURPOSES) {
       const cands = only ? engines : engines.filter(e => e.purposes.includes(p));
       const b = await this.builtin(u, p, cands);
-      const st = studio[p] && cands.some(e => e.model === familyOf(studio[p]!)) ? familyOf(studio[p]!) : studio[p] && cands.some(e => e.model === studio[p]) ? studio[p]! : null;
+      const st = studio[p] && cands.some(e => e.model === studio[p]) ? studio[p]! : null;
       purposes.push({ id: p, label: PURPOSE_INFO[p].label, kind: PURPOSE_INFO[p].kind, default: st ?? b.model, studioDefault: u.role === 'owner' ? st : null, rule: st ? 'fixed' : b.rule });
     }
     const def = only ? purposes[0]!.default : null;
@@ -439,8 +430,7 @@ export class ModelChoice {
    */
   async check(u: AuthUser, purpose: Purpose, model: string): Promise<Engine> {
     const cands = await this.candidates(u, purpose, { quotes: false });
-    // An old id of a provider route ("h3-hf") is its model's entry (owner 2026-11-14: one entry per model).
-    const e = cands.find(x => x.model === model) ?? cands.find(x => x.model === familyOf(model));
+    const e = cands.find(x => x.model === model);
     if (u.role !== 'owner') {
       const rules = await this.memberRules(u.studioId);
       if (e && ModelChoice.forMembers(e, rules)) return e;
@@ -478,7 +468,7 @@ export class ModelChoice {
     if (requested) return { model: requested, source: 'request', engine: await this.check(u, purpose, requested) };
     const d = (await this.studioDefaults(u.studioId))[purpose];
     if (!d) return null;
-    const e = (await this.candidates(u, purpose, { quotes: false })).find(x => x.model === d || x.model === familyOf(d));
+    const e = (await this.candidates(u, purpose, { quotes: false })).find(x => x.model === d);
     // A member runs on the studio's default too, unless it's a custom model the owner hid from members.
     if (!e || (u.role !== 'owner' && e.custom && !ModelChoice.forMembers(e, await this.memberRules(u.studioId)))) return null;
     return { model: d, source: 'studio', engine: e };

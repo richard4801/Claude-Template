@@ -103,11 +103,27 @@ describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield H3 against a FAKE Higgsfield
     } finally { await a.close(); }
   });
 
-  it('out of credit at start: the same shot runs on Replicate H3 2K and later shots skip Higgsfield', async () => {
+  it('out of credit at start, by default: the shot fails, refunded, saying so and what to pick (no silent move)', async () => {
     hf.length = 0; rep.length = 0; hfMode = 'no_credit';
     const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
     const { owner } = await people(a, 0, { topUp: 100 });
     try {
+      expect((await owner.req('GET', '/v1/suite/settings')).body.providerFallback).toBe(false);
+      const { j, settle } = await shot(a, owner);
+      expect(j.state).toBe('failed');
+      expect(j.error).toBe("Higgsfield is out of credit · you weren't charged · pick MiniMax H3 · Replicate");
+      expect(hf).toHaveLength(1);
+      expect(rep).toHaveLength(0);
+      expect(settle?.amountUsd ?? 0).toBe(0);
+    } finally { await a.close(); }
+  });
+
+  it('out of credit at start, opted in: the same shot runs on Replicate H3 2K and later shots skip Higgsfield', async () => {
+    hf.length = 0; rep.length = 0; hfMode = 'no_credit';
+    const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      expect((await owner.req('PATCH', '/v1/suite/settings', { providerFallback: true })).body.providerFallback).toBe(true);
       const first = await shot(a, owner);
       expect(first.j.state).toBe('done');
       expect(hf).toHaveLength(1);
@@ -140,57 +156,48 @@ describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield H3 against a FAKE Higgsfield
     return { req: r.body.request, j };
   };
 
-  it('Character swap: MiniMax H3 is one entry; its 2K runs on Higgsfield at $0.065/s only with the key', async () => {
+  it('Character swap: MiniMax H3 · Higgsfield is offered only with the key, at $0.065/s 2K, 5–15 s', async () => {
     for (const [creds, offered] of [[true, true], [false, false]] as const) {
       const a = await makeApp(env(creds ? { HF_CREDENTIALS: 'hfid:hfsecret' } : {}));
       const { owner } = await people(a, 0, { topUp: 100 });
       try {
         const list = (await owner.req('GET', '/v1/engines?purpose=swap')).body;
-        const rows = (list.engines ?? list).filter((e: any) => e.model === 'h3' || e.model === 'h3-hf');
-        expect(rows.map((e: any) => e.model)).toEqual(['h3']); // never a second H3 row (owner 2026-11-14)
-        const row = rows[0];
-        expect(row.purposes).toContain('swap');
-        const twoK = row.resolutions.find((r: any) => r.id === '2K');
-        if (!offered) {
-          expect(row).toMatchObject({ label: 'MiniMax H3 · Replicate', providerName: 'Replicate' });
-          expect(twoK).toMatchObject({ provider: 'replicate', perSec: 0.13 });
-          continue;
-        }
-        expect(row).toMatchObject({ name: 'MiniMax H3', label: 'MiniMax H3 · Replicate + Higgsfield', providerName: 'Replicate + Higgsfield' });
-        expect(row.resolutions.map((r: any) => [r.id, r.provider, r.perSec, r.modelLabel])).toEqual([['768P', 'replicate', 0.08, 'MiniMax H3 · Replicate'], ['2K', 'higgsfield', 0.065, 'MiniMax H3 · Higgsfield']]);
-        // The old id still resolves: a request for h3-hf is checked against the H3 entry.
-        expect((await owner.req('PATCH', '/v1/engines/defaults', { purpose: 'swap', model: 'h3-hf' })).status).toBe(200);
+        const hfRow = (list.engines ?? list).find((e: any) => e.model === 'h3-hf');
+        if (!offered) { expect(hfRow).toBeUndefined(); continue; }
+        expect(hfRow).toMatchObject({ name: 'MiniMax H3', label: 'MiniMax H3 · Higgsfield', providerName: 'Higgsfield', resolution: '2K', price: { basis: 'per_second', usd: 0.065 } });
+        expect(hfRow.purposes).toContain('swap');
+        expect(hfRow.limits).toMatchObject({ minSeconds: 5, maxInputSeconds: 15 });
       } finally { await a.close(); }
     }
   });
 
-  it('labels: H3 is one entry; each resolution names its provider; members with provider names off see neither', async () => {
+  it('labels: the same H3 on Replicate and on Higgsfield never look the same (owner, members, provider names off)', async () => {
     const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
     const { owner, members: [member] } = await people(a, 1, { topUp: 100 });
     try {
-      const h3s = (l: any[]) => l.filter((e: any) => e.model === 'h3' || e.model === 'h3-hf');
+      const h3s = (l: any[]) => l.filter((e: any) => e.model === 'h3' || e.model === 'h3-hf').sort((x: any, y: any) => x.model.localeCompare(y.model));
       const unique = (l: any[]) => expect(new Set(l.map((e: any) => e.label)).size).toBe(l.length);
       for (const who of [owner, member!]) {
         const eng = (await who.req('GET', '/v1/engines?purpose=swap')).body.engines;
-        expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate + Higgsfield']);
+        expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate', 'MiniMax H3 · Higgsfield']);
         unique(eng);
         for (const e of eng) expect(e.label).toBe(`${e.name} · ${e.providerName}`);
         const cat = (await who.req('GET', '/v1/suite/catalog')).body.engines;
-        expect(h3s(cat).map((e: any) => [e.name, e.label, e.providerName, e.resolutions.map((r: any) => r.providerName)])).toEqual([['MiniMax H3', 'MiniMax H3 · Replicate + Higgsfield', 'Replicate + Higgsfield', ['Replicate', 'Higgsfield']]]);
+        expect(h3s(cat).map((e: any) => [e.name, e.label, e.providerName])).toEqual([['MiniMax H3', 'MiniMax H3 · Replicate', 'Replicate'], ['MiniMax H3', 'MiniMax H3 · Higgsfield', 'Higgsfield']]);
         unique(cat);
       }
-      // 4c switch off: members get no provider anywhere, the entry or its resolutions.
+      // 4c switch off: members get no provider, and the two H3s become "Option 1" and "Option 2", never the same bare name.
       await owner.req('PATCH', '/v1/engines/members', { showProviderNames: false });
       const eng = (await member!.req('GET', '/v1/engines?purpose=swap')).body.engines;
-      expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3']);
+      expect(h3s(eng).map((e: any) => e.label)).toEqual(['MiniMax H3 · Option 1', 'MiniMax H3 · Option 2']);
       unique(eng);
       expect(JSON.stringify(eng)).not.toMatch(/Higgsfield|Replicate|"provider(Name)?"/);
       const cat = (await member!.req('GET', '/v1/suite/catalog')).body.engines;
       unique(cat);
-      expect(h3s(cat).map((e: any) => e.name)).toEqual(['MiniMax H3']);
+      expect(h3s(cat).map((e: any) => e.name)).toEqual(['MiniMax H3 · Option 1', 'MiniMax H3 · Option 2']);
       expect(JSON.stringify(cat)).not.toMatch(/Higgsfield|Replicate|"provider(Name)?"/);
       // The owner always sees providers.
-      expect(h3s((await owner.req('GET', '/v1/engines?purpose=swap')).body.engines).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate + Higgsfield']);
+      expect(h3s((await owner.req('GET', '/v1/engines?purpose=swap')).body.engines).map((e: any) => e.label)).toEqual(['MiniMax H3 · Replicate', 'MiniMax H3 · Higgsfield']);
     } finally { await a.close(); }
   });
 
@@ -215,11 +222,24 @@ describe.skipIf(!hasFfmpeg)('AI suite · Higgsfield H3 against a FAKE Higgsfield
     } finally { await a.close(); }
   });
 
-  it('Character swap: Higgsfield out of credit at the start → the swap runs on Replicate H3 2K', async () => {
+  it('Character swap: Higgsfield out of credit at the start, by default → fails, refunded, saying what to pick', async () => {
     hf.length = 0; rep.length = 0; hfMode = 'no_credit';
     const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
     const { owner } = await people(a, 0, { topUp: 100 });
     try {
+      const { j } = await swap(a, owner);
+      expect(j.state).toBe('failed');
+      expect(j.error).toBe("Higgsfield is out of credit · you weren't charged · pick MiniMax H3 · Replicate");
+      expect(rep).toHaveLength(0);
+    } finally { await a.close(); }
+  });
+
+  it('Character swap: Higgsfield out of credit at the start, opted in → the swap runs on Replicate H3 2K', async () => {
+    hf.length = 0; rep.length = 0; hfMode = 'no_credit';
+    const a = await makeApp(env({ HF_CREDENTIALS: 'hfid:hfsecret' }));
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      await owner.req('PATCH', '/v1/suite/settings', { providerFallback: true });
       const { j } = await swap(a, owner);
       expect(j.state, j.error).toBe('done');
       expect(hf).toHaveLength(1);

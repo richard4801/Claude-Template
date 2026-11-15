@@ -373,9 +373,10 @@ describe.skipIf(!hasFfmpeg)('Wan 3.0 on Higgsfield: built in, priced live from t
     expect(d.auto.model).toBe('kling-o1'); // Auto skips a provider that refused recently; the person can still pick it
     const est = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'remix', ...body, engineModel: 'h3-hf' });
     expect(est.status, JSON.stringify(est.body)).toBe(200);
-    // The shot pickers list MiniMax H3 once (owner 2026-11-14): its 2K runs on Higgsfield, 768P on Replicate.
+    // The shot pickers list each provider on its own (owner 2026-11-15), each with its own resolutions.
     const h3 = (await owner.req('GET', '/v1/engines?purpose=shot')).body.engines.filter((e: any) => e.model === 'h3' || e.model === 'h3-hf');
-    expect(h3.map((e: any) => [e.model, e.resolutions.map((r: any) => [r.id, r.provider])])).toEqual([['h3', [['768P', 'replicate'], ['2K', 'higgsfield']]]]);
+    expect(h3.map((e: any) => [e.model, e.label, e.resolutions.map((r: any) => [r.id, r.provider])])).toEqual([
+      ['h3', 'MiniMax H3 · Replicate', [['768P', 'replicate'], ['2K', 'replicate']]], ['h3-hf', 'MiniMax H3 · Higgsfield', [['2K', 'higgsfield']]]]);
     (a.ctx.suite as any).down.clear();
     price = null;
     const n = await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'Rain.', engineModel: 'wan-3.0', resolution: '1080p', duration: 6 });

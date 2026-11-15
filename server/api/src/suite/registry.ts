@@ -31,10 +31,9 @@ export type ModelSpec = {
   name: string;
   provider: ProviderId;
   /**
-   * One model on several providers (owner 2026-11-14: "I should have options"): a ROUTE names the public model it runs
-   * (`family`, the head's id). The pickers list the head once, with the union of its routes' resolutions; each resolution
-   * runs on the cheapest route that offers it for the shot (suite/routes.ts), and falls back to another route at the
-   * same resolution when the first provider refuses at start. A route keeps its own id (old ids, prices, owner switches).
+   * The same model on another provider (owner 2026-11-14/15): `family` is the Replicate entry's id. Each provider is its
+   * own picker entry with its own resolutions and price (owner 2026-11-15, no switching between providers); the link is
+   * used only when the studio opts in to "try the other provider when one refuses at start" (runner).
    */
   family?: string;
   /** Provider model ref; per mode where a family has separate endpoints (Wan 2.7 t2v/i2v/r2v). */
@@ -425,8 +424,12 @@ export function routesOf(id: string): ModelSpec[] {
   const head = modelById(familyOf(id));
   return head ? [head, ...(ROUTES.get(head.id) ?? [])] : [];
 }
-/** The models the pickers list: every registry model that isn't a route of another, then the studio's custom models. */
-export const publicModels = (studioId?: string) => [...MODELS.filter(m => !isRoute(m)), ...(studioId ? customModelsOf(studioId) : [])];
+/**
+ * The models the pickers list: every registry model, each provider on its own (owner 2026-11-15: "Higgsfield and
+ * Replicate should stand on their own": "Seedance 2.5 · Replicate" and "Seedance 2.5 · Higgsfield" are two entries, each
+ * with its own resolutions and price), then the studio's custom models. `family` only links them for an opted-in fallback.
+ */
+export const publicModels = (studioId?: string) => [...MODELS, ...(studioId ? customModelsOf(studioId) : [])];
 
 export type LadderStep = { model: string; resolution: string };
 /**

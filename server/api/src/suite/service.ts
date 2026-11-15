@@ -21,7 +21,7 @@ import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
 import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixGroup, REMIX_GROUPS, remixIncomplete, remixModels, remixSpan, remixView, sourceLimits, togglesOn } from './remix.js';
 import { z } from 'zod';
-import { billedSeconds, buildPlan, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
+import { billedSeconds, buildPlan, FALLBACK_KEY, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, familyOf, refFor, inputSlotsOf, isRoute, MODELS, NO_INPUTS, modelById, modelView, MOCK_MODEL, publicModels, routesOf, TIER_INFO, TIERS, type ModelSpec, type ProviderId, type Tier } from './registry.js';
 import { familySpec, providersKey, quoteBody, routesAt, samplePlan, unionResolutions, type RateFn } from './routes.js';
@@ -106,6 +106,7 @@ export class SuiteService {
     await this.byo.ensure(studioId); // WS5: the studio's custom models are in the registry before anything is planned
     const [r] = await this.ctx.db.select().from(suiteSettings).where(eq(suiteSettings.studioId, studioId));
     const p: SuitePrefs = r ? { models: r.models, ladder: r.ladder ?? undefined, capPerJob: r.capPerJob, capPerDay: r.capPerDay } : {};
+    p.providerFallback = !!r?.models?.[FALLBACK_KEY]?.enabled;
     // WS5: a custom model's markup is set on the model itself (Settings → Providers).
     const custom = customModelsOf(studioId);
     if (custom.length) p.models = { ...(p.models ?? {}), ...Object.fromEntries(custom.map(m => [m.id, { ...(p.models?.[m.id] ?? {}), priceScale: m.byo!.priceScale }])) };
@@ -117,13 +118,15 @@ export class SuiteService {
     const avail = this.available();
     return {
       mode: this.mode, caps: this.caps(p), spentToday: round2(await this.spentToday(studioId)),
+      // Owner opt-in, default off: a provider that refuses at start hands the shot to the same model on its other provider.
+      providerFallback: !!p.providerFallback,
       ladder: Object.fromEntries(TIERS.map(t => [t, p.ladder?.[t]?.length ? p.ladder[t] : DEFAULT_LADDER[t]])), defaultLadder: DEFAULT_LADDER,
       models: MODELS.map(m => modelView(m, p.models?.[m.id], avail.has(m.provider))),
       providers: { replicate: this.providers.replicate.configured(), fal: this.providers.fal.configured(), runpod: false },
     };
   }
   async updateSettings(u: AuthUser, body: unknown) {
-    const b = (body ?? {}) as { models?: Record<string, { enabled?: unknown; acknowledge?: unknown; priceScale?: unknown }>; ladder?: unknown; capPerJob?: unknown; capPerDay?: unknown };
+    const b = (body ?? {}) as { models?: Record<string, { enabled?: unknown; acknowledge?: unknown; priceScale?: unknown }>; ladder?: unknown; capPerJob?: unknown; capPerDay?: unknown; providerFallback?: unknown };
     const cur = await this.prefs(u.studioId);
     const next: Required<Pick<SuitePrefs, 'models'>> & SuitePrefs = { ...cur, models: { ...(cur.models ?? {}) } };
     for (const [id, v] of Object.entries(b.models ?? {})) {
@@ -152,12 +155,16 @@ export class SuiteService {
           if (!Array.isArray(steps) || steps.length > 10) throw badRequest(`ladder.${tier}: up to 10 steps`);
           out[tier as Tier] = steps.map((s: any) => {
             const m = modelById(String(s?.model));
-            if (!m || m.id === 'mock' || (m.byo && m.byo.studioId !== u.studioId) || !routesOf(m.id).some(x => x.resolutions.some(r => r.id === s?.resolution))) throw badRequest(`ladder.${tier}: unknown model or resolution`);
+            if (!m || m.id === 'mock' || (m.byo && m.byo.studioId !== u.studioId) || !m.resolutions.some(r => r.id === s?.resolution)) throw badRequest(`ladder.${tier}: unknown model or resolution`);
             return { model: m.id, resolution: String(s.resolution) };
           });
         }
         next.ladder = out;
       }
+    }
+    if (b.providerFallback !== undefined) {
+      if (typeof b.providerFallback !== 'boolean') throw badRequest('providerFallback: true or false');
+      next.models[FALLBACK_KEY] = { enabled: b.providerFallback };
     }
     for (const k of ['capPerJob', 'capPerDay'] as const) {
       const v = b[k];
@@ -176,9 +183,8 @@ export class SuiteService {
     const avail = this.available();
     const tiers = TIERS.map(t => {
       const steps = p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t];
-      // Each step on the cheapest route of its model that makes its resolution (registry `family`).
-      const usable = steps.map(s => ({ s, m: routesAt(s.model, s.resolution, m => m.status !== 'removed' && !m.licence.blockNewFeatures
-        && p.models?.[m.id]?.enabled !== false && avail.has(m.provider))[0] })).filter(x => !!x.m);
+      const usable = steps.map(s => ({ s, m: modelById(s.model) })).filter(x => x.m && x.m.status !== 'removed' && !x.m.licence.blockNewFeatures
+        && p.models?.[x.m.id]?.enabled !== false && avail.has(x.m.provider) && x.m.resolutions.some(r => r.id === x.s.resolution));
       const first = usable[0];
       const res = first?.m!.resolutions.find(r => r.id === first.s.resolution);
       const base = { id: t, label: TIER_INFO[t].label, detail: TIER_INFO[t].detail, available: !!first,
@@ -186,8 +192,7 @@ export class SuiteService {
         maxSeconds: usable.length ? Math.max(...usable.map(x => x.m!.duration.max)) : null,
         minSeconds: usable.length ? Math.min(...usable.map(x => x.m!.duration.min)) : null,
         canKeyframes: usable.some(x => x.m!.modes.image), canReferences: usable.some(x => x.m!.modes.reference), canGuide: usable.some(x => x.m!.camera.referenceVideo), inputs: inputSlotsOf(usable.map(x => x.m!)) };
-      // `model` is the public model the pickers list (a route's family); `route` the spec this step runs on.
-      return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: familyOf(x.m!.id), ...(isRoute(x.m!) ? { route: x.m!.id } : {}), name: x.m!.name, label: specName(x.m!), resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
+      return u.role === 'owner' ? { ...base, models: usable.map(x => ({ model: x.m!.id, name: x.m!.name, label: specName(x.m!), resolution: x.s.resolution, inputs: inputSlotsOf([x.m!]) })) } : base;
     });
     // Composer tools (plans/video-composer.md "Tools on the shell"): which the apps can offer now. Talking and UGC ad are
     // shots (audio / product references); Extend continues a finished take.
@@ -231,30 +236,25 @@ export class SuiteService {
   }
 
   /**
-   * The video models the pickers list (owner 2026-11-14: one entry per model): each public model with a usable route
-   * (switched on, licensed, its provider set up), its limits as one model, and its resolutions across routes, each with
-   * the route and provider it runs on and that route's $/s after the owner's price correction (0 = priced live, unknown).
+   * The video models the pickers list (owner 2026-11-15: one entry per provider): each model that can run here (switched
+   * on, licensed, its provider set up) with its own resolutions, each with its $/s after the owner's price correction;
+   * a Higgsfield one quoted live (0 with `livePrice` = no quote back in time: "priced at Generate").
    */
   async pickerModels(studioId: string, p: SuitePrefs, avail: Set<ProviderId>, quotes = true) {
     const usable = (m: ModelSpec) => m.status !== 'removed' && !m.licence.blockNewFeatures && p.models?.[m.id]?.enabled !== false
       && !(m.licence.requiresAck && !p.models?.[m.id]?.acknowledgedAt) && avail.has(m.provider);
-    const heads = publicModels(studioId);
-    const rate = await this.pickerRates(quotes ? heads.flatMap(h => routesOf(h.id)).filter(usable) : []);
+    const heads = publicModels(studioId).filter(usable);
+    const rate = await this.pickerRates(quotes ? heads : []);
     const r4 = (v: number) => Math.round(v * 10000) / 10000;
-    const out = [];
-    for (const head of heads) {
-      const spec = familySpec(head.id, usable, rate);
-      if (!spec) continue;
-      const routes = routesOf(head.id).filter(usable);
-      const provOf = (m: ModelSpec) => (m.byo ? m.byo.providerKind : m.provider);
-      const resolutions = unionResolutions(head.id, usable, rate).map(r => {
-        const m = modelById(r.model)!;
-        return { id: r.id, label: r.label, perSec: r.rate == null ? 0 : r4(r.rate * (p.models?.[m.id]?.priceScale ?? 1)),
-          provider: provOf(m), providerName: providerLabel(provOf(m)), modelLabel: specName(m), ...(r.livePrice ? { livePrice: true } : {}) };
+    return heads.map(m => {
+      const prov = m.byo ? m.byo.providerKind : m.provider;
+      const resolutions = m.resolutions.map(r => {
+        const usd = rate(m, r.id);
+        return { id: r.id, label: r.label, perSec: usd == null ? 0 : r4(usd * (p.models?.[m.id]?.priceScale ?? 1)),
+          provider: prov, providerName: providerLabel(prov), modelLabel: specName(m), ...(m.livePrice ? { livePrice: true } : {}) };
       });
-      out.push({ head, spec, routes, resolutions, provider: providersKey(routes.map(provOf) as ProviderId[]) });
-    }
-    return out;
+      return { head: m, spec: m, routes: [m], resolutions, provider: prov };
+    });
   }
 
   /**
@@ -264,10 +264,9 @@ export class SuiteService {
    */
   async ownerEngines(studioId: string, p: SuitePrefs, avail: Set<ProviderId>) {
     const rules = await modelChoice(this.ctx).memberRules(studioId); // 4c: `members` = shown to members
-    const tiersOf = (id: string) => TIERS.filter(t => (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).some(s => familyOf(s.model) === id));
-    const ladderRes = (id: string) => { for (const t of TIERS) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => familyOf(x.model) === id); if (s) return s.resolution; } return undefined; };
-    // Owner 2026-11-14: one entry per model; its resolutions are the union of its provider routes, each priced on the
-    // route it runs on (suite/routes.ts), with that route's provider.
+    const tiersOf = (id: string) => TIERS.filter(t => (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).some(s => s.model === id));
+    const ladderRes = (id: string) => { for (const t of TIERS) { const s = (p.ladder?.[t]?.length ? p.ladder[t]! : DEFAULT_LADDER[t]).find(x => x.model === id); if (s) return s.resolution; } return undefined; };
+    // Owner 2026-11-15: one entry per provider (each with its own resolutions and price; Higgsfield's quoted live).
     const video = (await this.pickerModels(studioId, p, avail))
       .filter(f => f.spec.modes.text || f.spec.modes.image || f.spec.modes.reference || SWAP_ENGINES.some(e => e.id === f.head.id && e.genjutsu))
       .map(({ head: h, spec: m, routes, resolutions: rs, provider }) => {
