@@ -1,0 +1,286 @@
+From 9f774a93725f289e41ffdfb023b95c303ea9c52e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 15 Nov 2026 00:06:53 +0000
+Subject: [PATCH] Android: model picker shows the provider of the chosen
+ resolution; priced-at-Generate chips; nearest resolution with a note
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Server 2026-11-14 (one model, several providers): SuiteResolution reads provider, providerName, modelLabel,
+livePrice. The pill reads "Seedance 2.5 · Higgsfield, 1080p"; a live-priced resolution's chip shows "priced at
+Generate" instead of being hidden; switching models keeps the resolution when the new one makes it, else the nearest,
+with a toast (as the Mac). PickerRoutesTest.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxp8e6PPQu5wSLUbCfw
+---
+ .../main/kotlin/studio/muse/app/data/Suite.kt | 12 +++-
+ .../screens/suite/composer/ComposerScreen.kt  |  7 ++-
+ .../screens/suite/composer/ComposerSheets.kt  |  4 +-
+ .../ui/screens/suite/composer/ModelPicker.kt  | 63 ++++++++++++++++---
+ .../studio/muse/app/PickerRoutesTest.kt       | 61 ++++++++++++++++++
+ 5 files changed, 135 insertions(+), 12 deletions(-)
+ create mode 100644 android/app/src/test/kotlin/studio/muse/app/PickerRoutesTest.kt
+
+diff --git a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
+index 7b1b340..b6ee155 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/data/Suite.kt
+@@ -506,8 +506,18 @@ data class SuiteShot(val job: Job, val warnings: List<String> = emptyList(), val
+ @Serializable
+ data class SuiteLadderStep(val model: String, val resolution: String)
+ 
++/**
++ * One resolution of a model. One model on several providers (server 2026-11-14): [provider] / [providerName] say where
++ * this resolution runs and [modelLabel] the model as it runs there ("Seedance 2.5 · Higgsfield"); null from older servers
++ * and for members while the studio hides provider names. [livePrice]: priced by the provider when the shot is planned
++ * ([perSec] 0 here).
++ */
+ @Serializable
+-data class SuiteResolution(val id: String, val label: String = "", val shortSide: Int = 0, val perSec: Double = 0.0)
++data class SuiteResolution(val id: String, val label: String = "", val shortSide: Int = 0, val perSec: Double = 0.0,
++    val provider: String? = null, val providerName: String? = null, val modelLabel: String? = null, val livePrice: Boolean = false) {
++    /** No per-second price to show yet: it is priced on Generate. */
++    val pricedAtGenerate: Boolean get() = livePrice && perSec <= 0
++}
+ 
+ /** A registry model's lengths: min–max, or only the [allowed] ones. */
+ @Serializable
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+index 925e68e..e231bf6 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerScreen.kt
+@@ -300,6 +300,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
+         lead = st.model(d.characterId), clipFrame = clipFrame, clipName = recast.clipId?.let { id -> video.clip?.takeIf { it.id == id }?.name ?: if (id == SampleData.SAMPLE_CLIP) SampleData.sampleMeta.name else "Your clip" },
+         models = st.models, outfits = st.outfitsOf(d.characterId),
+         catalogNote = if (catalog == null) catalogError ?: "" else null, onRetryCatalog = { scope.launch { store.load() } },
++        toast = { c.repo.toast(it) },
+         photo = photo, // Photo tool (workstream 3)
+         onPromptEmptied = { if (d.tool == ComposerTool.PHOTO) c.suite.photo.clearPreset() else update { it.unselectingPreset() } },
+         refChips = { SuiteReferenceChips(d.references, { r -> store.removeDraftReference(r.uploadId, r.url) }) },
+@@ -410,7 +411,7 @@ fun SuiteComposerScreen(toolId: String? = null) {
+                     setTab = { t -> store.sheet.update { it?.copy(tab = t) } }, open = { open(it) }, close = { open(null) }, onMove = ::onMove,
+                     onPickSlot = { id -> pickFile(id) }, onClearSlot = { id -> store.composerSlots.update { it.clear(id) } },
+                     onPickCharacter = { id, o -> pickCharacter(id, o) }, onGenerate = ::generate, onStoryboard = { nav.go(Routes.SUITE_STORYBOARD) }, onCameraStage = { nav.go(Routes.CAMERA_STAGE) },
+-                    frame = frame, onTapFace = ::tapFace,
++                    frame = frame, onTapFace = ::tapFace, toast = { c.repo.toast(it) },
+                     takes = ExtendSlot.candidates(st.takes, c.repo.demo), extendKey = extendSlots[ToolSlots.EXTEND_VIDEO]?.media?.key,
+                     onPickTake = { t -> if (store.pickExtendTake(t)) open(null) else c.repo.toast("This take has no video to extend yet") },
+                     onUploadVideo = { open(null); pickExtendUpload(ToolSlots.EXTEND_VIDEO) },
+@@ -513,6 +514,8 @@ class ComposerUi(
+     val onRetryCatalog: () -> Unit = {},
+     /** Backspace cleared the prompt (owner decision 2026-11-08): the preset is unselected. */
+     val onPromptEmptied: () -> Unit = {},
++    /** A short notice ("Kling 4.0 makes 720p, 1080p · using 720p"). */
++    val toast: (String) -> Unit = {},
+ ) {
+     /** No price yet and no reason why: the estimate is on its way (the button says "Pricing…"). */
+     val pricing: Boolean get() = live && est == null && blocker == null
+@@ -1178,7 +1181,7 @@ private fun WideBar(ui: ComposerUi) {
+             // Owner only (WS7, as the Mac's "Model" pill): any engine, this quality's ladder first, then the others, then "Your providers".
+             val groups = ModelPicker.groups(ui.catalog, d.quality, purpose = d.pickPurpose)
+             if (ui.owner && !groups.isEmpty && d.tool in ComposerDraft.PROMPT_TOOLS) {
+-                MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> ui.update { it.pinEngine(groups.all.getOrNull(i - 1)).fit(ui.catalog) } }
++                MenuPill("cube", d.modelPill(ui.catalog), "Model, only you see models", modelMenuItems(d, groups)) { i -> val e = groups.all.getOrNull(i - 1); d.pinNote(e)?.let(ui.toast); ui.update { it.pinEngine(e).fit(ui.catalog) } }
+             }
+             // Shape, length and takes are in the Settings row (as on the phone); the bar keeps sound and speaking.
+             if (d.tool != ComposerTool.EXTEND) {
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
+index 041d705..1b304e0 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ComposerSheets.kt
+@@ -95,6 +95,8 @@ class SheetContext(
+     val onStoryboard: () -> Unit,
+     /** Recast: where the clip's first frame comes from (null = no clip yet). */
+     val frame: FrameSource? = null,
++    /** A short notice ("Kling 4.0 makes 720p, 1080p · using 720p"). */
++    val toast: (String) -> Unit = {},
+     /** Recast: a tap on the first frame → the person's index (null = full). */
+     val onTapFace: (android.graphics.Bitmap, Float, Float) -> Int? = { _, _, _ -> null },
+     /** "+ New location": a name and a photo; the screen uploads it and adds it to the library. */
+@@ -375,7 +377,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
+                 SIc(if (open) "chevd" else "chev", 16.dp, m.t.muted)
+             }
+             if (open) {
+-                ModelPickerList(d, groups) { e, r -> x.update { it.pinEngine(e, r) } }
++                ModelPickerList(d, groups) { e, r -> d.pinNote(e, r)?.let(x.toast); x.update { it.pinEngine(e, r) } }
+                 T("Length, shape and the input slots follow the pinned model", m.type.tiny, m.t.muted)
+             }
+         }
+diff --git a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
+index 9264644..7d8ff1d 100644
+--- a/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
++++ b/android/app/src/main/kotlin/studio/muse/app/ui/screens/suite/composer/ModelPicker.kt
+@@ -91,21 +91,51 @@ data class PickerEngine(
+     /** A resolution's short label ("720p"). */
+     fun resLabel(r: String): String = resolutions.firstOrNull { it.id == r }?.label?.substringBefore(' ')?.ifBlank { null } ?: r
+ 
+-    /** The row's price chips, shared with the Mac: one per resolution ("720p  $0.050/s"), or one "$0.05 a photo" / "$0.40 a run". */
++    /**
++     * The row's price chips, shared with the Mac: one per resolution ("720p  $0.050/s"; a live-priced one "1080p  priced at
++     * Generate"), or one "$0.05 a photo" / "$0.40 a run".
++     */
+     val chips: List<Pair<String?, String>> get() {
+-        val res = resolutions.filter { (it.perSec) > 0 }
+-        if (kind == "video" && res.isNotEmpty()) return res.map { it.id to "${resLabel(it.id)}  ${ModelPicker.perSec(it.perSec)}" }
++        val res = resolutions.filter { it.perSec > 0 || it.pricedAtGenerate }
++        if (kind == "video" && res.isNotEmpty()) return res.map { it.id to "${resLabel(it.id)}  ${if (it.pricedAtGenerate) PRICED_AT_GENERATE else ModelPicker.perSec(it.perSec)}" }
+         if (kind == "video" && (perSec ?: 0.0) > 0) return listOf(resolution to listOfNotNull(resolution?.let(::resLabel), ModelPicker.perSec(perSec!!)).joinToString("  "))
+         return perRun?.takeIf { it > 0 }?.let { listOf(null to "${ModelPicker.money(it)} ${if (kind == "image") "a photo" else "a run"}") } ?: emptyList()
+     }
+ 
+-    /** One price, for menus: "720p  $0.157/s", "$0.04 a photo". */
++    /** One price, for menus: "720p  $0.157/s", "1080p  priced at Generate", "$0.04 a photo". */
+     fun price(res: String? = resolution): String =
+-        perSecAt(res)?.takeIf { kind == "video" && it > 0 }?.let { listOfNotNull(res?.let(::resLabel), ModelPicker.perSec(it)).joinToString("  ") }
++        resolutions.firstOrNull { it.id == res && it.pricedAtGenerate }?.let { "${resLabel(it.id)}  $PRICED_AT_GENERATE" }
++            ?: perSecAt(res)?.takeIf { kind == "video" && it > 0 }?.let { listOfNotNull(res?.let(::resLabel), ModelPicker.perSec(it)).joinToString("  ") }
+             ?: perRun?.takeIf { it > 0 }?.let { "${ModelPicker.money(it)} ${if (kind == "image") "a photo" else "a run"}" }
+             ?: res?.let(::resLabel).orEmpty()
+ 
+     val price: String get() = price(resolution)
++
++    /** The model as it runs at [res]: that resolution's provider label when the server sends it ("Seedance 2.5 · Higgsfield"), else its name. */
++    fun nameAt(res: String?): String = resolutions.firstOrNull { it.id == res }?.modelLabel?.ifBlank { null } ?: name
++
++    /**
++     * One of its resolutions for [wanted]: the same (any letter case), else the nearest in pixels (the larger on a tie;
++     * owner 2026-11-14: "keep the resolution if that model has it, else the nearest"); null when it lists none.
++     */
++    fun snapRes(wanted: String?): String? {
++        if (resolutions.isEmpty() || wanted == null) return null
++        resolutions.firstOrNull { it.id.equals(wanted, ignoreCase = true) }?.let { return it.id }
++        val px = ModelPicker.pixels(wanted) ?: return null
++        return resolutions.mapNotNull { r -> ModelPicker.pixels(r.id)?.let { Triple(r.id, kotlin.math.abs(it - px), it) } }
++            .minWithOrNull(compareBy<Triple<String, Int, Int>> { it.second }.thenByDescending { it.third })?.first
++    }
++
++    /** When [wanted] isn't one of its resolutions: "Kling 4.0 makes 720p, 1080p · using 720p" (as the Mac); else null. */
++    fun resolutionNote(wanted: String?): String? {
++        val used = snapRes(wanted) ?: return null
++        if (used.equals(wanted, ignoreCase = true)) return null
++        return "$name makes ${resolutions.joinToString(", ") { resLabel(it.id) }} · using ${resLabel(used)}"
++    }
++
++    companion object {
++        const val PRICED_AT_GENERATE = "priced at Generate"
++    }
+ }
+ 
+ /** The three groups the picker shows. */
+@@ -121,6 +151,13 @@ object ModelPicker {
+     /** A photo or a run, in cents: "$0.05", "$0.40". */
+     fun money(v: Double): String = "$" + String.format(java.util.Locale.US, "%.2f", v)
+ 
++    /** Pixels on the short side a resolution id stands for ("768P" 768, "1080p" 1080, "2K" 1440, "4k" 2160), as the Mac. */
++    fun pixels(id: String): Int? {
++        val s = id.lowercase()
++        if (s.endsWith("k")) return s.dropLast(1).toDoubleOrNull()?.let { k -> if (k >= 4) 2160 else if (k >= 2) 1440 else (k * 1080).toInt() }
++        return s.takeWhile { it.isDigit() }.toIntOrNull()
++    }
++
+     /**
+      * Every [kind] engine in the owner's catalog: `engines[]` (WS5) when the server sends it; else, for video, each tier's
+      * models (one entry per model, with every quality that runs it) plus the custom video models.
+@@ -191,7 +228,10 @@ object ModelPicker {
+ fun ComposerDraft.pinEngine(e: PickerEngine?, res: String? = null): ComposerDraft {
+     if (e == null) return copy(engineModel = null, resolution = null)
+     val q = if (e.tiers.isEmpty() || quality in e.tiers) quality else e.tiers.first()
+-    var d = copy(engineModel = e.id, resolution = res ?: e.resolutionOn(q), quality = q)
++    // Owner 2026-11-14: switching models keeps the current resolution when the new one makes it, else the nearest
++    // (pinNote says so); from Auto, the one this quality's ladder runs it at.
++    val wanted = res ?: resolution.takeIf { engineModel != null }
++    var d = copy(engineModel = e.id, resolution = e.snapRes(wanted) ?: res ?: e.resolutionOn(q), quality = q)
+     val lo = e.minSeconds; val hi = e.maxSeconds
+     if (lo != null && hi != null && hi >= lo) d = d.copy(duration = d.duration.coerceIn(lo, hi))
+     else if (hi != null) d = d.copy(duration = d.duration.coerceAtMost(hi))
+@@ -200,9 +240,16 @@ fun ComposerDraft.pinEngine(e: PickerEngine?, res: String? = null): ComposerDraf
+     return d
+ }
+ 
+-/** The pinned model as the Mac writes it: "Kling 4.0, 1080p" (a comma, no middle dot); "Auto" on Auto. */
++/** What pinning [e] (at [res]) would say: the resolution it can't keep and the one it uses, or null. */
++fun ComposerDraft.pinNote(e: PickerEngine?, res: String? = null): String? =
++    e?.resolutionNote(res ?: resolution.takeIf { engineModel != null })
++
++/**
++ * The pinned model as the Mac writes it: "Kling 4.0, 1080p" (a comma, no middle dot), with the provider the chosen
++ * resolution runs on when the server says it ("Seedance 2.5 · Higgsfield, 1080p"); "Auto" on Auto.
++ */
+ fun ComposerDraft.modelLabel(cat: SuiteCatalog?): String =
+-    ModelPicker.find(cat, engineModel)?.let { e -> e.name + ((resolution ?: e.resolutionOn(quality))?.let { r -> ", " + e.resLabel(r) } ?: "") }
++    ModelPicker.find(cat, engineModel)?.let { e -> val r = resolution ?: e.resolutionOn(quality); e.nameAt(r) + (r?.let { ", " + e.resLabel(it) } ?: "") }
+         ?: if (engineModel == null) "Auto" else engineModel
+ 
+ /** The pill: "Model" on Auto, else the pinned model ("Kling 4.0, 1080p"). */
+diff --git a/android/app/src/test/kotlin/studio/muse/app/PickerRoutesTest.kt b/android/app/src/test/kotlin/studio/muse/app/PickerRoutesTest.kt
+new file mode 100644
+index 0000000..bcb8cd3
+--- /dev/null
++++ b/android/app/src/test/kotlin/studio/muse/app/PickerRoutesTest.kt
+@@ -0,0 +1,61 @@
++package studio.muse.app
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import studio.muse.app.data.SuiteResolution
++import studio.muse.app.ui.screens.suite.composer.ComposerDraft
++import studio.muse.app.ui.screens.suite.composer.ModelPicker
++import studio.muse.app.ui.screens.suite.composer.PickerEngine
++import studio.muse.app.ui.screens.suite.composer.pinEngine
++import studio.muse.app.ui.screens.suite.composer.pinNote
++
++/** One model on several providers (server 2026-11-14): each resolution names its provider; live-priced chips show. */
++class PickerRoutesTest {
++    private val seedance = PickerEngine(
++        "seedance-2.5", "Seedance 2.5 · Replicate + Higgsfield", listOf("cinema"), "720p",
++        listOf(
++            SuiteResolution("480p", "480p", 480, 0.1028, "replicate", "Replicate", "Seedance 2.5 · Replicate"),
++            SuiteResolution("720p", "720p", 720, 0.2312, "replicate", "Replicate", "Seedance 2.5 · Replicate"),
++            SuiteResolution("1080p", "1080p", 1080, 0.0, "higgsfield", "Higgsfield", "Seedance 2.5 · Higgsfield", livePrice = true),
++        ),
++        4, 30, null, listOf("9:16", "16:9"), 0.2312, null, custom = false,
++    )
++    private val kling = PickerEngine(
++        "kling-v4", "Kling 4.0", listOf("standard"), "720p",
++        listOf(SuiteResolution("720p", "720p", 720, 0.157), SuiteResolution("1080p", "1080p", 1080, 0.235)),
++        3, 30, null, listOf("9:16", "16:9"), 0.157, null, custom = false,
++    )
++
++    @Test fun liveResolutionsShowAsPricedAtGenerate() {
++        assertEquals(listOf("480p  $0.10/s", "720p  $0.23/s", "1080p  priced at Generate"), seedance.chips.map { it.second })
++        assertEquals("1080p  priced at Generate", seedance.price("1080p"))
++        assertTrue(seedance.resolutions[2].pricedAtGenerate)
++        assertFalse(kling.resolutions[0].pricedAtGenerate)
++    }
++
++    @Test fun theProviderOfTheChosenResolution() {
++        assertEquals("Seedance 2.5 · Higgsfield", seedance.nameAt("1080p"))
++        assertEquals("Seedance 2.5 · Replicate", seedance.nameAt("480p"))
++        assertEquals("an older server: the model's own name", "Kling 4.0", kling.nameAt("720p"))
++    }
++
++    @Test fun switchingModelsKeepsTheResolutionElseTheNearestWithANote() {
++        val hi = ComposerDraft(quality = "cinema").pinEngine(seedance, "1080p")
++        assertEquals("1080p", hi.resolution)
++        assertEquals("1080p", hi.pinEngine(kling).resolution)
++        assertNull(hi.pinNote(kling))
++        val low = hi.pinEngine(seedance, "480p")
++        assertEquals("720p", low.pinEngine(kling).resolution)
++        assertEquals("Kling 4.0 makes 720p, 1080p · using 720p", low.pinNote(kling))
++        // From Auto: the ladder's resolution, no note.
++        assertEquals("720p", ComposerDraft(quality = "standard").pinEngine(kling).resolution)
++        assertNull(ComposerDraft(quality = "standard").pinNote(kling))
++        assertEquals("1080p", kling.snapRes("4k"))
++        assertEquals("1080p", kling.snapRes("1080P"))
++        assertEquals(1440, ModelPicker.pixels("2K"))
++        assertEquals(768, ModelPicker.pixels("768P"))
++    }
++}
+-- 
+2.43.0
+

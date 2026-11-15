@@ -1,0 +1,213 @@
+From 29d4a520301ab616d50f7cce13c1e09f1226ac71 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 15 Nov 2026 00:06:52 +0000
+Subject: [PATCH] Mac: model picker shows the provider of the chosen
+ resolution; nearest resolution with a note; live-priced chips
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Server 2026-11-14 (one model, several providers): SuiteResolution decodes provider, providerName, modelLabel,
+livePrice. The pill reads "Seedance 2.5 · Higgsfield, 1080p"; a live-priced resolution shows "priced at Generate";
+switching models keeps the resolution when the new one makes it, else the nearest (snapResolution: nearest before
+the ladder's), with a toast saying what it makes and what it uses.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Py2rxp8e6PPQu5wSLUbCfw
+---
+ mac/Muse/App/AppStore+ModelPicker.swift       |  4 +++
+ .../MuseCore/Suite/ComposerModelPicker.swift  | 33 ++++++++++++++-----
+ .../Sources/MuseCore/Suite/SuiteModels.swift  | 22 +++++++++++--
+ .../ComposerModelPickerTests.swift            | 31 +++++++++++++++--
+ 4 files changed, 78 insertions(+), 12 deletions(-)
+
+diff --git a/mac/Muse/App/AppStore+ModelPicker.swift b/mac/Muse/App/AppStore+ModelPicker.swift
+index 8c97073..a36f462 100644
+--- a/mac/Muse/App/AppStore+ModelPicker.swift
++++ b/mac/Muse/App/AppStore+ModelPicker.swift
+@@ -16,7 +16,11 @@ extension AppStore {
+             suite.photo.imageModel = m?.model
+             return
+         }
++        // Owner 2026-11-14: a model without the current resolution moves to its nearest one, and says so.
++        let wanted = resolution ?? (suite.composer.engineModel == nil ? nil : suite.composer.resolution)
++        let note = m.flatMap { ComposerModelPicker.resolutionNote($0, wanted: wanted) }
+         suite.composer = ComposerModelPicker.pin(suite.composer, m, resolution: resolution, catalog: suite.catalog, settings: suite.settings)
++        if let note { showToast(note) }
+     }
+ 
+     /// The model the composer's tool is pinned to (nil = Auto).
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift b/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
+index 0ca902d..011b5a0 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/ComposerModelPicker.swift
+@@ -337,8 +337,9 @@ public enum ComposerModelPicker {
+         return Int(digits)
+     }
+ 
+-    /// One of the model's own resolutions: `wanted` when it makes it (any letter case), else the one its ladder runs it at,
+-    /// else the nearest in pixels, else its best. MiniMax H3 (Higgsfield) makes 2K only: every pick lands on 2K.
++    /// One of the model's own resolutions: `wanted` when it makes it (any letter case), else the nearest in pixels (the
++    /// larger on a tie; owner 2026-11-14: "keep the resolution if that model has it, else the nearest"), else the one its
++    /// ladder runs it at, else its best. MiniMax H3 at 768P: every pick lands on 768P or 2K, whichever is nearer.
+     public static func snapResolution(_ e: SuiteModelOption, _ wanted: String?) -> String? {
+         let ids = e.resolutions.map(\.id)
+         guard !ids.isEmpty else { return wanted ?? e.resolution }
+@@ -346,14 +347,25 @@ public enum ComposerModelPicker {
+             if ids.contains(w) { return w }
+             if let same = ids.first(where: { $0.caseInsensitiveCompare(w) == .orderedSame }) { return same }
+         }
+-        if let r = e.resolution, ids.contains(r) { return r }
+         if let px = wanted.flatMap({ pixels($0) }) {
+-            let near = ids.compactMap { id in pixels(id).map { (id, abs($0 - px)) } }.min { $0.1 < $1.1 }
++            let near = ids.compactMap { id in pixels(id).map { (id, abs($0 - px), $0) } }
++                .min { $0.1 != $1.1 ? $0.1 < $1.1 : $0.2 > $1.2 }
+             if let near { return near.0 }
+         }
++        if let r = e.resolution, ids.contains(r) { return r }
+         return ids.last
+     }
+ 
++    /// When `wanted` isn't one of the model's resolutions: what it makes and what picking it uses, for a notice
++    /// ("Seedance 2.5 · Replicate makes 480p, 720p · using 720p"). Nil when it makes it (or nothing was asked).
++    public static func resolutionNote(_ e: SuiteModelOption, wanted: String?) -> String? {
++        guard let w = wanted, !e.resolutions.isEmpty, let used = snapResolution(e, w),
++              used.caseInsensitiveCompare(w) != .orderedSame else { return nil }
++        let names = e.resolutions.map { resLabel($0.label) }.joined(separator: ", ")
++        let usedLabel = resLabel(e.resolutions.first { $0.id == used }?.label ?? used)
++        return "\(e.shownName) makes \(names) · using \(usedLabel)"
++    }
++
+     /// Pins a video model at a resolution (nil = Auto, the quality's ladder), then fits the draft to it. Without a
+     /// resolution: the one its ladder runs it at, else its best.
+     /// The quality follows a ladder model (as on Android): kept when this quality's ladder runs it, else its first quality,
+@@ -361,7 +373,10 @@ public enum ComposerModelPicker {
+     public static func pin(_ d: ComposerDraft, _ e: SuiteModelOption?, resolution: String? = nil, catalog: SuiteCatalog?, settings: SuiteSettings?) -> ComposerDraft {
+         var x = d
+         x.engineModel = e?.model
+-        x.resolution = e.flatMap { e in snapResolution(e, resolution ?? e.resolution) }
++        // Switching models keeps the current resolution when the new one makes it, else the nearest (owner 2026-11-14);
++        // from Auto (no resolution yet): the one its ladder runs it at.
++        let current = d.engineModel == nil ? nil : d.resolution
++        x.resolution = e.flatMap { e in snapResolution(e, resolution ?? current ?? e.resolution) }
+         if let e, !e.tiers.isEmpty, !e.tiers.contains(d.quality), let q = e.tiers.first { x.quality = q }
+         return fitted(x, catalog: catalog, settings: settings)
+     }
+@@ -413,8 +428,10 @@ public enum ComposerModelPicker {
+     public static func label(_ d: ComposerDraft, catalog: SuiteCatalog?, settings: SuiteSettings?) -> String {
+         guard let id = d.engineModel else { return "Auto" }
+         let e = pinned(d, catalog, settings)
+-        let name = e?.shownName ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
+-        let res = e?.resolutions.first { $0.id == d.resolution }?.label ?? d.resolution
++        let r = e?.resolutions.first { $0.id == d.resolution }
++        // The provider the chosen resolution runs on ("Seedance 2.5 · Higgsfield, 1080p"), when the server says it.
++        let name = r?.modelLabel ?? e?.shownName ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
++        let res = r?.label ?? d.resolution
+         return res.map { "\(name), \(resLabel($0))" } ?? name
+     }
+ 
+@@ -442,7 +459,7 @@ public enum ComposerModelPicker {
+ 
+     /// "$0.08/s" at this resolution, "$0.05 a photo", "$0.40 a run", or "" when the price is unknown.
+     public static func price(_ e: SuiteModelOption, resolution: String? = nil) -> String {
+-        if let r = resolution, let p = e.resolutions.first(where: { $0.id == r })?.perSec { return perSecond(p) }
++        if let r = resolution, let x = e.resolutions.first(where: { $0.id == r }) { return x.pricedAtGenerate ? "priced at Generate" : perSecond(x.perSec) }
+         if let run = e.perRun { return money(run) + (e.kind == "image" ? " a photo" : " a run") }
+         if let p = e.perSec { return perSecond(p) }
+         return ""
+diff --git a/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift b/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
+index 12cb486..c65baff 100644
+--- a/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
++++ b/mac/MuseCore/Sources/MuseCore/Suite/SuiteModels.swift
+@@ -1174,18 +1174,36 @@ public struct SuiteResolution: Codable, Hashable, Sendable {
+     public var id: String
+     public var label: String
+     public var perSec: Double
+-    enum CodingKeys: String, CodingKey { case id, label, perSec }
+-    public init(id: String, label: String, perSec: Double) {
++    /// One model on several providers (server 2026-11-14): the provider this resolution runs on ("higgsfield"), its name
++    /// and the model as it runs here ("Seedance 2.5 · Higgsfield"). Nil from older servers, and for members while the
++    /// studio hides provider names.
++    public var provider: String?
++    public var providerName: String?
++    public var modelLabel: String?
++    /// Priced by the provider when the shot is planned: `perSec` is 0 here, the price shows on Generate.
++    public var livePrice: Bool
++    enum CodingKeys: String, CodingKey { case id, label, perSec, provider, providerName, modelLabel, livePrice }
++    public init(id: String, label: String, perSec: Double, provider: String? = nil, providerName: String? = nil, modelLabel: String? = nil, livePrice: Bool = false) {
+         self.id = id
+         self.label = label
+         self.perSec = perSec
++        self.provider = provider
++        self.providerName = providerName
++        self.modelLabel = modelLabel
++        self.livePrice = livePrice
+     }
+     public init(from d: Decoder) throws {
+         let c = try d.container(keyedBy: CodingKeys.self)
+         id = c.v(.id, "")
+         label = c.v(.label, id)
+         perSec = c.v(.perSec, 0)
++        provider = c.o(.provider)
++        providerName = c.o(.providerName)
++        modelLabel = c.o(.modelLabel)
++        livePrice = c.v(.livePrice, false)
+     }
++    /// Priced only when the shot is planned (no per-second price to show yet).
++    public var pricedAtGenerate: Bool { livePrice && perSec <= 0 }
+ }
+ 
+ /// One model of the registry as the owner sees it.
+diff --git a/mac/MuseCore/Tests/MuseCoreTests/ComposerModelPickerTests.swift b/mac/MuseCore/Tests/MuseCoreTests/ComposerModelPickerTests.swift
+index f6fbab6..4eb1218 100644
+--- a/mac/MuseCore/Tests/MuseCoreTests/ComposerModelPickerTests.swift
++++ b/mac/MuseCore/Tests/MuseCoreTests/ComposerModelPickerTests.swift
+@@ -64,8 +64,10 @@ final class ComposerModelPickerTests: XCTestCase {
+         XCTAssertEqual(ComposerModelPicker.label(p, catalog: c, settings: nil), "Veo 3.1 Lite, 720p")
+         XCTAssertEqual(ComposerModelPicker.price(veo, resolution: "720p"), "$0.050/s")
+         XCTAssertEqual(ComposerModelPicker.limits(veo), "4, 6 or 8 s, 9:16 and 16:9")
+-        // No resolution named: the one its ladder runs it at; an unknown one: the same.
+-        XCTAssertEqual(ComposerModelPicker.pin(d, veo, resolution: "8k", catalog: c, settings: nil).resolution, veo.resolution)
++        // A resolution it doesn't make: the nearest it makes (owner 2026-11-14), said in a note.
++        XCTAssertEqual(ComposerModelPicker.pin(d, veo, resolution: "8k", catalog: c, settings: nil).resolution, "1080p")
++        XCTAssertEqual(ComposerModelPicker.resolutionNote(veo, wanted: "8k"), "\(veo.shownName) makes 720p, 1080p · using 1080p")
++        XCTAssertNil(ComposerModelPicker.resolutionNote(veo, wanted: "720p"))
+         // Kling 4.0 runs 3–30 s: 13 s is kept, 1:1 is one of its shapes.
+         let kling = c.engines!.first { $0.model == "kling-v4" }!
+         let k = ComposerModelPicker.pin(d, kling, catalog: c, settings: nil)
+@@ -164,7 +166,32 @@ final class ComposerModelPickerTests: XCTestCase {
+         XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "2K"), "1080p", "the nearest in pixels")
+         XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "480p"), "720p")
+         XCTAssertEqual(ComposerModelPicker.snapResolution(kling, nil), "4k", "no ladder resolution: its best")
++        XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "8k"), "4k")
+         XCTAssertEqual(ComposerModelPicker.pixels("768P"), 768)
+         XCTAssertEqual(ComposerModelPicker.pixels("2K"), 1440)
+     }
++
++    /// One model on several providers (server 2026-11-14): each resolution says the provider it runs on.
++    func testEachResolutionNamesItsProvider() throws {
++        let json = #"{"enabled":true,"test":false,"tiers":[],"camera":{},"engines":[{"model":"seedance-2.5","name":"Seedance 2.5","label":"Seedance 2.5 · Replicate + Higgsfield","kind":"video","custom":false,"tier":"cinema","tiers":["cinema"],"resolution":"720p","resolutions":[{"id":"480p","label":"480p","perSec":0.1028,"provider":"replicate","providerName":"Replicate","modelLabel":"Seedance 2.5 · Replicate"},{"id":"720p","label":"720p","perSec":0.2312,"provider":"replicate","providerName":"Replicate","modelLabel":"Seedance 2.5 · Replicate"},{"id":"1080p","label":"1080p","perSec":0,"provider":"higgsfield","providerName":"Higgsfield","modelLabel":"Seedance 2.5 · Higgsfield","livePrice":true}],"perSec":0.2312,"minSeconds":4,"maxSeconds":30,"aspectRatios":["9:16","16:9"]},{"model":"kling-v4","name":"Kling 4.0","kind":"video","custom":false,"tier":"standard","tiers":["standard"],"resolution":"720p","resolutions":[{"id":"720p","label":"720p","perSec":0.157},{"id":"1080p","label":"1080p","perSec":0.235}],"perSec":0.157,"minSeconds":3,"maxSeconds":30,"aspectRatios":["9:16","16:9"]}]}"#
++        let c = try JSONDecoder().decode(SuiteCatalog.self, from: Data(json.utf8))
++        let sd = c.engines!.first { $0.model == "seedance-2.5" }!
++        XCTAssertEqual(sd.resolutions.map(\.provider), ["replicate", "replicate", "higgsfield"])
++        XCTAssertTrue(sd.resolutions[2].pricedAtGenerate)
++        XCTAssertFalse(sd.resolutions[0].pricedAtGenerate)
++        XCTAssertEqual(ComposerModelPicker.price(sd, resolution: "1080p"), "priced at Generate")
++        XCTAssertEqual(ComposerModelPicker.price(sd, resolution: "720p"), "$0.23/s")
++        let p = ComposerModelPicker.pin(ComposerDraft(duration: 6), sd, resolution: "1080p", catalog: c, settings: nil)
++        XCTAssertEqual(ComposerModelPicker.label(p, catalog: c, settings: nil), "Seedance 2.5 · Higgsfield, 1080p")
++        XCTAssertEqual(ComposerModelPicker.label(ComposerModelPicker.pin(p, sd, resolution: "480p", catalog: c, settings: nil), catalog: c, settings: nil), "Seedance 2.5 · Replicate, 480p")
++        // Switching to a model keeps the resolution when it has it, else the nearest, with a note.
++        let kling = c.engines!.first { $0.model == "kling-v4" }!
++        XCTAssertEqual(ComposerModelPicker.pin(p, kling, catalog: c, settings: nil).resolution, "1080p")
++        let low = ComposerModelPicker.pin(p, sd, resolution: "480p", catalog: c, settings: nil)
++        XCTAssertEqual(ComposerModelPicker.pin(low, kling, catalog: c, settings: nil).resolution, "720p")
++        XCTAssertEqual(ComposerModelPicker.resolutionNote(kling, wanted: "480p"), "Kling 4.0 makes 720p, 1080p · using 720p")
++        // An older server: no provider fields, nothing changes.
++        XCTAssertNil(kling.resolutions[0].modelLabel)
++        XCTAssertFalse(kling.resolutions[0].livePrice)
++    }
+ }
+-- 
+2.43.0
+
