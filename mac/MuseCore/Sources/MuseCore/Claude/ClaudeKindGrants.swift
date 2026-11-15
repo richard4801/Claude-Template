@@ -20,6 +20,8 @@ public enum ClaudeShellScope: String, Codable, CaseIterable, Sendable {
     case anywhere
 
     public var label: String { self == .folders ? "Inside your folders and temporary files" : "Anywhere on this Mac" }
+    /// For the Settings picker (a narrow column): "Folders + temp", "Anywhere".
+    public var shortLabel: String { self == .folders ? "Folders + temp" : "Anywhere" }
 }
 
 /// What "Allow always: shell commands" makes of one command.
