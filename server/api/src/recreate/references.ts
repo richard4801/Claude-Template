@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { clips as clipsTable, models, studioSettings, suiteLocations, uploads } from '../db/schema.js';
@@ -514,12 +514,16 @@ export class RecreateReferences {
    * generate, or empty; with the last assembly's match score and sources.
    */
   async fillView(u: AuthUser, id: string) {
-    const r = await this.row(u, id);
-    const recipe = r.recipe as Recipe | null, f = r.fill ?? {};
+    // Only what this view reads (the app polls it): not the recipe (just its slot ids) or the rest of the row.
+    const [r] = await this.ctx.db.select({ id: recreateReferences.id, userId: recreateReferences.userId, deletedAt: recreateReferences.deletedAt, fill: recreateReferences.fill,
+      slotIds: sql<string[] | null>`jsonb_path_query_array(${recreateReferences.recipe}, '$.slots[*].id')` })
+      .from(recreateReferences).where(and(eq(recreateReferences.id, id), eq(recreateReferences.studioId, u.studioId)));
+    if (!r || r.deletedAt || (u.role !== 'owner' && r.userId !== u.id)) throw notFound('Reference'); // the same check as row()
+    const f = r.fill ?? {};
     const jobIds = Object.values(f.jobs ?? {}).map(j => j.jobId);
-    const js = jobIds.length ? await this.ctx.db.select({ id: jobs.id, state: jobs.state, stats: jobs.stats }).from(jobs).where(inArray(jobs.id, jobIds)) : [];
+    const js = jobIds.length ? await this.ctx.db.select({ id: jobs.id, state: jobs.state, stats: sql<{ errorCode?: string } | null>`jsonb_strip_nulls(jsonb_build_object('errorCode', ${jobs.stats}->'errorCode'))` }).from(jobs).where(inArray(jobs.id, jobIds)) : [];
     const ts = jobIds.length ? await this.ctx.db.select({ id: takesTable.id, jobId: takesTable.jobId, index: takesTable.index }).from(takesTable).where(inArray(takesTable.jobId, jobIds)) : [];
-    const slots = (recipe?.slots ?? []).map(sl => {
+    const slots = (r.slotIds ?? []).map(id => ({ id })).map(sl => {
       const job = f.jobs?.[sl.id], m = f.matched?.[sl.id];
       if (job) {
         const jr = js.find(x => x.id === job.jobId), st = jr?.state;

@@ -17,7 +17,7 @@ import { pipeline } from 'node:stream/promises';
 import { failureOf } from '../services/replicateVideo.js';
 import { beatOnlyAudio } from '../audio/beat.js';
 import { putFile } from '../storage/objects.js';
-import type { JobRow } from '../gpu/controller.js';
+import type { JobRow, WaitingJob } from '../gpu/controller.js';
 import type { VideoRef } from './camera.js';
 import { buildInput, type MediaUrls } from './inputs.js';
 import { billedSeconds, modelName as specLabel, shotNote, type ShotPlan } from './plan.js';
@@ -63,14 +63,18 @@ export class SuiteRunner {
   }
 
   /** One pass: resume orphans (claimed, nobody running them after a restart), then start the oldest waiting ones. */
-  async dispatch(waiting: JobRow[]) {
+  async dispatch(waiting: WaitingJob[]) {
     if (this.stopping) return;
-    const orphans = await this.ctx.db.select().from(jobs).where(and(eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'), eq(jobs.podId, SUITE_POD)));
-    for (const j of orphans) {
-      if (this.running.has(j.id)) continue;
+    // Only the id and the lease of each claimed job (every pass); the full row only for one this instance resumes.
+    const orphans = await this.ctx.db.select({ id: jobs.id, lease: sql<{ by?: string; at?: number } | null>`${jobs.stats} #> '{suite,lease}'` }).from(jobs)
+      .where(and(eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'), eq(jobs.podId, SUITE_POD)));
+    for (const o of orphans) {
+      if (this.running.has(o.id)) continue;
       // Another instance still checks in on it (the old one during a deploy's overlap): leave it there.
-      const l = (j.stats as any)?.suite?.lease as { by?: string; at?: number } | undefined;
+      const l = o.lease ?? undefined;
       if (l?.by && l.by !== this.instance && Date.now() - (l.at ?? 0) < this.leaseMs()) continue;
+      const [j] = await this.ctx.db.select().from(jobs).where(and(eq(jobs.id, o.id), eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'), eq(jobs.podId, SUITE_POD)));
+      if (!j || this.running.has(j.id)) continue;
       this.launch(j);
     }
     const max = Math.max(1, Math.floor(this.ctx.config.SUITE_MAX_CONCURRENT));

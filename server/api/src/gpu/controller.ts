@@ -8,16 +8,23 @@ import type { jobs, pods } from '../db/schema.js';
 
 export type JobRow = typeof jobs.$inferSelect;
 export type PodRow = typeof pods.$inferSelect;
+/** A waiting job as the dispatcher reads it: no draft, outputs, stats, prompt or thumb (services/jobs.ts waitingCols). */
+export type WaitingJob = Omit<JobRow, 'draft' | 'outputs' | 'stats' | 'prompt' | 'thumb'>;
 export type WorkKind = 'h3' | 'viggle' | 'lora-train' | 'upscale';
 
 export interface GpuController {
   readonly mode: 'simulated' | 'runpod';
-  /** Waiting jobs that may start (FIFO, not paused). Assign or start pods for their users. */
-  dispatch(waiting: JobRow[], now: number): Promise<void>;
+  /**
+   * Waiting jobs that may start (FIFO, not paused). Assign or start pods for their users. `active`: the active pods the
+   * caller just read (saves a read). Returns the active pods afterwards, or null when they may have changed underneath.
+   */
+  dispatch(waiting: WaitingJob[], now: number, active?: PodRow[]): Promise<PodRow[] | null | void>;
   /** The job was deleted or cancelled: stop working on it. */
   cancel(jobId: string): Promise<void>;
   /** Housekeeping: heartbeats, boot timeouts, idle shutdown. */
-  tick(now: number): Promise<void>;
+  tick(now: number, active?: PodRow[] | null): Promise<PodRow[] | null | void>;
+  /** Pods starting or running. */
+  activePods?(): Promise<PodRow[]>;
   /** A job on this pod ended (done, failed or cancelled): the pod is idle until it claims another. */
   jobEnded(podId: string, now: number): Promise<void>;
   shutdown(): Promise<void>;
@@ -36,4 +43,4 @@ export function gpuTable(c: Config): Record<WorkKind, string[]> {
 }
 /** Can a pod with this GPU run this kind of job? */
 export const gpuCanRun = (c: Config, gpuType: string, kind: WorkKind) => gpuTable(c)[kind].includes(gpuType);
-export const workKindOf = (j: JobRow): WorkKind => j.kind === 'lora-train' ? 'lora-train' : j.request.engine === 'viggle' ? 'viggle' : j.request.engine === 'upscale' ? 'upscale' : 'h3';
+export const workKindOf = (j: Pick<JobRow, 'kind' | 'request'>): WorkKind => j.kind === 'lora-train' ? 'lora-train' : j.request.engine === 'viggle' ? 'viggle' : j.request.engine === 'upscale' ? 'upscale' : 'h3';

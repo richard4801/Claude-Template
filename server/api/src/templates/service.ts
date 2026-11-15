@@ -352,7 +352,7 @@ export function layersFromPrompt(prompt: string): TemplateLayers {
 const directionFromPrompt = (prompt: string) => /^Direction: (.+)$/m.exec(prompt)?.[1]?.replace(/\.$/, '').trim();
 
 /** The prompt a viewer may see for a shot: template shots show the public version to anyone but the template's owner. */
-export function shotPromptFor(t: TakeRow, viewerId: string): { prompt: string; variation?: unknown } {
+export function shotPromptFor(t: Pick<TakeRow, 'templateId' | 'templateOwnerId' | 'templateName' | 'prompt' | 'publicPrompt' | 'variation'>, viewerId: string): { prompt: string; variation?: unknown } {
   if (!t.templateId) return { prompt: t.prompt };
   if (t.templateOwnerId === viewerId) return { prompt: t.prompt, variation: t.variation ?? undefined };
   return { prompt: t.publicPrompt ?? `Template: ${t.templateName ?? 'template'}` };

@@ -4,7 +4,7 @@ import type { Ctx } from '../ctx.js';
 import { jobs, pods } from '../db/schema.js';
 import { randomToken, sha256, uid } from '../lib/util.js';
 import * as P from '../pricing.js';
-import { gpuCanRun, gpuTable, workKindOf, type GpuController, type JobRow, type PodRow, type WorkKind } from './controller.js';
+import { gpuCanRun, gpuTable, workKindOf, type GpuController, type JobRow, type PodRow, type WaitingJob, type WorkKind } from './controller.js';
 import type { RunpodApi } from './runpodApi.js';
 import { SOMETHING_WENT_WRONG } from '../services/jobs.js';
 
@@ -25,8 +25,10 @@ export abstract class PodPool implements GpuController {
   protected abstract terminate(pod: PodRow): Promise<void>;
   /** Called for each ready pod without a job on every dispatch (the simulated pool claims and runs here). */
   protected async idlePod(_pod: PodRow, _now: number) {}
-  /** Extra housekeeping (heartbeats). */
-  protected async health(_now: number) {}
+  /** idlePod() may write pod rows (then dispatch's pod list is no longer current). */
+  protected idlePodWrites = false;
+  /** Extra housekeeping (heartbeats). `active`: the active pods, if the caller has them. Returns true if it changed a pod. */
+  protected async health(_now: number, _active?: PodRow[]): Promise<boolean> { return false; }
 
   /** Why the last launch for this kind failed, if it did recently. */
   launchFailure(kind: WorkKind) { return this.launchFailedAt.get(kind) ?? null; }
@@ -39,10 +41,15 @@ export abstract class PodPool implements GpuController {
     return this.ctx.db.select().from(pods).where(inArray(pods.state, ['starting', 'running']));
   }
 
-  async dispatch(waiting: JobRow[], now: number) {
-    let active = await this.activePods();
+  /**
+   * `snapshot`: the active pods as the caller just read them, used when nothing is waiting (handing over or starting
+   * pods is always decided on a fresh read). Returns the active pods afterwards (null: they may have changed).
+   */
+  async dispatch(waiting: WaitingJob[], now: number, snapshot?: PodRow[]): Promise<PodRow[] | null> {
     const users: string[] = [];
     for (const j of waiting) if (j.userId && !users.includes(j.userId)) users.push(j.userId);
+    let active = snapshot && !users.length ? [...snapshot] : await this.activePods();
+    let stale = false;
     for (const u of users) {
       const first = waiting.find(j => j.userId === u)!;
       const kind = workKindOf(first);
@@ -54,7 +61,7 @@ export abstract class PodPool implements GpuController {
         await this.chargeIdle(idle, now);
         const [r] = await this.ctx.db.update(pods).set({ assignedUserId: u, idleSince: now }).where(eq(pods.id, idle.id)).returning();
         this.ctx.log.info({ pod: idle.id, from: idle.assignedUserId, to: u }, 'warm pod handed to another user');
-        active = active.map(p => (p.id === idle.id ? r! : p));
+        if (r) active = active.map(p => (p.id === idle.id ? r : p)); else stale = true;
         continue;
       }
       if (active.length >= (await this.maxGpus(first.studioId))) continue; // waits for the next free pod
@@ -63,7 +70,8 @@ export abstract class PodPool implements GpuController {
       const pod = await this.startPod({ studioId: first.studioId, userId: first.userId, jobId: first.id }, kind, now);
       if (pod) active.push(pod);
     }
-    for (const p of active) if (p.state === 'running' && !p.currentJobId) await this.idlePod(p, now);
+    for (const p of active) if (p.state === 'running' && !p.currentJobId) { await this.idlePod(p, now); if (this.idlePodWrites) stale = true; }
+    return stale ? null : active;
   }
 
   /** Starts a pod for a user: for their waiting job, or (jobId null) for "Keep GPU warm" with `warmSessionId`. */
@@ -141,13 +149,18 @@ export abstract class PodPool implements GpuController {
 
   async cancel(_jobId: string) { /* the worker sees 409 job_cancelled on its next progress report */ }
 
-  async tick(now: number) {
-    await this.health(now);
+  /** `snapshot`: the active pods if the caller has a current list. Returns the active pods afterwards. */
+  async tick(now: number, snapshot?: PodRow[] | null): Promise<PodRow[]> {
+    const changed = await this.health(now, snapshot ?? undefined);
     const idleMs = this.ctx.config.IDLE_SHUTDOWN_SECONDS * 1000;
-    for (const p of await this.activePods()) {
-      // A warm GPU's own auto-off rules apply instead (services/warm.ts).
-      if (p.state === 'running' && !p.currentJobId && !p.warmSessionId && p.idleSince && now - p.idleSince >= idleMs) await this.stopPod(p, now, 'idle');
-    }
+    // A warm GPU's own auto-off rules apply instead (services/warm.ts).
+    const idleOut = (p: PodRow) => p.state === 'running' && !p.currentJobId && !p.warmSessionId && !!p.idleSince && now - p.idleSince >= idleMs;
+    // The snapshot only says nothing needs stopping: before stopping anything, decide on a fresh read.
+    let active = snapshot && !changed ? snapshot : await this.activePods();
+    if (active === snapshot && active.some(idleOut)) active = await this.activePods();
+    const stopped = new Set<string>();
+    for (const p of active) if (idleOut(p)) { await this.stopPod(p, now, 'idle'); stopped.add(p.id); }
+    return stopped.size ? active.filter(p => !stopped.has(p.id)) : active;
   }
 
   async stopPod(p: PodRow, now: number, why: string) {
@@ -204,6 +217,7 @@ export abstract class PodPool implements GpuController {
 /** Virtual pods; renders run in-process at SPEED× like the mock. Free. */
 export class SimulatedGpu extends PodPool {
   readonly mode = 'simulated' as const;
+  protected idlePodWrites = true; // it claims jobs for idle pods (pod rows change)
   private runners = new Map<string, NodeJS.Timeout>();
 
   protected async launch(_pod: PodRow, kind: WorkKind) {
@@ -301,12 +315,21 @@ export class RunpodGpu extends PodPool {
     if (pod.runpodId) await this.api.terminate(pod.runpodId);
   }
 
-  protected async health(now: number) {
+  protected async health(now: number, active?: PodRow[]) {
     const c = this.ctx.config;
+    const due = (p: PodRow) => {
+      const last = p.lastHeartbeatAt ?? p.readyAt;
+      return (p.state === 'starting' && now - p.startedAt > c.POD_BOOT_TIMEOUT_SEC * 1000)
+        || (p.state === 'running' && !!last && now - last > c.WORKER_HEARTBEAT_TIMEOUT_SEC * 1000);
+    };
+    // A snapshot can only say all is well: anything to act on is decided on a fresh read.
+    if (active && !active.some(due)) return false;
+    let changed = false;
     for (const p of await this.activePods()) {
       if (p.state === 'starting' && now - p.startedAt > c.POD_BOOT_TIMEOUT_SEC * 1000) {
         this.ctx.log.warn({ pod: p.id }, 'pod never reported in');
         await this.stopPod(p, now, 'boot timeout');
+        changed = true;
         continue;
       }
       const last = p.lastHeartbeatAt ?? p.readyAt;
@@ -315,8 +338,10 @@ export class RunpodGpu extends PodPool {
         if (p.currentJobId) await this.ctx.jobs.fail(p.currentJobId, SOMETHING_WENT_WRONG, true);
         await this.ctx.db.update(pods).set({ currentJobId: null, idleSince: null }).where(eq(pods.id, p.id));
         await this.stopPod({ ...p, currentJobId: null, idleSince: null }, now, 'heartbeat timeout');
+        changed = true;
       }
     }
+    return changed;
   }
 
   async shutdown() {}

@@ -176,7 +176,7 @@ export class LoraService {
   }
 
   // ------------------------------------------------------------------ from the GPU
-  async onProgress(job: JobRow, p: number) {
+  async onProgress(job: Pick<JobRow, 'id' | 'modelId'>, p: number) {
     const pr = Math.min(99.9, Math.max(0, p));
     const [l] = await this.ctx.db.select().from(loras).where(eq(loras.modelId, job.modelId));
     if (!l || l.jobId !== job.id) return;

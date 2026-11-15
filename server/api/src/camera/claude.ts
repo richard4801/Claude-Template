@@ -107,6 +107,12 @@ export class ClaudeService {
     if (!t) throw notFound('Thread');
     return t;
   }
+  /** The same check as thread(), reading only the id. */
+  private async threadRef(u: AuthUser, id: string) {
+    const [t] = await this.db.select({ id: claudeThreads.id }).from(claudeThreads).where(and(eq(claudeThreads.id, id), eq(claudeThreads.ownerId, u.id)));
+    if (!t) throw notFound('Thread');
+    return t;
+  }
 
   /**
    * POST /v1/claude/threads {contextKind, contextId, new?, title?}: the context's most recent chat (made if there is none),
@@ -303,15 +309,28 @@ export class ClaudeService {
   // ------------------------------------------------------------------ the Mac mirrors its Claude Code stream
   async events(u: AuthUser, threadId: string, body: unknown) {
     const b = parse(z.object({ turnId: z.string().max(40).optional(), events: z.array(ClaudeEvent).min(1).max(500) }).strict(), body);
-    const t = await this.thread(u, threadId);
-    let turn: TurnRow | undefined;
+    // The Mac posts every few hundred ms while it answers: the usual case (its running turn, in its own thread) is one
+    // small write; anything else goes through the full checks below for the exact error.
+    let t: { id: string } | undefined;
+    let turn: { id: string } | undefined;
     if (b.turnId) {
-      turn = await this.turnRow(u, b.turnId);
-      if (turn.threadId !== t.id) throw badRequest('turnId: not a turn of this thread');
-      if (turn.state !== 'running') throw new ApiError(410, 'turn_expired', 'That message has ended');
-      await this.db.update(claudeTurns).set({ lastEventAt: Date.now() }).where(eq(claudeTurns.id, turn.id));
-      this.arm(turn.id, this.silentTurnMs, u, 'Your Mac stopped answering');
+      const [hit] = await this.db.update(claudeTurns).set({ lastEventAt: Date.now() })
+        .where(and(eq(claudeTurns.id, b.turnId), eq(claudeTurns.ownerId, u.id), eq(claudeTurns.threadId, threadId), eq(claudeTurns.state, 'running'),
+          sql`exists (select 1 from ${claudeThreads} where ${claudeThreads.id} = ${threadId} and ${claudeThreads.ownerId} = ${u.id})`))
+        .returning({ id: claudeTurns.id });
+      if (hit) { t = { id: threadId }; turn = hit; }
     }
+    if (!t) {
+      t = await this.threadRef(u, threadId);
+      if (b.turnId) {
+        const row = await this.turnRow(u, b.turnId);
+        if (row.threadId !== t.id) throw badRequest('turnId: not a turn of this thread');
+        if (row.state !== 'running') throw new ApiError(410, 'turn_expired', 'That message has ended');
+        await this.db.update(claudeTurns).set({ lastEventAt: Date.now() }).where(eq(claudeTurns.id, row.id));
+        turn = row;
+      }
+    }
+    if (turn) this.arm(turn.id, this.silentTurnMs, u, 'Your Mac stopped answering');
     const source = 'mac' as const;
     for (const ev of b.events) {
       const relay = (event: unknown) => void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'event', threadId: t.id, ...(turn ? { turnId: turn.id } : {}), event });

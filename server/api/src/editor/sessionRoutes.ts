@@ -22,14 +22,16 @@ export function registerEditSessionRoutes(app: FastifyInstance, ctx: Ctx) {
     return Promise.all(rows.map(r => svc.view(r, { history: false })));
   });
   app.get<P>('/v1/edit-sessions/:id', async req => svc.view(await svc.row(req.user, req.params.id)));
+  /** The light poll: {revision, pending} only (no project, no history), for panels that check every few seconds. */
+  app.get<P>('/v1/edit-sessions/:id/state', async req => svc.state(req.user, req.params.id));
   app.get<P & { Querystring: { limit?: string } }>('/v1/edit-sessions/:id/history', async req => svc.history(req.user, req.params.id, Number(req.query?.limit) || 100));
   app.post<P>('/v1/edit-sessions/:id/patch', async req => svc.push(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
   app.post<P>('/v1/edit-sessions/:id/reset', async req => svc.reset(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
   app.post<P>('/v1/edit-sessions/:id/undo', async req => svc.undo(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
   app.post<P>('/v1/edit-sessions/:id/view', async req => svc.saveView(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>));
   app.post<P>('/v1/edit-sessions/:id/close', async req => svc.close(req.user, req.params.id));
-  app.post<P>('/v1/edit-sessions/:id/presence', async req => { await svc.row(req.user, req.params.id); return svc.touch(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>); });
-  app.delete<{ Params: { id: string; device: string } }>('/v1/edit-sessions/:id/presence/:device', async req => { await svc.row(req.user, req.params.id); svc.leave(req.params.id, req.params.device); return { ok: true }; });
+  app.post<P>('/v1/edit-sessions/:id/presence', async req => { await svc.own(req.user, req.params.id); return svc.touch(req.user, req.params.id, (req.body ?? {}) as Record<string, unknown>); });
+  app.delete<{ Params: { id: string; device: string } }>('/v1/edit-sessions/:id/presence/:device', async req => { await svc.own(req.user, req.params.id); svc.leave(req.params.id, req.params.device); return { ok: true }; });
   app.post<{ Params: { id: string; rid: string } }>('/v1/edit-sessions/:id/frames/:rid', async req => svc.frameDone(req.user, req.params.id, req.params.rid, (req.body ?? {}) as Record<string, unknown>));
   app.post<{ Params: { id: string; rid: string } }>('/v1/edit-sessions/:id/requests/:rid', async req => svc.appRequestDone(req.user, req.params.id, req.params.rid, (req.body ?? {}) as Record<string, unknown>));
   app.post<{ Params: { id: string; pid: string } }>('/v1/edit-sessions/:id/pending/:pid', async req => svc.answer(req.user, req.params.id, req.params.pid, (req.body ?? {}) as Record<string, unknown>));

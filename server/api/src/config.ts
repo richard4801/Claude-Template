@@ -108,6 +108,12 @@ const Env = z.object({
   /** Unused since 2026-11-04 (app clean-up): nothing pauses on a provider balance. Kept so old env files still parse. */
   RUNPOD_MIN_BALANCE_USD: num(2),
   DISPATCH_MS: num(250),
+  /**
+   * The dispatcher's pace when the only work is hosted provider runs (Suite / Replicate lines): they poll their providers
+   * every few seconds themselves and wake the dispatcher when a run ends, so a pass every DISPATCH_MS only reads the
+   * database for nothing. 0 = every DISPATCH_MS.
+   */
+  HOSTED_POLL_MS: num(1500),
   WORKER_HEARTBEAT_TIMEOUT_SEC: num(60),
   POD_BOOT_TIMEOUT_SEC: num(900),
   /**

@@ -1,7 +1,7 @@
 // Edit sessions (plans/claude-editing.md A, plans/api.md "Edit sessions"): a live, revisioned working copy of an
 // EditProject v2 per take, shared by the owner's apps and Claude. Every change is a JSON Patch with its inverse, so
 // every change (Claude's too) is undoable; changes reach the apps as `edit` events. Owner only.
-import { and, desc, eq, gt, inArray, lte } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gt, inArray, lte, sql } from 'drizzle-orm';
 import { newSafeIssues, previewOf, type EditPreview } from './safeArea.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { takes, uploads } from '../db/schema.js';
@@ -24,6 +24,12 @@ import { maskNotices } from './maskNotice.js';
 
 type Session = typeof editSessions.$inferSelect;
 type OpRow = typeof editOps.$inferSelect;
+/** A change without its patch and inverse (what the history and the events show). */
+type OpEntry = Omit<OpRow, 'patch' | 'inverse'>;
+const { patch: _patch, inverse: _inverse, ...opEntryCols } = getTableColumns(editOps);
+/** For the history list: the entry columns, and of meta only the notice (entryView reads nothing else). */
+const opHistoryCols = { ...opEntryCols,
+  meta: sql<Record<string, unknown> | null>`case when ${editOps.meta} is null then null else jsonb_strip_nulls(jsonb_build_object('notice', ${editOps.meta}->'notice')) end`.as('meta') };
 export const SESSION_LIMITS = { historyKept: 500, historyShown: 60, presenceSec: 45, frameWaitMs: 12_000, claudeOpsPerMin: 120 } as const;
 
 export type Presence = { device: string; label: string; platform: 'android' | 'mac' | 'other'; canRender: boolean; at: number;
@@ -53,16 +59,31 @@ export class EditSessions {
     if (!s) throw notFound('Edit session');
     return s;
   }
+  /** The ownership check alone (no project): the session's id and studio. */
+  async own(u: AuthUser, id: string): Promise<Pick<Session, 'id' | 'studioId'>> {
+    this.owner(u);
+    const [s] = await this.ctx.db.select({ id: editSessions.id, studioId: editSessions.studioId }).from(editSessions).where(and(eq(editSessions.id, id), eq(editSessions.studioId, u.studioId)));
+    if (!s) throw notFound('Edit session');
+    return s;
+  }
+  /** The light poll (Mac Recreate panel): the revision and the open paid-helper requests, without the project or history. */
+  async state(u: AuthUser, id: string) {
+    this.owner(u);
+    const [s] = await this.ctx.db.select({ revision: editSessions.revision, pending: editSessions.pending }).from(editSessions)
+      .where(and(eq(editSessions.id, id), eq(editSessions.studioId, u.studioId)));
+    if (!s) throw notFound('Edit session');
+    return { revision: s.revision, pending: (s.pending as Pending[]).filter(p => p.status === 'waiting' || p.status === 'running') };
+  }
   private online(id: string): Presence[] {
     const now = Date.now();
     return [...(this.presence.get(id)?.values() ?? [])].filter(p => now - p.at < SESSION_LIMITS.presenceSec * 1000);
   }
-  entryView = (o: OpRow) => ({ id: o.id, revision: o.revision, author: o.author, byClaude: o.author === 'claude', kind: o.kind, label: o.label,
+  entryView = (o: Pick<OpRow, 'id' | 'revision' | 'author' | 'kind' | 'label' | 'undoes' | 'undone' | 'createdAt' | 'meta'>) => ({ id: o.id, revision: o.revision, author: o.author, byClaude: o.author === 'claude', kind: o.kind, label: o.label,
     undoes: o.undoes ?? undefined, undone: !!o.undone, createdAt: o.createdAt,
     // A mask / Invert / green-screen key / cut-out Claude changed (maskNotice.ts): the apps show it with Undo.
     ...(typeof (o.meta as { notice?: unknown } | null)?.notice === 'string' ? { notice: (o.meta as { notice: string }).notice } : {}) });
   async view(s: Session, o: { history?: boolean } = {}) {
-    const hist = o.history === false ? undefined : (await this.ctx.db.select().from(editOps).where(eq(editOps.sessionId, s.id)).orderBy(desc(editOps.id)).limit(SESSION_LIMITS.historyShown)).map(this.entryView);
+    const hist = o.history === false ? undefined : (await this.ctx.db.select(opHistoryCols).from(editOps).where(eq(editOps.sessionId, s.id)).orderBy(desc(editOps.id)).limit(SESSION_LIMITS.historyShown)).map(this.entryView);
     return { id: s.id, takeId: s.takeId, baseVersionId: s.baseVersionId ?? undefined, revision: s.revision, project: s.project as M.EditProject,
       durationSec: M.durationSec(s.project as M.EditProject), status: s.status, updatedBy: s.updatedBy, updatedAt: s.updatedAt,
       pending: (s.pending as Pending[]).filter(p => p.status === 'waiting' || p.status === 'running'),
@@ -70,7 +91,7 @@ export class EditSessions {
       requests: (this.requests.get(s.id) ?? []).slice(-10), ...(s.view ? { view: s.view } : {}), lastTouchedAt: lastTouched(s),
       ...(hist ? { history: hist } : {}) };
   }
-  private emit(s: Session, ev: Record<string, unknown>) {
+  private emit(s: Pick<Session, 'id' | 'studioId'>, ev: Record<string, unknown>) {
     void this.ctx.hub.emit(s.studioId, v => (v.role === 'owner' ? { type: 'edit', sessionId: s.id, ...ev } : null));
   }
 
@@ -164,15 +185,18 @@ export class EditSessions {
   /** Stores a new project (already validated) with its patch and inverse; tells the apps. */
   private async commit(s: Session, next: M.EditProject, o: { author: string; kind: OpRow['kind']; label: string; undoes?: number; meta?: Record<string, unknown> }) {
     const patch = diff(s.project, next), inverse = diff(next, s.project);
-    if (!patch.length && o.kind !== 'tool') return { session: s, entry: null as OpRow | null, patch };
+    if (!patch.length && o.kind !== 'tool') return { session: s, entry: null as OpEntry | null, patch };
     const now = Date.now(), rev = s.revision + (patch.length ? 1 : 0);
     const notices = o.author === 'claude' && o.kind === 'edit' && patch.length ? maskNotices(s.project as M.EditProject, next) : [];
     if (notices.length) o = { ...o, meta: { ...(o.meta ?? {}), notice: notices.join(' · ') } };
-    const [u] = await this.ctx.db.update(editSessions).set({ project: next as unknown as Record<string, unknown>, revision: rev, updatedBy: o.author, updatedAt: now })
-      .where(and(eq(editSessions.id, s.id), eq(editSessions.revision, s.revision))).returning();
-    if (!u) throw await this.stale(s.id, s.revision); // someone else committed in between
+    // Neither write sends the project, patch or inverse back: the session row is what was just written.
+    const set = { project: next as unknown as Record<string, unknown>, revision: rev, updatedBy: o.author, updatedAt: now };
+    const [hit] = await this.ctx.db.update(editSessions).set(set)
+      .where(and(eq(editSessions.id, s.id), eq(editSessions.revision, s.revision))).returning({ id: editSessions.id });
+    if (!hit) throw await this.stale(s.id, s.revision); // someone else committed in between
+    const u: Session = { ...s, ...set };
     const [entry] = await this.ctx.db.insert(editOps).values({ sessionId: s.id, revision: rev, author: o.author, kind: o.kind, label: o.label.slice(0, 200),
-      patch, inverse, undoes: o.undoes ?? null, meta: patch.length ? { ...(o.meta ?? {}), touched: touched(s.project as M.EditProject, next) } : (o.meta ?? null), createdAt: now }).returning();
+      patch, inverse, undoes: o.undoes ?? null, meta: patch.length ? { ...(o.meta ?? {}), touched: touched(s.project as M.EditProject, next) } : (o.meta ?? null), createdAt: now }).returning(opEntryCols);
     if (o.undoes) await this.ctx.db.update(editOps).set({ undone: 1 }).where(eq(editOps.id, o.undoes));
     await this.prune(s.id);
     if (patch.length) this.emit(u, { op: 'patch', revision: rev, baseRevision: s.revision, patch, entry: this.entryView(entry!) });
@@ -227,7 +251,7 @@ export class EditSessions {
     return { project, labels, over: since.map(x => x.r.label) };
   }
   private async stale(id: string, baseRevision: number) {
-    const [cur] = await this.ctx.db.select().from(editSessions).where(eq(editSessions.id, id));
+    const [cur] = await this.ctx.db.select({ revision: editSessions.revision }).from(editSessions).where(eq(editSessions.id, id));
     return new ApiError(409, 'stale_revision', `The edit moved on (revision ${cur?.revision ?? '?'}, you sent ${baseRevision}) · get it again and re-apply`);
   }
   private async prune(id: string) {
@@ -298,20 +322,20 @@ export class EditSessions {
     return { revision: r.session.revision, entry: r.entry ? this.entryView(r.entry) : null };
   }
   /** A note in the history without a change (every MCP call is logged). */
-  async log(s: Session, label: string) {
-    const [entry] = await this.ctx.db.insert(editOps).values({ sessionId: s.id, revision: s.revision, author: 'claude', kind: 'tool', label: label.slice(0, 200), patch: [], inverse: [], createdAt: Date.now() }).returning();
+  async log(s: Pick<Session, 'id' | 'studioId' | 'revision'>, label: string) {
+    const [entry] = await this.ctx.db.insert(editOps).values({ sessionId: s.id, revision: s.revision, author: 'claude', kind: 'tool', label: label.slice(0, 200), patch: [], inverse: [], createdAt: Date.now() }).returning(opEntryCols);
     this.emit(s, { op: 'log', entry: this.entryView(entry!) });
   }
   async history(u: AuthUser, id: string, limit = 100) {
-    await this.row(u, id);
-    return (await this.ctx.db.select().from(editOps).where(eq(editOps.sessionId, id)).orderBy(desc(editOps.id)).limit(Math.min(500, Math.max(1, limit)))).map(this.entryView);
+    await this.own(u, id);
+    return (await this.ctx.db.select(opHistoryCols).from(editOps).where(eq(editOps.sessionId, id)).orderBy(desc(editOps.id)).limit(Math.min(500, Math.max(1, limit)))).map(this.entryView);
   }
   /**
    * Where the editor was left (continue a draft): playhead, zoom, tabs, platform view, the project's name. Stored as is
    * (cleaned), no revision and no history; `at` marks the session as the one last worked on.
    */
   async saveView(u: AuthUser, id: string, b: Record<string, unknown>) {
-    const s = await this.row(u, id);
+    const s = await this.own(u, id);
     const view = cleanView(b.view ?? b);
     await this.ctx.db.update(editSessions).set({ view }).where(eq(editSessions.id, s.id));
     return { ok: true, view };
@@ -319,14 +343,17 @@ export class EditSessions {
   /** Open sessions, the one last worked on (edited or looked at) first: the apps' "Recent edits". */
   async recent(u: AuthUser, limit = 20) {
     this.owner(u);
-    const rows = await this.ctx.db.select().from(editSessions).where(and(eq(editSessions.studioId, u.studioId), eq(editSessions.status, 'open')))
-      .orderBy(desc(editSessions.updatedAt)).limit(100);
+    // The 100 candidates without their projects; only the sessions returned are read in full.
+    const rows = await this.ctx.db.select({ id: editSessions.id, updatedAt: editSessions.updatedAt, view: editSessions.view }).from(editSessions)
+      .where(and(eq(editSessions.studioId, u.studioId), eq(editSessions.status, 'open'))).orderBy(desc(editSessions.updatedAt)).limit(100);
     // Sorted on when the person last worked on it (lastTouched), not on the last change from anyone.
     const top = rows.sort((a, b) => lastTouched(b) - lastTouched(a)).slice(0, Math.min(50, Math.max(1, limit)));
-    return Promise.all(top.map(r => this.view(r, { history: false })));
+    if (!top.length) return [];
+    const full = new Map((await this.ctx.db.select().from(editSessions).where(and(eq(editSessions.studioId, u.studioId), inArray(editSessions.id, top.map(r => r.id))))).map(r => [r.id, r]));
+    return Promise.all(top.flatMap(r => { const f = full.get(r.id); return f ? [this.view(f, { history: false })] : []; }));
   }
   async close(u: AuthUser, id: string) {
-    const s = await this.row(u, id);
+    const s = await this.own(u, id);
     await this.ctx.db.update(editSessions).set({ status: 'closed', updatedAt: Date.now() }).where(eq(editSessions.id, s.id));
     this.emit(s, { op: 'closed' });
     return { ok: true };
@@ -368,7 +395,7 @@ export class EditSessions {
     return got ? { ...got, device: r.device } : { missed: `${r.label} has the edit open but didn't send the frame within ${SESSION_LIMITS.frameWaitMs / 1000} s (busy loading a big clip?).` };
   }
   async frameDone(u: AuthUser, id: string, requestId: string, b: { uploadId?: unknown }) {
-    await this.row(u, id);
+    await this.own(u, id);
     const w = this.frames.get(requestId);
     if (!w) throw notFound('Frame request');
     if (typeof b.uploadId !== 'string') throw badRequest('uploadId: required');
@@ -389,7 +416,7 @@ export class EditSessions {
     return req;
   }
   async appRequestDone(u: AuthUser, id: string, requestId: string, b: { status?: unknown; versionId?: unknown; error?: unknown }) {
-    const s = await this.row(u, id);
+    const s = await this.own(u, id);
     const req = (this.requests.get(id) ?? []).find(r => r.id === requestId);
     if (!req) throw notFound('Request');
     req.status = b.status === 'failed' ? 'failed' : 'done';
@@ -434,8 +461,9 @@ export class EditSessions {
   track(jobId: string, w: { sessionId: string; studioId: string; ownerId: string; kind: string; itemId?: string; reasons?: string[]; label: string }) { this.watch.set(jobId, w); }
   private async jobFinished(jobId: string, state: string, result: Record<string, unknown> | null) {
     let w = this.watch.get(jobId);
-    if (!w) { // approved from the app: find it in a session's pending list
-      const rows = await this.ctx.db.select().from(editSessions).where(eq(editSessions.status, 'open'));
+    if (!w) { // approved from the app: find it in a session's pending list (only the session that has it, without its project)
+      const rows = await this.ctx.db.select({ id: editSessions.id, studioId: editSessions.studioId, ownerId: editSessions.ownerId, pending: editSessions.pending })
+        .from(editSessions).where(and(eq(editSessions.status, 'open'), sql`${editSessions.pending} @> ${JSON.stringify([{ jobId }])}::jsonb`));
       const s = rows.find(r => (r.pending as Pending[]).some(p => p.jobId === jobId));
       const p = s && (s.pending as Pending[]).find(x => x.jobId === jobId);
       if (!s || !p) return;

@@ -4,7 +4,7 @@
 // GPU queue (state "running", gpuState "pending") → a GPU slot claims it (fair round-robin between users) →
 // progress → done (takes created, hold settled to the actual cost) or failed (hold released in full).
 // `queue: true` parks a job as "queued" (nothing held) until POST /v1/queue/run.
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { clips, jobs, loras, models, outfits, takes, type ImageRef } from '../db/schema.js';
@@ -15,7 +15,7 @@ import * as P from '../pricing.js';
 import { loraToken } from '../prompt/engine.js';
 import { replicateSwap, videoSwap } from '../prompt/scripts/builders.js';
 import { resolveSpeaking } from '../audio/service.js';
-import { gpuCanRun, type JobRow } from '../gpu/controller.js';
+import { gpuCanRun, type JobRow, type PodRow, type WaitingJob } from '../gpu/controller.js';
 import { pods } from '../db/schema.js';
 import { resultsOf } from '../claude/results.js';
 import { shotPromptFor } from '../templates/service.js';
@@ -68,6 +68,23 @@ export const linePhase = (position: number, startsIn: number) =>
 
 type QueueInfo = { queuePosition: number; etaSeconds: number; startsInSeconds: number };
 
+/** What the dispatcher reads of a waiting job (no draft, outputs, stats, prompt or thumb: it never looks at them). */
+export const waitingCols = (({ draft: _d, outputs: _o, stats: _s, prompt: _p, thumb: _t, ...rest }) => rest)(getTableColumns(jobs));
+/**
+ * What view() and emitJob() read of a job: every column but outputs, and of stats only the keys view() shows
+ * (errorCode, replicate/suite billedSeconds, photo takeIds). Used where a hot write returns the row only to emit it.
+ */
+export const jobViewCols = {
+  ...(({ outputs: _o, stats: _s, ...rest }) => rest)(getTableColumns(jobs)),
+  stats: sql<Record<string, unknown> | null>`case when ${jobs.stats} is null then null else jsonb_strip_nulls(jsonb_build_object(
+    'errorCode', ${jobs.stats}->'errorCode',
+    'replicate', jsonb_strip_nulls(jsonb_build_object('billedSeconds', ${jobs.stats}#>'{replicate,billedSeconds}')),
+    'suite', jsonb_strip_nulls(jsonb_build_object('billedSeconds', ${jobs.stats}#>'{suite,billedSeconds}')),
+    'photo', jsonb_strip_nulls(jsonb_build_object('takeIds', ${jobs.stats}#>'{photo,takeIds}')))) end`.as('stats'),
+};
+/** A job row as jobViewCols returns it: enough for view() and emitJob(). */
+export type JobViewRow = Omit<JobRow, 'outputs'>;
+
 const isRep = (j: { request: Record<string, any> }) => j.request?.engine === 'replicate';
 // AI suite (workstream 1): suite shots run on their own line (suite/runner.ts), never on a pod.
 const isSuite = (j: { request: Record<string, any> }) => j.request?.engine === 'suite';
@@ -82,13 +99,17 @@ export class JobService {
   private loop: NodeJS.Timeout | null = null;
   private ticking = false;
   private current: Promise<void> | null = null;
-  /** Nothing waiting and no pod up after the last pass: poll only every IDLE_POLL_SECONDS (lets Neon sleep). */
-  private quiet = false;
+  /**
+   * After the last pass: "quiet" (nothing waiting, no pod up, no hosted run): poll only every IDLE_POLL_SECONDS (lets the
+   * database sleep). "hosted" (only Suite / Replicate runs, which poll their providers themselves and kick() when they
+   * end): every HOSTED_POLL_MS. "busy" (a pod up or a GPU job waiting): every DISPATCH_MS.
+   */
+  private mode: 'busy' | 'hosted' | 'quiet' = 'busy';
   private lastPassAt = 0;
   constructor(private ctx: Ctx) {}
 
   // ------------------------------------------------------------------ views
-  view(j: JobRow, takesOut?: unknown[]) {
+  view(j: JobViewRow, takesOut?: unknown[]) {
     const q = j.state === 'running' && j.gpuState === 'pending' ? this.queueInfo.get(j.id) ?? this.lineInfo.get(j.id) : undefined;
     return compact({
       id: j.id, title: j.title, modelId: j.modelId, modelName: j.modelName, outfitId: j.outfitId, request: withoutChat(j.request), state: j.state,
@@ -102,7 +123,7 @@ export class JobService {
       takeIds: isPhoto(j) ? (j.stats as any)?.photo?.takeIds : undefined, // WS19: a photo job's stills (jobless takes)
     });
   }
-  emitJob(j: JobRow, extra: Record<string, unknown> = {}) {
+  emitJob(j: JobViewRow, extra: Record<string, unknown> = {}) {
     if (j.kind !== 'render' || j.hiddenAt) return;
     this.ctx.hub.emit(j.studioId, { type: 'job', job: this.view(j), ...extra });
     if (j.state === 'done' || j.state === 'failed') void this.resultToChat(j, extra).catch(() => undefined);
@@ -112,7 +133,7 @@ export class JobService {
    * Results arrive in the chat (owner, 2026-11-11): a job started while a Claude chat was open (by Claude through the
    * panel, or by the person on a page) tells that chat's owner's apps it finished; their Mac runs Claude on it.
    */
-  private async resultToChat(j: JobRow, extra: Record<string, unknown>) {
+  private async resultToChat(j: JobViewRow, extra: Record<string, unknown>) {
     const chatId = typeof j.request?.chatId === 'string' ? j.request.chatId : undefined;
     if (!chatId || !j.userId) return;
     const fromExtra = Array.isArray(extra.takes) ? (extra.takes as { id?: unknown }[]).map(x => x.id).filter((x): x is string => typeof x === 'string') : [];
@@ -124,7 +145,8 @@ export class JobService {
   }
 
   async list(studioId: string) {
-    const rows = await this.ctx.db.select().from(jobs)
+    // view() never shows outputs or the run state in stats: they stay in the database.
+    const rows = await this.ctx.db.select(jobViewCols).from(jobs)
       .where(and(eq(jobs.studioId, studioId), eq(jobs.kind, 'render'), isNull(jobs.hiddenAt))).orderBy(desc(jobs.createdAt));
     return rows.map(r => this.view(r));
   }
@@ -366,10 +388,10 @@ export class JobService {
   }
 
   // ------------------------------------------------------------------ GPU side
-  private async waitingJobs(studioId?: string) {
+  private async waitingJobs(studioId?: string): Promise<WaitingJob[]> {
     const conds = [eq(jobs.state, 'running'), eq(jobs.gpuState, 'pending')];
     if (studioId) conds.push(eq(jobs.studioId, studioId));
-    return (await this.ctx.db.select().from(jobs).where(and(...conds))).sort(fifo);
+    return (await this.ctx.db.select(waitingCols).from(jobs).where(and(...conds))).sort(fifo);
   }
 
   /** The next job for a pod: its assigned user's oldest waiting job that its GPU can run (FIFO per user). */
@@ -379,7 +401,7 @@ export class JobService {
    */
   async claimFor(pod: { id: string; assignedUserId: string | null; gpuType: string }, caps?: string[], anyUser = false): Promise<JobRow | null> {
     if (!pod.assignedUserId && !anyUser) return null;
-    const can = (j: JobRow) => !caps || (caps.includes(this.workerKind(j)) && (!j.request.lipSync || caps.includes('latentsync')));
+    const can = (j: WaitingJob) => !caps || (caps.includes(this.workerKind(j)) && (!j.request.lipSync || caps.includes('latentsync')));
     const mine = (await this.waitingJobs()).filter(j => !isHosted(j) && (anyUser || j.userId === pod.assignedUserId) && !j.blocked
       && (anyUser || gpuCanRun(this.ctx.config, pod.gpuType, this.workerKind(j))) && can(j));
     for (const j of mine) {
@@ -401,12 +423,13 @@ export class JobService {
     if (v!.kind === 'lora-train') await this.ctx.lora.onProgress(v!, 0);
     return v!;
   }
-  workerKind(j: JobRow): 'h3' | 'viggle' | 'lora-train' | 'upscale' { return j.kind === 'lora-train' ? 'lora-train' : j.request.engine === 'viggle' ? 'viggle' : j.request.engine === 'upscale' ? 'upscale' : 'h3'; }
+  workerKind(j: Pick<JobRow, 'kind' | 'request'>): 'h3' | 'viggle' | 'lora-train' | 'upscale' { return j.kind === 'lora-train' ? 'lora-train' : j.request.engine === 'viggle' ? 'viggle' : j.request.engine === 'upscale' ? 'upscale' : 'h3'; }
 
   /** Progress for a claimed job. Returns false if the job is no longer running (deleted or failed): the GPU should stop. */
   async progress(jobId: string, fields: { progress: number; take?: number; step?: number; totalSteps?: number; phase?: string; secondsLeft?: number }) {
+    // Only what the job event shows comes back (not outputs or the run state in stats): this runs on every progress report.
     const [u] = await this.ctx.db.update(jobs).set({ ...fields, lastProgressAt: Date.now() })
-      .where(and(eq(jobs.id, jobId), eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'))).returning();
+      .where(and(eq(jobs.id, jobId), eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'))).returning(jobViewCols);
     if (!u) return false;
     if (u.kind === 'lora-train') await this.ctx.lora.onProgress(u, fields.progress);
     else this.emitJob(u);
@@ -475,13 +498,16 @@ export class JobService {
   }
   stop() { if (this.loop) clearInterval(this.loop); this.loop = null; }
   /** Run a tick soon (after a job is queued or a GPU frees up). */
-  kick() { this.quiet = false; setImmediate(() => { if (!this.current) void this.tick(); }); }
+  kick() { this.mode = 'busy'; setImmediate(() => { if (!this.current) void this.tick(); }); }
   /** Whether the timer should run a pass now. Every code path that creates GPU work calls kick(), so when quiet the
    * slow poll is only a safety net. */
   private due() {
-    const idleMs = this.ctx.config.IDLE_POLL_SECONDS * 1000;
-    return !this.quiet || !idleMs || Date.now() - this.lastPassAt >= idleMs;
+    if (this.mode === 'busy') return true;
+    const waitMs = this.mode === 'hosted' ? this.ctx.config.HOSTED_POLL_MS : this.ctx.config.IDLE_POLL_SECONDS * 1000;
+    return !waitMs || Date.now() - this.lastPassAt >= waitMs;
   }
+  /** The dispatcher's polling mode after the last pass (tests, status). */
+  pollMode() { return this.mode; }
 
   /** One dispatcher pass. If a pass is running, waits for it and runs another (so callers see a fresh pass). */
   async tick(now?: number): Promise<void> {
@@ -505,16 +531,21 @@ export class JobService {
           if (u) { Object.assign(j, u); this.emitJob(u); }
         }
       }
-      await this.updateQueueInfo(waiting);
-      await this.ctx.gpu.dispatch(waiting.filter(j => !j.blocked), now);
-      await this.ctx.gpu.tick(now);
-      await this.ctx.warm.tick(now);
-      const pool = this.ctx.gpu as { activePods?: () => Promise<unknown[]> };
-      const wasQuiet = this.quiet;
-      this.quiet = all.length === 0 && !this.ctx.replicateVideo.busy() && !this.ctx.suite.runner.busy() && (pool.activePods ? (await pool.activePods()).length === 0 : false);
-      if (this.quiet !== wasQuiet) this.ctx.log.debug({ quiet: this.quiet }, this.quiet ? 'dispatcher idle: slow polling' : 'dispatcher busy');
+      // The active pods are read once per pass and handed down; whoever may have changed them says so (null: re-read).
+      const gpu = this.ctx.gpu;
+      let active: PodRow[] | null = gpu.activePods ? await gpu.activePods() : null;
+      await this.updateQueueInfo(waiting, active ?? undefined);
+      active = (await gpu.dispatch(waiting.filter(j => !j.blocked), now, active ?? undefined)) ?? null;
+      active = (await gpu.tick(now, active)) ?? null;
+      // A warm GPU session that ends stops its pod.
+      if (await this.ctx.warm.tick(now)) active = null;
+      const podsUp = gpu.activePods ? (active ?? await gpu.activePods()).length : null;
+      const prev = this.mode;
+      const hosted = all.length > waiting.length || this.ctx.replicateVideo.busy() || this.ctx.suite.runner.busy();
+      this.mode = waiting.length || podsUp !== 0 ? 'busy' : hosted ? 'hosted' : 'quiet';
+      if (this.mode !== prev) this.ctx.log.debug({ mode: this.mode }, this.mode === 'quiet' ? 'dispatcher idle: slow polling' : `dispatcher ${this.mode}`);
     } catch (e) {
-      this.quiet = false;
+      this.mode = 'busy';
       this.ctx.log.error({ err: (e as Error).message }, 'dispatcher tick failed');
     } finally {
       this.lastPassAt = Date.now();
@@ -530,13 +561,13 @@ export class JobService {
   }
 
   /** The Replicate line's position for a waiting job (services/replicateVideo.ts); a job event goes out when it moves. */
-  async setLinePosition(j: JobRow, position: number, startsIn: number) {
+  async setLinePosition(j: WaitingJob, position: number, startsIn: number) {
     const info = { queuePosition: position, startsInSeconds: startsIn, etaSeconds: startsIn + (j.totalSeconds || 0) };
     const prev = this.lineInfo.get(j.id);
     this.lineInfo.set(j.id, info);
     if (prev && prev.queuePosition === position) return;
     const phase = linePhase(position, startsIn);
-    const [u] = await this.ctx.db.update(jobs).set({ phase, blocked: null }).where(and(eq(jobs.id, j.id), eq(jobs.gpuState, 'pending'))).returning();
+    const [u] = await this.ctx.db.update(jobs).set({ phase, blocked: null }).where(and(eq(jobs.id, j.id), eq(jobs.gpuState, 'pending'))).returning(jobViewCols);
     if (u) this.emitJob(u);
   }
 
@@ -544,8 +575,9 @@ export class JobService {
    * Queue position and ETA for each waiting job. A user with a pod waits only for their own earlier jobs; a user without
    * one (over MAX_GPUS) waits for the next pod to free up. A job event goes out when a job's position changes.
    */
-  private async updateQueueInfo(waiting: JobRow[]) {
-    const active = await this.ctx.db.select().from(pods).where(inArray(pods.state, ['starting', 'running']));
+  private async updateQueueInfo(waiting: WaitingJob[], snapshot?: PodRow[]) {
+    if (!waiting.length) { this.queueInfo.clear(); return; } // nothing to place in line (same result as the full pass)
+    const active = snapshot ?? await this.ctx.db.select().from(pods).where(inArray(pods.state, ['starting', 'running']));
     const running = await this.ctx.db.select({ id: jobs.id, secondsLeft: jobs.secondsLeft }).from(jobs).where(and(eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed')));
     const left = new Map(running.map(r => [r.id, r.secondsLeft]));
     const podLeft = (p: typeof active[number]) => (p.currentJobId ? left.get(p.currentJobId) ?? 0 : 0);
@@ -570,16 +602,20 @@ export class JobService {
       if (!prev || prev.queuePosition !== position) {
         if (!j.blocked) {
           const phase = linePhase(position, startsIn);
-          const [u2] = await this.ctx.db.update(jobs).set({ phase }).where(and(eq(jobs.id, j.id), eq(jobs.gpuState, 'pending'))).returning();
+          const [u2] = await this.ctx.db.update(jobs).set({ phase }).where(and(eq(jobs.id, j.id), eq(jobs.gpuState, 'pending'))).returning(jobViewCols);
           if (u2) this.emitJob(u2);
-        } else this.emitJob(j);
+        } else {
+          // Still paused (the clearing update above missed it): the event needs the full row, which the pass doesn't read.
+          const full = await this.get(j.id);
+          if (full) this.emitJob(full);
+        }
       }
     }
     for (const id of this.queueInfo.keys()) if (!seen.has(id)) this.queueInfo.delete(id);
   }
 }
 
-const fifo = (a: JobRow, b: JobRow) => (a.queuedAt ?? a.createdAt) - (b.queuedAt ?? b.createdAt) || a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const fifo = (a: Pick<JobRow, 'queuedAt' | 'createdAt' | 'id'>, b: Pick<JobRow, 'queuedAt' | 'createdAt' | 'id'>) => (a.queuedAt ?? a.createdAt) - (b.queuedAt ?? b.createdAt) || a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /** A render reference: its sheet label ("face, front", "outfit, ¾" …), the image and, for an outfit's images, why. */
 export type RenderRef = { label: string; image: ImageRef; why?: string };
@@ -641,7 +677,9 @@ function mergeOutputs(planned: Record<string, unknown>[], reported: Record<strin
 }
 
 /** A take as one viewer may see it. Template shots show their full prompt and draws only to the template's owner. */
-export function takeView(t: typeof takes.$inferSelect, publicUrl?: string, viewerId?: string) {
+/** What takeView() reads: every column but the photoshoot layers (never sent to apps). */
+export const { layers: _takeLayers, ...takeViewCols } = getTableColumns(takes);
+export function takeView(t: Omit<typeof takes.$inferSelect, 'layers'>, publicUrl?: string, viewerId?: string) {
   const shown = shotPromptFor(t, viewerId ?? '');
   return compact({
     id: t.id, kind: t.kind, jobId: t.jobId, index: t.index, of: t.of, title: t.title, label: t.label, engineLabel: t.engineLabel, cost: t.cost,

@@ -21,7 +21,7 @@ import { PaidLost, paidLostFailure, reportPaidLost, sleep } from './paidLost.js'
 import { mediaToolsAvailable, padTo, probe, restoreAudio, stripAudio, thumbnail } from '../replicate/media.js';
 import { putFile, putObject } from '../storage/objects.js';
 import sharp from 'sharp';
-import type { JobRow } from '../gpu/controller.js';
+import type { JobRow, WaitingJob } from '../gpu/controller.js';
 import { modelById } from '../suite/registry.js';
 import { GENJUTSU_NO_ACCESS, GENJUTSU_RES, HF_SWAP_MIN_SEC, swapEngineById } from '../engines/purposes.js';
 import type { VideoProvider } from '../suite/providers.js';
@@ -187,19 +187,23 @@ export class ReplicateVideo {
    * here is running (after a restart) are resumed first, unless another instance still holds their lease; then free
    * slots take the oldest waiting jobs.
    */
-  async dispatch(waiting: JobRow[]) {
+  async dispatch(waiting: WaitingJob[]) {
     if (this.stopping) return;
-    const orphans = await this.ctx.db.select().from(jobs).where(and(eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'), eq(jobs.podId, REPLICATE_POD)));
-    for (const j of orphans) {
-      if (this.running.has(j.id)) continue;
+    // Only the id and the lease of each claimed job (every pass); the full row only for one this instance resumes.
+    const orphans = await this.ctx.db.select({ id: jobs.id, lease: sql<{ by?: string; at?: number } | null>`${jobs.stats} #> '{replicateLease}'` }).from(jobs)
+      .where(and(eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'), eq(jobs.podId, REPLICATE_POD)));
+    for (const o of orphans) {
+      if (this.running.has(o.id)) continue;
       // Another instance still checks in on it (the old one during a deploy's overlap): leave it there.
-      const l = (j.stats as any)?.replicateLease as { by?: string; at?: number } | undefined;
+      const l = o.lease ?? undefined;
       if (l?.by && l.by !== this.instance && Date.now() - (l.at ?? 0) < this.leaseMs()) continue;
+      const [j] = await this.ctx.db.select().from(jobs).where(and(eq(jobs.id, o.id), eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'), eq(jobs.podId, REPLICATE_POD)));
+      if (!j || this.running.has(j.id)) continue;
       this.ctx.log.info({ job: j.id }, 'Replicate job resumed');
       this.launch(j);
     }
     const max = Math.max(1, Math.floor(this.ctx.config.REPLICATE_MAX_CONCURRENT));
-    const line: JobRow[] = [];
+    const line: WaitingJob[] = [];
     for (const j of waiting) {
       if (this.running.size < max) {
         const c = await this.ctx.jobs.claim(j.id, REPLICATE_POD);
@@ -209,7 +213,7 @@ export class ReplicateVideo {
     }
     // Queue position and ETA: each slot frees after the running job's estimate; the line moves one job per slot.
     if (!line.length) return;
-    const per = (j: JobRow) => j.totalSeconds || P.totalSeconds(j.request);
+    const per = (j: WaitingJob) => j.totalSeconds || P.totalSeconds(j.request);
     const left = (await this.ctx.db.select({ s: jobs.secondsLeft }).from(jobs)
       .where(and(eq(jobs.state, 'running'), eq(jobs.gpuState, 'claimed'), eq(jobs.podId, REPLICATE_POD)))).map(x => x.s);
     const soonest = left.length ? Math.min(...left) : 0;

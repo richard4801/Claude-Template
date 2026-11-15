@@ -28,6 +28,8 @@ export class PostScheduler {
   /** Earliest scheduled post still waiting (Infinity: none), and when the database was last read. Between due times
    * the loop doesn't touch the database (lets Neon sleep), except a slow safety poll every IDLE_POLL_SECONDS. */
   private nextDueAt = 0;
+  /** Simulated posting: when the earliest handed-off post turns "posted" (Infinity: none waiting). */
+  private nextPostAt = 0;
   private lastReadAt = 0;
   constructor(private ctx: Ctx) {}
 
@@ -83,7 +85,7 @@ export class PostScheduler {
   /** Stage 1: the client opens each app with the caption on the clipboard. */
   private async handoff(x: PostRow) {
     const [u] = await this.ctx.db.update(posts).set({ state: 'handoff', handoffAt: Date.now() }).where(and(eq(posts.id, x.id), eq(posts.state, 'scheduled'))).returning();
-    if (u) this.emit(u);
+    if (u) { this.emit(u); this.nextPostAt = Math.min(this.nextPostAt, (u.handoffAt ?? 0) + this.ctx.config.GEN_MS); }
     return u ?? x;
   }
 
@@ -96,7 +98,9 @@ export class PostScheduler {
 
   private due(now = Date.now()) {
     const idleMs = this.ctx.config.IDLE_POLL_SECONDS * 1000;
-    if (!idleMs || this.ctx.config.socialMode === 'simulated') return true; // dev: simulated posting needs every tick
+    if (!idleMs) return true;
+    // Simulated posting (dev) also wakes when a handed-off post is due to turn "posted".
+    if (this.ctx.config.socialMode === 'simulated' && now >= this.nextPostAt) return true;
     return now >= this.nextDueAt || now - this.lastReadAt >= idleMs;
   }
 
@@ -107,18 +111,21 @@ export class PostScheduler {
       this.lastReadAt = Date.now();
       for (const x of await this.ctx.db.select().from(posts).where(and(eq(posts.state, 'scheduled'), lte(posts.dueAt, now)))) await this.handoff(x);
       if (this.ctx.config.socialMode === 'simulated') {
-        const due = await this.ctx.db.select().from(posts).where(and(eq(posts.state, 'handoff'), lte(posts.handoffAt, now - this.ctx.config.GEN_MS)));
+        const due = await this.ctx.db.select({ id: posts.id }).from(posts).where(and(eq(posts.state, 'handoff'), lte(posts.handoffAt, now - this.ctx.config.GEN_MS)));
         for (const x of due) {
           const views = 1240 + Math.floor(Math.random() * 900);
           const [u] = await this.ctx.db.update(posts).set({ state: 'posted', postedAt: now, stats: { views, likes: Math.floor(views * 0.11), comments: Math.floor(views * 0.008) } })
             .where(and(eq(posts.id, x.id), eq(posts.state, 'handoff'))).returning();
           if (u) this.emit(u);
         }
+        const [h] = await this.ctx.db.select({ at: min(posts.handoffAt) }).from(posts).where(eq(posts.state, 'handoff'));
+        this.nextPostAt = h?.at == null ? Infinity : Number(h.at) + this.ctx.config.GEN_MS;
       }
       const [n] = await this.ctx.db.select({ at: min(posts.dueAt) }).from(posts).where(eq(posts.state, 'scheduled'));
       this.nextDueAt = n?.at == null ? Infinity : Number(n.at);
     } catch (e) {
       this.nextDueAt = 0;
+      this.nextPostAt = 0;
       this.ctx.log.error({ err: (e as Error).message }, 'post scheduler tick failed');
     } finally { this.running = false; }
   }

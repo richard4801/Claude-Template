@@ -247,11 +247,13 @@ export class WarmService {
   }
 
   // ------------------------------------------------------------------ the dispatcher's pass
+  /** Returns true if any session was live (then a pod may have stopped in this pass). */
   async tick(now: number) {
     const live = await this.ctx.db.select().from(warmSessions).where(inArray(warmSessions.state, ['starting', 'warm']));
     for (const s0 of live) {
       try { await this.tickOne(s0, now); } catch (e) { this.ctx.log.error({ session: s0.id, err: (e as Error).message }, 'warm GPU tick failed'); }
     }
+    return live.length > 0;
   }
 
   private async tickOne(s0: WarmSession, now: number) {

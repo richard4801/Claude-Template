@@ -238,10 +238,10 @@ export class Learning {
    * Called after every change in an edit session (sessions.ts commit). When the owner's change undoes one of Claude's,
    * or touches what one of Claude's recent changes touched, it is logged as a correction. Never throws.
    */
-  async observe(s: SessionRow, before: M.EditProject, after: M.EditProject, entry: OpRow) {
+  async observe(s: SessionRow, before: M.EditProject, after: M.EditProject, entry: Omit<OpRow, 'patch' | 'inverse'>) {
     try {
       if (entry.author === 'claude' || entry.kind === 'tool') return;
-      const touchedOf = (o: OpRow) => (((o.meta ?? {}) as { touched?: string[] }).touched ?? []);
+      const touchedOf = (o: Pick<OpRow, 'meta'>) => (((o.meta ?? {}) as { touched?: string[] }).touched ?? []);
       if (entry.kind === 'undo' && entry.undoes) {
         const [c] = await this.db.select().from(editOps).where(eq(editOps.id, entry.undoes));
         if (!c || c.author !== 'claude') return;
@@ -270,7 +270,7 @@ export class Learning {
       }
     } catch (e) { this.ctx.log.warn({ err: e }, 'learn observe'); }
   }
-  private async record(s: SessionRow, entry: OpRow, c: OpRow, kind: 'undo' | 'change', area: Area, what: string, extra: Record<string, unknown>, hit?: string) {
+  private async record(s: SessionRow, entry: Omit<OpRow, 'patch' | 'inverse'>, c: OpRow, kind: 'undo' | 'change', area: Area, what: string, extra: Record<string, unknown>, hit?: string) {
     const meta = (c.meta ?? {}) as { sources?: Record<string, unknown> };
     const item = hit && !hit.startsWith('canvas/') && !hit.startsWith('track:') ? hit.slice(0, hit.lastIndexOf('/')) : undefined;
     const source = item && meta.sources ? meta.sources[item] : undefined;

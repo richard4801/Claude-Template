@@ -19,7 +19,7 @@ import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_
 import { applySent, sentImagesOf, sentOfBody, whyOf, type SentView } from '../images/sent.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
-import { linkChat, takeView } from '../services/jobs.js';
+import { linkChat, takeView, takeViewCols } from '../services/jobs.js';
 import { resultsOf } from '../claude/results.js';
 import { ASSET_DIR, ASSET_KEYS, PhotoError, PROVIDERS, type ShootRefIn } from '../images/service.js';
 import { PhotoBill } from '../images/bill.js';
@@ -816,7 +816,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   });
   app.post('/v1/queue/run', async req => ctx.jobs.runQueue(req.user));
 
-  app.get('/v1/takes', async req => (await db.select().from(takes).where(eq(takes.studioId, req.user.studioId)).orderBy(desc(takes.createdAt))).map(t => takeView(t, pub, req.user.id)));
+  app.get('/v1/takes', async req => (await db.select(takeViewCols).from(takes).where(eq(takes.studioId, req.user.studioId)).orderBy(desc(takes.createdAt))).map(t => takeView(t, pub, req.user.id)));
   app.patch<{ Params: { id: string } }>('/v1/takes/:id', async req => {
     const b = (req.body ?? {}) as { status?: string };
     const [t] = await db.select().from(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
