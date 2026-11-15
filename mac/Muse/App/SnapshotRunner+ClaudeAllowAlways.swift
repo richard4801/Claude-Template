@@ -174,15 +174,24 @@ extension SnapshotRunner {
         try? await Task.sleep(for: .seconds(0.5))
         let frames = SnapshotRunner.state.composerFrames
         let height = mainWindow?.contentView?.bounds.height ?? 0
+        let width = mainWindow?.contentView?.bounds.width ?? 0
         func shown(_ key: String) -> (Bool, String) {
             guard let f = frames[key] else { return (false, "not drawn") }
             return (f.height > 0 && f.minY >= 0 && f.maxY <= height, "at y \(Int(f.minY))–\(Int(f.maxY)) in a window \(Int(height)) high")
+        }
+        /// Run 668: the Shell commands row's Remove was pushed past the right edge (only "R" showed).
+        func whole(_ key: String) -> (Bool, String) {
+            guard let f = frames[key] else { return (false, "not drawn") }
+            return (f.width > 20 && f.minX >= 0 && f.maxX <= width, "at x \(Int(f.minX))–\(Int(f.maxX)) in a window \(Int(width)) wide")
         }
         let heading = shown("settings always allowed"), rule = shown("settings shell commands"), toggle = shown("settings ask before anything")
         let toolRow = shown("settings tool suite_add_reference")
         check("settings_shows_always_allowed", heading.0, "the Always allowed heading \(heading.1)")
         check("settings_shows_rule", rule.0, "the Shell commands row \(rule.1); rows drawn \(frames.keys.filter { $0.hasPrefix("settings ") }.sorted())")
         check("settings_shows_tool", toolRow.0, "the suite_add_reference row \(toolRow.1)")
+        let remove = whole("settings shell remove"), scope = whole("settings shell scope")
+        check("settings_shell_remove_whole", remove.0, "the Shell commands Remove button \(remove.1)")
+        check("settings_shell_scope_whole", scope.0, "the Where picker \(scope.1)")
         check("settings_shows_switch", toggle.0, "the Ask before anything row \(toggle.1)")
         capture(dir.appendingPathComponent("mac_a_claude_allow_settings.png"))
         SnapshotRunner.state.scrollTo = nil

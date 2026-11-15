@@ -136,17 +136,22 @@ struct ClaudeFileSettingsSection: View {
                 SettingRow("Shell commands", hint: scope == .folders
                            ? "Any command inside your folders and temporary files. Deleting, moving, network, installs, admin and ~/Library still ask."
                            : "Any command anywhere on this Mac. Deleting, moving, network, installs, admin and ~/Library still ask.") {
-                    HStack(spacing: Space.s2) {
-                        Picker("Where", selection: Binding(get: { scope }, set: { service.setShellScope($0) })) {
-                            ForEach(ClaudeShellScope.allCases, id: \.self) { sc in Text(sc.label).tag(sc) }
-                        }
-                        .labelsHidden().pickerStyle(.menu).fixedSize()
-                        .accessibilityIdentifier("settings.claude.shellScope")
-                        RButton("Remove", kind: .plain, small: true) { service.removeShellCommands() }
-                            .accessibilityLabel("Remove shell commands")
-                    }
+                    RButton("Remove", kind: .plain, small: true) { service.removeShellCommands() }
+                        .fixedSize()
+                        .accessibilityLabel("Remove shell commands")
+                        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings shell remove") } }
                 }
                 .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings shell commands") } }
+                .opacity(s.askAll ? 0.6 : 1)
+                // The scope on its own row (run 668: beside Remove it pushed Remove past the edge at 1024 wide).
+                SettingRow("Where", hint: nil) {
+                    Picker("Where", selection: Binding(get: { scope }, set: { service.setShellScope($0) })) {
+                        ForEach(ClaudeShellScope.allCases, id: \.self) { sc in Text(sc.shortLabel).tag(sc) }
+                    }
+                    .labelsHidden().pickerStyle(.menu).fixedSize()
+                    .accessibilityIdentifier("settings.claude.shellScope")
+                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings shell scope") } }
+                }
                 .opacity(s.askAll ? 0.6 : 1)
             }
             ForEach(s.tools, id: \.self) { tool in
