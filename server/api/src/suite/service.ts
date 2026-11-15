@@ -725,12 +725,22 @@ export class SuiteService {
       .where(and(eq(jobs.studioId, studioId), gte(jobs.createdAt, dayStart()), ne(jobs.state, 'failed'), sql`${jobs.request}->>'engine' = 'suite'`));
     return rows.reduce((a, r) => a + (r.state === 'done' && r.actual != null ? r.actual : r.cost), 0);
   }
-  /** The suite's own caps (the wallet caps are checked again by the hold). */
-  async checkCaps(studioId: string, cost: number, prefs: SuitePrefs) {
-    const caps = this.caps(prefs), spent = await this.spentToday(studioId);
+  /**
+   * The caps a shot is checked against: the ones in Settings → AI & spending (per job for this person, whole studio
+   * per day), the same caps the wallet hold enforces. Owner 2026-11-14: "there's no $5 generation cap" — the suite's
+   * old separate $5 / $25 caps (SUITE_CAP_*, suite settings capPerJob/capPerDay) are no longer enforced: Settings is
+   * the one place.
+   */
+  async effectiveCaps(u: { id: string; studioId: string }, _prefs: SuitePrefs) {
+    const m = await this.ctx.money.caps(u);
+    return { perJob: m.perJob, perDay: m.perDay };
+  }
+  async checkCaps(u: { id: string; studioId: string }, cost: number, prefs: SuitePrefs) {
+    const studioId = u.studioId;
+    const caps = await this.effectiveCaps(u, prefs), spent = await this.spentToday(studioId);
     const out = { perJob: caps.perJob, perDay: caps.perDay, spentToday: round2(spent), leftToday: round2(Math.max(0, caps.perDay - spent)), ok: true, code: null as string | null, message: null as string | null };
-    if (cost > caps.perJob + 1e-9) Object.assign(out, { ok: false, code: 'suite_over_job_limit', message: `Over the studio's ${P.money(caps.perJob)} per-shot limit` });
-    else if (spent + cost > caps.perDay + 1e-9) Object.assign(out, { ok: false, code: 'suite_over_day_limit', message: `Over the studio's ${P.money(caps.perDay)} daily AI suite limit · ${P.money(out.leftToday)} left today` });
+    if (cost > caps.perJob + 1e-9) Object.assign(out, { ok: false, code: 'suite_over_job_limit', message: `Over the ${P.money(caps.perJob)} per-job limit (Settings → AI & spending)` });
+    else if (spent + cost > caps.perDay + 1e-9) Object.assign(out, { ok: false, code: 'suite_over_day_limit', message: `Over the studio's ${P.money(caps.perDay)} daily limit · ${P.money(out.leftToday)} left today` });
     return out;
   }
 
@@ -746,7 +756,7 @@ export class SuiteService {
     const p = await this.plan(u, r);
     if (p.swap) return p.view;
     const { plan, prefs } = p;
-    const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);
+    const caps = await this.checkCaps(u, plan.estimate, prefs);
     const words = await this.wordsFor(u);
     const view = this.estimateView(u, r, plan, caps, p.tried);
     return { ...view, warnings: view.warnings.map(words), speaking: p.talk };
@@ -836,7 +846,7 @@ export class SuiteService {
       return this.ctx.jobs.create(u, { ...p.req, ...(draft ? { draft } : {}) }, { swapChoice: p.choice });
     }
     const { plan, prefs } = p;
-    const caps = await this.checkCaps(u.studioId, plan.estimate, prefs);
+    const caps = await this.checkCaps(u, plan.estimate, prefs);
     if (r.dryRun) { const words = await this.wordsFor(u), v = this.estimateView(u, r, plan, caps, p.tried); return { dryRun: true, estimate: { ...v, warnings: v.warnings.map(words), speaking: p.talk } }; }
     // New Swap: a clip longer than the model takes is trimmed by the person first (owner 2026-11-12: never cut silently).
     if (plan.remix?.trimNeeded) throw Object.assign(new ApiError(400, 'remix_trim_needed', `Trim the clip first: ${specName(modelById(plan.modelId)!)} takes up to ${plan.remix.maxSeconds} s`),

@@ -408,13 +408,15 @@ describe.skipIf(!hasFfmpeg)('AI suite · Shot API on the mock provider', () => {
     expect(s.mode).toBe('mock');
     expect(s.models.find((m: any) => m.id === 'h3-open')).toMatchObject({ blocked: true, enabled: false, blockedReason: 'Licence: not for new features' });
     expect((await owner.req('PATCH', '/v1/suite/settings', { models: { 'h3-open': { enabled: true } } })).body.code).toBe('model_blocked');
-    await owner.req('PATCH', '/v1/suite/settings', { capPerJob: 0.05 });
+    const studioBefore = (await owner.req('GET', '/v1/settings/studio')).body;
+    await owner.req('PATCH', '/v1/settings/studio', { capPerJob: 0.05 });
     const big = await member.req('POST', '/v1/suite/shots', { prompt: 'x', quality: 'cinema', duration: 10 });
     expect(big.status).toBe(402);
     expect(big.body.code).toBe('suite_over_job_limit');
     const est = (await member.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', quality: 'cinema', duration: 10 })).body;
     expect(est).toMatchObject({ ok: false, code: 'suite_over_job_limit' });
-    await owner.req('PATCH', '/v1/suite/settings', { capPerJob: null, ladder: { draft: [{ model: 'veo-3.1-lite', resolution: '720p' }] } });
+    await owner.req('PATCH', '/v1/settings/studio', { capPerJob: studioBefore.capPerJob ?? studioBefore.caps?.perJob ?? 5 });
+    await owner.req('PATCH', '/v1/suite/settings', { ladder: { draft: [{ model: 'veo-3.1-lite', resolution: '720p' }] } });
     const o = (await owner.req('POST', '/v1/suite/shots/estimate', { prompt: 'x', duration: 6 })).body;
     expect(o.engine.model).toBe('veo-3.1-lite');
     expect((await owner.req('PATCH', '/v1/suite/settings', { ladder: { draft: [{ model: 'nope', resolution: 'x' }] } })).status).toBe(400);
