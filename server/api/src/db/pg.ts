@@ -173,7 +173,7 @@ export function createPool(url: string, o: PgOptions = {}) {
 
 // ---------------------------------------------------------------------------------------------------- migrations
 /** Same bookkeeping as drizzle's migrator (drizzle.__drizzle_migrations), so databases migrated either way agree. */
-const LOCK_KEY = 7_365_847_210; // arbitrary, fixed: "muse migrations"
+export const LOCK_KEY = 7_365_847_210; // arbitrary, fixed: "muse migrations"
 
 export async function migrateWithLock(pool: pg.Pool, migrationsFolder: string, log: Log = quiet) {
   const migrations = readMigrationFiles({ migrationsFolder });

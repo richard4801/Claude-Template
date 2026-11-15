@@ -20,6 +20,11 @@ const Env = z.object({
   DATABASE_URL: str(),
   /** Optional direct (non-pooled) Neon URL used only for start-up migrations. The pooled DATABASE_URL works too. */
   DATABASE_URL_UNPOOLED: str(),
+  /**
+   * One-time database move (plans/db-move-railway.md): the OLD database's connection string. At boot, while the new
+   * database (DATABASE_URL) has no completed copy, every row is copied from here first. Harmless once the copy is done.
+   */
+  MIGRATE_FROM_DATABASE_URL: str(),
   /** Pool size. Keep it small (≤ 5): Neon's free tier and a 512 MB instance both prefer few connections. */
   DB_POOL_MAX: num(5),
   /** Close idle connections after this long so a serverless database (Neon) can suspend. */
@@ -308,6 +313,7 @@ export function describeConfig(c: Config) {
     env: c.NODE_ENV,
     devMode: c.DEV_MODE,
     database: !c.DATABASE_URL || c.DATABASE_URL.startsWith('pglite') ? 'embedded' : 'postgres',
+    migrateFrom: !!c.MIGRATE_FROM_DATABASE_URL,
     storage: c.storage,
     gpu: c.GPU_MODE,
     balance: c.balanceMode,

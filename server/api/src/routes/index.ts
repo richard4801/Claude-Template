@@ -32,6 +32,7 @@ import { seedDev, SLOT_SAMPLE } from '../seed.js';
 import { buildTemplatePrompt, randomImageSeed, randomSeed } from '../templates/prompt.js';
 import { analyzeClip, audioView } from '../audio/service.js';
 import { dbStatus } from '../db/pg.js';
+import { dbCopyView } from '../db/copy.js';
 import { inviteShareText, registerReleaseRoutes } from './releases.js';
 import { setViews } from '../services/tools.js';
 import { IMAGE_STEPS, type ImageStep } from '../replicate/mapping.js';
@@ -142,7 +143,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const lastOkAt = dbStatus.lastOkAt || null;
     const body = { ok: db !== false, speed: ctx.config.SPEED, db, dbLastOkAt: lastOkAt, gpu: ctx.gpu.mode, storage: ctx.storage.kind,
       imageEngine: ctx.images.defaultSelection().provider, videoEngine: ctx.config.videoEngineDefault, version: '0.1.0',
-      build: ctx.boot.build, startedAt: ctx.boot.startedAt, migrations: ctx.boot.migrations, starters: ctx.boot.starters,
+      build: ctx.boot.build, startedAt: ctx.boot.startedAt, migrations: ctx.boot.migrations, starters: ctx.boot.starters, dbCopy: dbCopyView(),
       media: { cpus: media.cpus, memMB: media.memMB } };
     reply.header('cache-control', 'no-store');
     return db === false ? reply.status(503).send(body) : body;

@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import { describeConfig, type Config } from './config.js';
 import type { AuthUser, Ctx } from './ctx.js';
 import { openDb, type DbHandle } from './db/client.js';
+import { sameDatabase } from './db/copy.js';
 import { ApiError } from './errors.js';
 import { EventHub } from './events.js';
 import { RunpodApi } from './gpu/runpodApi.js';
@@ -68,9 +69,14 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     trustProxy: true,
   });
 
+  // DATABASE_URL_UNPOOLED is only a direct route to the SAME database. Left pointing at the old Neon database after a move
+  // (plans/db-move-railway.md), it would migrate the wrong database: then it is ignored.
+  const unpooled = config.DATABASE_URL_UNPOOLED;
+  const migrationUrl = unpooled && sameDatabase(config.DATABASE_URL, unpooled) ? unpooled : undefined;
+  if (unpooled && !migrationUrl) app.log.warn('DATABASE_URL_UNPOOLED points at a different database than DATABASE_URL: ignored (you can delete it)');
   const dbh = opts.db ?? await openDb(config.DATABASE_URL, undefined, {
     poolMax: config.DB_POOL_MAX, idleTimeoutMs: config.DB_IDLE_TIMEOUT_MS, connectTimeoutMs: config.DB_CONNECT_TIMEOUT_MS,
-    startupRetryMs: config.DB_STARTUP_RETRY_SECONDS * 1000, migrationUrl: config.DATABASE_URL_UNPOOLED, log: app.log,
+    startupRetryMs: config.DB_STARTUP_RETRY_SECONDS * 1000, migrationUrl, log: app.log,
   });
   const hub = new EventHub();
   hub.onError = e => app.log.warn({ err: (e as Error)?.message }, 'live event failed');
