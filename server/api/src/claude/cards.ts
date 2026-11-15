@@ -83,6 +83,11 @@ export async function replaceCard(ctx: Ctx, u: AuthUser, m: typeof claudeMessage
 }
 
 /** The newest plan card with this id in the chat (show_plan updates it rather than adding a second one). */
+/** The plan ids already shown in this chat, newest first. */
+async function planIds(ctx: Ctx, threadId: string) {
+  const rows = await ctx.db.select().from(claudeMessages).where(and(eq(claudeMessages.threadId, threadId), eq(claudeMessages.role, 'tool'))).orderBy(desc(claudeMessages.createdAt)).limit(200);
+  return [...new Set(rows.map(r => (r.tool?.name === 'card' ? ((r.tool.ui as { card?: Card } | undefined)?.card as PlanCard | undefined) : undefined)).filter(c => c?.kind === 'plan').map(c => c!.planId))];
+}
 async function planRow(ctx: Ctx, threadId: string, planId: string) {
   const rows = await ctx.db.select().from(claudeMessages).where(and(eq(claudeMessages.threadId, threadId), eq(claudeMessages.role, 'tool'))).orderBy(desc(claudeMessages.createdAt)).limit(200);
   return rows.find(r => r.tool?.name === 'card' && ((r.tool.ui as { card?: Card } | undefined)?.card as PlanCard | undefined)?.planId === planId);
@@ -314,7 +319,13 @@ export const CARD_TOOLS: EditTool[] = [
       const old = await planRow(env.ctx, chat.id, planId);
       const prev = old ? ((old.tool!.ui as { card: PlanCard }).card) : undefined;
       let steps = b.steps ?? prev?.steps;
-      if (!steps) throw badRequest(`steps: the plan's steps, e.g. ["Watch the clip", "Swap the outfit"] (no plan "${planId}" in this chat to update)`);
+      if (!steps) {
+        // An update (done / title only) with no plan to update (ci_f7f14f1386f4): say so plainly, with the chat's plans.
+        const ids = await planIds(env.ctx, chat.id);
+        throw badRequest(`There is no plan "${planId}" in this chat to update, so done/title alone can't tick anything. `
+          + (ids.length ? `This chat's plans: ${ids.map(x => `"${x}"`).join(', ')} (use that planId), or ` : 'Make it first: ')
+          + `call show_plan with planId "${planId}" and steps, e.g. ["Watch the clip", "Swap the outfit"] (done may come in the same call).`);
+      }
       // A tick past the last step (a merged plan) ticks the last one.
       if (b.done.length) steps = steps.map((s, i) => ({ ...s, done: s.done || b.done.some(n => Math.min(n, steps!.length - 1) === i) }));
       const card: PlanCard = { kind: 'plan', planId, title: b.title ?? prev?.title ?? 'Plan', steps };

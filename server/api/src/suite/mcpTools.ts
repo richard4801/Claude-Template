@@ -36,6 +36,28 @@ const AID = str(DRAFT_ID_HELP, 80);
 /** Bound by the app (never shown to Claude): the chat, and on the Camera page its session; they find the draft on screen. */
 const BOUND = { chatId: str('This chat (filled in for you)'), cameraSessionId: str('The camera session open on the Camera page (filled in for you)', 80) };
 const aid = (env: Parameters<EditTool['run']>[0], a: Record<string, unknown>) => resolveAssist(env, a);
+/** suite_set_draft's startFrame / endFrame (ci_91473102d2b0). */
+const frameIn = (description: string) => ({ type: ['object', 'null'], additionalProperties: false, description, properties: {
+  takeId: str('A take or Library still (chaining clips: the take before)', 80),
+  at: { anyOf: [{ type: 'number', minimum: 0 }, { type: 'string', enum: ['first', 'last'] }], description: 'A video take: seconds, "first" or "last" (its very last frame)' },
+  uploadId: str('An image attached in the chat', 80), image: { description: 'Any studio picture: {url} as MUSE gives it' }, label: str('A few words ("end of clip 2")', 80) } });
+/**
+ * The images-sent warning the composer shows under the prompt (ci_62c3c2fdcdbf: "This model takes no images here" was on
+ * screen while suite_get_draft said nothing): a changed list the model can't take, in words, or null.
+ */
+async function sentWarning(env: Parameters<EditTool['run']>[0], v: { draft: unknown; request: unknown }): Promise<string | null> {
+  const d = v.draft as { tool?: string; sent?: unknown };
+  if (!d.sent) return null;
+  try {
+    if (d.tool === 'photo') await sentImagesOf(env.ctx).estimators.photo?.(env.user, v.request as Record<string, unknown>);
+    else if (d.tool !== 'remix') await env.ctx.suite.estimate(env.user, v.request);
+    return null;
+  } catch (e) {
+    const err = e as { code?: string; message?: string };
+    if (err.code !== 'too_many_images' && !/^Invalid images/.test(err.message ?? '')) return null;
+    return `${err.message} · the images sent were changed for this ${d.tool ?? 'shot'} (get_sent_images shows them; set_sent_images reset: true goes back to MUSE's pick)`;
+  }
+}
 
 /** The "What I changed" card for one suite_set_draft, with the names the person knows (outfit, clip, model). */
 async function changesCard(env: Parameters<EditTool['run']>[0], a: Record<string, unknown>, assistId: string, before: Record<string, unknown>, after: Record<string, unknown>) {
@@ -95,12 +117,16 @@ export const SUITE_TOOLS: EditTool[] = [
     name: 'suite_get_draft', title: 'Read the shot being set up', scope: 'edit:read', readOnly: true, idempotent: true,
     description: 'The composer on screen as it is now (the person may have changed it), on any Suite tool (Shot, Photo, Talking, UGC, Swap, Recast, Extend) or a camera session\'s Shot draft: the draft, the request Generate would send (the Swap/Recast clip, Extend\'s video, slot frames and references, a Directed camera with its guides, the pinned model), onScreen (every input in words, each with the id to watch or the suite_see input number), rig-check warnings and any waiting approval. Watch the clips and see the pictures before you write about them.',
     inputSchema: obj({ assistId: AID, ...BOUND }),
-    run: async (env, a) => assistOf(env.ctx).get(env.user, await aid(env, a)),
+    run: async (env, a) => {
+      const v = await assistOf(env.ctx).get(env.user, await aid(env, a));
+      const w = await sentWarning(env, v);
+      return w ? { ...v, sentImagesWarning: w } : v;
+    },
   },
   {
     name: 'suite_set_draft', title: 'Set up the shot', scope: 'edit:write',
-    description: 'Changes the composer (the owner sees it live). Each field you give replaces the draft\'s: modelId (null removes the @model), outfitId, prompt (the words only; the @model is added in front), rig {body, lens, focalMm, aperture, height, shotSize, lighting, palette, stock, gradeLook, genre, era, tempo, format} (the whole rig; leave rows out for Auto), moves [{id, intensity 0–1}] (≤ 2), quality, aspect, duration (s), takes, sound, speaking (Talking), count (Photo: how many stills), and for UGC ad the rig format. Movement → Directed: directed {cameraSessionId} takes the camera and blocking guides (greybox + start/middle/end stills) from one of the owner\'s camera sessions (list_camera_sessions; render its guides first with render_camera_guides, focalMm to change the lens) and replaces the chips\' camera; directed: null goes back to the chips. engineModel (a model id from the shot\'s tier, as the composer\'s model picker; null = Auto) and resolution pin the model. References: suite_add_reference (remove: true takes one out). Only suite_options ids are accepted. Returns the draft, the request and rig-check warnings. A Directed or pinned-model draft runs as set when you request the shot (suite_request_shot); the composer on screen may not show it until the app is updated. New Swap (beta): swapVariant new, clipId, remix (the toggles) and range; engineModel picks ANY video model (null = Auto, which says why; a model that can’t take a video gets it as a reference or as frames, and the warnings say exactly what MUSE did — tell the person); suite_estimate shows the price, the part used and whether the clip must be trimmed; suite_request_shot asks the owner to Approve.',
-    inputSchema: obj({ assistId: AID, ...BOUND, modelId: { type: ['string', 'null'] }, outfitId: { type: ['string', 'null'] }, prompt: str('What happens, in plain words', 2000),
+    description: 'Changes the composer (the owner sees it live). Each field you give replaces the draft\'s: modelId (null removes the @model), outfitId, prompt (the words only; the @model is added in front), rig {body, lens, focalMm, aperture, height, shotSize, lighting, palette, stock, gradeLook, genre, era, tempo, format} (the whole rig; leave rows out for Auto), moves [{id, intensity 0–1}] (≤ 2), quality, aspect, duration (s), takes, sound, speaking (Talking), count (Photo: how many stills), and for UGC ad the rig format. Movement → Directed: directed {cameraSessionId} takes the camera and blocking guides (greybox + start/middle/end stills) from one of the owner\'s camera sessions (list_camera_sessions; render its guides first with render_camera_guides, focalMm to change the lens) and replaces the chips\' camera; directed: null goes back to the chips. engineModel (a model id from the shot\'s tier, as the composer\'s model picker; null = Auto) and resolution pin the model. References: suite_add_reference (remove: true takes one out). Shot frames: startFrame / endFrame put a picture in the composer\'s start and end frame slots (the slots Generate sends): a take\'s frame {takeId, at: "last" | "first" | seconds} (chaining clips: the next clip\'s startFrame is the last frame of the one before), an attached upload {uploadId} or a Library / studio picture {takeId} or {image: {url}}; null empties it; a picture the person puts in that slot afterwards wins. The prompt may be as long as the pinned model takes (its promptMax; under Auto up to 8000, shortened for a model that takes less and the estimate says which); Photo takes 2000. Only suite_options ids are accepted. Returns the draft, the request and rig-check warnings. A Directed or pinned-model draft runs as set when you request the shot (suite_request_shot); the composer on screen may not show it until the app is updated. New Swap (beta): swapVariant new, clipId, remix (the toggles) and range; engineModel picks ANY video model (null = Auto, which says why; a model that can’t take a video gets it as a reference or as frames, and the warnings say exactly what MUSE did — tell the person); suite_estimate shows the price, the part used and whether the clip must be trimmed; suite_request_shot asks the owner to Approve.',
+    inputSchema: obj({ assistId: AID, ...BOUND, modelId: { type: ['string', 'null'] }, outfitId: { type: ['string', 'null'] }, prompt: str('What happens, in plain words. Up to the pinned model\'s limit (Seedance 2.0: 4000; MUSE at most 8000; Photo 2000); a longer one is refused naming the model and its limit', 8000),
       rig: { type: 'object', description: 'The rig rows (suite_options ids)' }, moves: { type: 'array', items: { type: 'object' }, maxItems: 2 },
       quality: str('draft | standard | hd | cinema'), aspect: str('9:16 | 16:9 | 1:1 | 4:3 | 3:4 | 21:9'), duration: { type: 'integer', minimum: 2, maximum: 30 },
       takes: { type: 'integer', minimum: 1, maximum: 4 }, sound: { type: 'boolean' }, speaking: { type: ['boolean', 'null'] }, count: { type: 'integer', minimum: 1, maximum: 4, description: 'Photo: how many stills' },
@@ -111,6 +137,8 @@ export const SUITE_TOOLS: EditTool[] = [
       remix: { type: ['object', 'null'], description: 'New Swap toggles; a toggle given replaces it, null switches it off (kept from the clip). background {mode:"describe", words} | {mode:"photo", image:{asset|url}, name}; outfit {kind:"outfit", outfitId} | {kind:"product", image} | {kind:"words", words}; character {kind:"model", modelId} (her, default, strict figure lock) | {kind:"face", image} (optional face swap: face only, only when the person asks); look {words} (time of day, light, colour grade). Write ONLY the change in words, never a full prompt: MUSE adds the keep and figure-lock lines', additionalProperties: false,
         properties: { background: { type: ['object', 'null'] }, outfit: { type: ['object', 'null'] }, character: { type: ['object', 'null'] }, look: { type: ['object', 'null'] } } },
       range: { type: ['array', 'null'], items: { type: 'number' }, minItems: 2, maxItems: 2, description: 'New Swap: the part of the clip to use [from, to] in seconds (needed when the clip is longer than the model takes; suite_estimate shows remix.trim). null = the whole clip' },
+      startFrame: frameIn('Shot: the start frame slot. One of takeId (+ at), uploadId or image; null empties it'),
+      endFrame: frameIn('Shot: the end frame slot (as startFrame); null empties it'),
       engineModel: { type: ['string', 'null'], maxLength: 40, description: 'Pin the model (null = Auto). Swap / one-person Recast: genjutsu-light (or genjutsu) when the person wants the same moves with a new look or scene (outfit, background, added characters or products); Auto or a Recast model for the same scene with a new person. Say which you chose and why' }, resolution: { type: ['string', 'null'], maxLength: 20 } }),
     run: async (env, a) => {
       const { assistId: _a, chatId: _c, cameraSessionId: _s, ...rest } = a;

@@ -9,6 +9,9 @@
 // and other studios' images are refused. Too many for the model is refused in plain words, never cut silently.
 // Every estimate returns `sentImages` (what would be sent, automatic or changed, each with why) for Claude and the apps.
 import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -56,6 +59,21 @@ export function sentOfBody(b: unknown): SentInput | null {
   return p.data;
 }
 
+/**
+ * A video's very last frame: decode its last second and keep the final picture (ffmpeg's image2 `-update` writes each
+ * frame over the one before), so the next clip can start exactly where this one ends.
+ */
+export async function lastFrame(ffmpeg: string, src: string, opts: { encoding: 'buffer'; maxBuffer: number; timeout: number }): Promise<Buffer> {
+  const dir = await mkdtemp(join(tmpdir(), 'muse-last-'));
+  const out = join(dir, 'last.jpg');
+  try {
+    await new Promise<void>((resolve, reject) => execFile(ffmpeg, ['-v', 'error', '-sseof', '-1', '-i', src, '-update', '1', '-q:v', '2', '-y', out], opts, err => (err ? reject(err) : resolve())));
+    const b = await readFile(out);
+    if (!b.length) throw new Error('no frame');
+    return b;
+  } finally { await rm(dir, { recursive: true, force: true }).catch(() => undefined); }
+}
+
 /** The storage key of one of our image links ("…/uploads/<key>"). */
 const keyOf = (url?: string) => (url ? /\/uploads\/([A-Za-z0-9][A-Za-z0-9._/-]*)$/.exec(url)?.[1] ?? null : null);
 /** The same image (bundled still, or the same stored object, whatever host the link names). */
@@ -99,8 +117,9 @@ export class SentImages {
     return { url: this.url(key) };
   }
 
-  /** A take's picture: a photo as it is; a video's frame at `at` seconds (default its first), stored once. */
-  async takeFrame(studioId: string, takeId: string, at?: number): Promise<ImageRef> {
+  /** A take's picture: a photo as it is; a video's frame at `at` seconds (default its first; "last": its last frame,
+   *  for chaining clips), stored once. */
+  async takeFrame(studioId: string, takeId: string, at?: number | 'last'): Promise<ImageRef> {
     const [t] = await this.ctx.db.select().from(takes).where(and(eq(takes.id, takeId), eq(takes.studioId, studioId)));
     if (!t) throw new ApiError(404, 'not_found', `Take ${takeId} isn't in this studio (deleted, or not a take id) · suite_feed lists the takes; {url} as MUSE gives it works for any studio picture`);
     if (t.kind === 'shot') {
@@ -108,15 +127,17 @@ export class SentImages {
       return t.thumb as ImageRef;
     }
     if (!t.mediaKey) throw new ApiError(409, 'not_ready', `${takeId} has no video yet`);
-    const ms = Math.round((at ?? 0) * 1000);
-    const key = `g/frame_${takeId}_${ms}.jpg`;
+    const last = at === 'last';
+    const ms = last ? 0 : Math.round(((at as number | undefined) ?? 0) * 1000);
+    const key = last ? `g/frame_${takeId}_last.jpg` : `g/frame_${takeId}_${ms}.jpg`;
     const [have] = await this.ctx.db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, studioId)));
     if (have) return { url: this.url(key) };
     const src = await this.ctx.storage.presignGet(t.mediaKey, 600);
-    const jpg = await new Promise<Buffer>((resolve, reject) => {
+    const opts = { encoding: 'buffer' as const, maxBuffer: 32 * 1024 * 1024, timeout: 60_000 };
+    const jpg = await (last ? lastFrame(this.ctx.config.FFMPEG_PATH, src, opts) : new Promise<Buffer>((resolve, reject) => {
       execFile(this.ctx.config.FFMPEG_PATH, ['-v', 'error', '-ss', (ms / 1000).toFixed(3), '-i', src, '-frames:v', '1', '-q:v', '2', '-f', 'image2', '-c:v', 'mjpeg', 'pipe:1'],
-        { encoding: 'buffer', maxBuffer: 32 * 1024 * 1024, timeout: 60_000 }, (err, out) => (err || !out?.length ? reject(err ?? new Error('no frame')) : resolve(out)));
-    }).catch(() => { throw new ApiError(422, 'no_frame', `Couldn’t take a frame from ${takeId} at ${ms / 1000} s`); });
+        opts, (err, out) => (err || !out?.length ? reject(err ?? new Error('no frame')) : resolve(out)));
+    })).catch(() => { throw new ApiError(422, 'no_frame', `Couldn’t take ${last ? 'the last frame' : `a frame at ${ms / 1000} s`} from ${takeId}`); });
     await putObject(this.ctx, { key, body: jpg, studioId, kind: 'generated', contentType: 'image/jpeg' });
     return { url: this.url(key) };
   }

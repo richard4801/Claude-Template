@@ -11,6 +11,12 @@ import { compileCamera, type CompiledCamera } from './compile.js';
 import { DEFAULT_LADDER, modelById, refFor, TIER_INFO, TIERS, type LadderStep, type ModelSpec, type ProviderId, type Resolution, type ShotMode, type Tier } from './registry.js';
 import { modelLabel } from '../engines/labels.js';
 
+/**
+ * The longest prompt a Shot request takes (ci_9a79f3707f79: a flat 2000 refused Seedance 2.0's 4000). Each model's own
+ * limit is its registry `promptMax`: suite_set_draft checks it when a model is pinned; under Auto a longer prompt is
+ * shortened for a model that takes less, and the estimate's warnings say so with the model's name.
+ */
+export const SHOT_PROMPT_CEILING = 8000;
 export const ImageRefSchema = z.object({ asset: z.string().max(80).optional(), url: z.string().max(2000).optional() }).refine(v => !!v.asset || !!v.url, 'an image needs asset or url');
 
 /** One person to recast: which person in the clip (index, position hint, or a face crop) → which character. */
@@ -72,7 +78,7 @@ export const ShotRequestSchema = z.object({
   modelId: z.string().max(80).optional(),
   outfitId: z.string().max(80).optional(),
   /** Scene, action and dialogue in the user's words. */
-  prompt: z.string().max(2000).default(''),
+  prompt: z.string().max(SHOT_PROMPT_CEILING).default(''),
   frames: z.object({ start: ImageRefSchema.optional(), middle: z.array(ImageRefSchema).max(8).optional(), end: ImageRefSchema.optional() }).optional(),
   references: z.object({
     images: z.array(z.object({ image: ImageRefSchema, role: z.enum(['product', 'location', 'style', 'prop', 'person', 'pose', 'outfit' /* workstream 1: attached in the Claude chat */, 'frame' /* a start/middle/end frame sent as a reference (adaptRequest) */]).default('product'), label: z.string().max(80).optional() })).max(6).optional(),
@@ -572,7 +578,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   let promptNoAudio = audioPlan?.beatOnly ? withFrames(shotPrompt('none')) : undefined;
   if (promptNoAudio && m.promptMax && promptNoAudio.length > m.promptMax) promptNoAudio = promptNoAudio.slice(0, m.promptMax);
   const negList = [...listOf(t['suite.shot.negative'] ?? ''), ...cam.avoid.map(a => a.replace(/^no\s+/i, ''))];
-  if (m.promptMax && prompt.length > m.promptMax) { prompt = prompt.slice(0, m.promptMax); notes.push('prompt shortened to fit'); }
+  if (m.promptMax && prompt.length > m.promptMax) { prompt = prompt.slice(0, m.promptMax); notes.push(`prompt shortened to fit (${m.name} takes at most ${m.promptMax} characters)`); }
 
   // ---- price
   const videoInput = videos.length > 0;

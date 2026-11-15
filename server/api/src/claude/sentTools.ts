@@ -9,7 +9,7 @@ import { claudeThreads } from '../camera/schema.js';
 import { ownChat, pageOf } from './chatTools.js';
 import type { EditTool, ToolEnv } from '../editor/mcpTools.js';
 import { ImageInSchema, SentImageInSchema, sentImagesOf, type SentInput, type SentPage, type SentView } from '../images/sent.js';
-import { assistOf, sentOfDraft } from '../suite/assist.js';
+import { assistOf } from '../suite/assist.js';
 import { resolveAssist } from '../suite/screen.js';
 import type { Draft } from '../suite/drafts.js';
 
@@ -60,10 +60,10 @@ async function current(env: ToolEnv, a: Record<string, unknown>): Promise<{ page
       const d = v.draft as Draft & { outfitId?: string; count?: number };
       const tool = d.tool ?? 'shot';
       if (tool === 'photo') {
-        const req = v.request as { modelId?: string; outfitId?: string };
+        // The Photo composer's own request (suite/assist.ts photoRequestOf): its model, outfit, image model and this tool's images.
         const est = svc.estimators.photo;
         if (!est) throw new Error('not ready');
-        return { page: 'suite', tool, sentImages: await est(env.user, { ...(req.modelId ? { modelId: req.modelId } : {}), ...(req.outfitId ? { outfitId: req.outfitId } : {}), count: d.count ?? 1, ...sentOfDraft(d), draft: d }) };
+        return { page: 'suite', tool, sentImages: await est(env.user, v.request as Record<string, unknown>) };
       }
       const e = await env.ctx.suite.estimate(env.user, v.request) as { sentImages?: SentView };
       return { page: 'suite', tool, sentImages: e.sentImages ?? null };

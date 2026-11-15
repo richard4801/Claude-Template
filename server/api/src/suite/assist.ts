@@ -9,7 +9,8 @@ import { z } from 'zod';
 import { sentOfBody, type SentInput } from '../images/sent.js';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { clips, jobs, models } from '../db/schema.js';
-import { RemixSchema } from './plan.js';
+import { RemixSchema, SHOT_PROMPT_CEILING } from './plan.js';
+import { modelById } from './registry.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { uid } from '../lib/util.js';
 import { APERTURES, BODIES, ERAS, FOCAL_STEPS, GENRES, HEIGHTS, LENSES, LIGHTING, LOOKS, MOVES, PALETTES, SHOT_SIZES, TEMPOS, UGC_FORMATS, type CameraSpecInput, type Option } from './camera.js';
@@ -38,6 +39,46 @@ export const AddReferenceBody = z.object({ uploadId: z.string().min(1).max(80).o
   use: z.enum(REFERENCE_USES), label: z.string().trim().max(80).optional(), remove: z.boolean().optional() }).strict()
   .refine(b => !!(b.uploadId || b.image || b.takeId), { message: 'uploadId, takeId or image: the picture to use' });
 const ASPECTS = ['9:16', '16:9', '1:1', '4:3', '3:4', '21:9'] as const;
+const PHOTO_ASPECTS = new Set(['9:16', '4:5', '3:4', '2:3', '1:1', '3:2', '4:3', '16:9']);
+/** Photo's prompt limit (suite/photo.ts PhotoRequestSchema). */
+export const PHOTO_PROMPT_MAX = 2000;
+
+/**
+ * The prompt limit for this draft (ci_9a79f3707f79): Photo's own; a pinned video model's registry promptMax ("Seedance
+ * 2.0 takes at most 4000 characters"); else MUSE's ceiling (under Auto a model that takes less gets it shortened, and
+ * the estimate's warnings name it).
+ */
+export function promptLimit(tool: string | undefined, engineModel?: string): { max: number; why: string } {
+  if (tool === 'photo') return { max: PHOTO_PROMPT_MAX, why: `a Photo prompt takes at most ${PHOTO_PROMPT_MAX} characters` };
+  const m = engineModel ? modelById(engineModel) : undefined;
+  if (m?.promptMax && m.promptMax < SHOT_PROMPT_CEILING) return { max: m.promptMax, why: `${m.name} takes at most ${m.promptMax} characters` };
+  return { max: SHOT_PROMPT_CEILING, why: `MUSE takes at most ${SHOT_PROMPT_CEILING} characters` };
+}
+
+// ------------------------------------------------------------------ start / end frames (ci_91473102d2b0)
+/** A frame Claude put in the Shot's start or end slot: the studio picture, what it is, and the slot's own picture
+ *  (on screen) when Claude set it, so a picture the person puts in that slot afterwards wins. */
+export type DraftFrame = { url: string; label: string; over: string | null };
+const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+export const FrameInSchema = z.object({
+  takeId: z.string().regex(ID_RE).optional(),
+  /** Seconds into a video take, or its first / last frame (chaining clips: the next starts on the last frame). */
+  at: z.union([z.number().min(0).max(3600), z.enum(['first', 'last'])]).optional(),
+  uploadId: z.string().regex(ID_RE).optional(),
+  image: ImageInSchema.optional(),
+  label: z.string().trim().max(80).optional(),
+}).strict().refine(f => [f.takeId, f.uploadId, f.image].filter(Boolean).length === 1, { message: 'one of takeId (with at), uploadId or image' });
+const DraftFrameSchema = z.object({ url: z.string().max(2000).regex(/\/uploads\/[a-z]+\/[A-Za-z0-9._-]+$/), label: z.string().max(120), over: z.string().max(2000).nullable() }).strict();
+/** The draft's frames Claude set, only well-formed ones. */
+export function framesOf(d: Draft): { start?: DraftFrame; end?: DraftFrame } {
+  const raw = (d as { frames?: { start?: unknown; end?: unknown } }).frames;
+  if (!raw || typeof raw !== 'object') return {};
+  const out: { start?: DraftFrame; end?: DraftFrame } = {};
+  for (const k of ['start', 'end'] as const) { const p = DraftFrameSchema.safeParse(raw[k]); if (p.success) out[k] = p.data; }
+  return out;
+}
+/** A slot's picture as a comparable string (its link or asset), or null. */
+export const frameKey = (x: unknown) => { const o = x as { url?: unknown; asset?: unknown } | null | undefined; return typeof o?.url === 'string' ? o.url.replace(/^.*(\/uploads\/)/, '$1') : typeof o?.asset === 'string' ? `asset:${o.asset}` : null; };
 
 // ------------------------------------------------------------------ what members see (Claude picks only these)
 /** The rig's option lists by draft field, and the composer's visible subset (merged duplicates and hidden ones left out). */
@@ -102,7 +143,7 @@ function shotRequestOf(d: Draft) {
   // Directed (a camera session's camera and guides) replaces the chips' camera, as in the composer.
   const directed = (extra.directed as DraftDirected | undefined)?.camera;
   const camera = directed ?? cameraOf(rig, moves);
-  return withScreen({
+  return withFrames(withScreen({
     ...(mention('character') ? { modelId: mention('character') } : {}),
     ...((mention('outfit') ?? extra.outfitId) ? { outfitId: (mention('outfit') ?? extra.outfitId) as string } : {}),
     prompt: promptText(toks), duration: Math.round(d.duration ?? 5), aspectRatio: d.aspect ?? '9:16', quality: d.quality ?? 'draft', takes: d.takes ?? 1,
@@ -116,7 +157,40 @@ function shotRequestOf(d: Draft) {
     // Images sent (images/sent.ts): Claude's or the person's choice, kept in the draft (set_sent_images).
     ...sentOfDraft(d),
     draft: d,
-  }, d);
+  }, d), d);
+}
+/**
+ * Claude's start / end frames in the request's frame slots (the ones the apps fill). A slot the person changed on screen
+ * after Claude set it keeps the person's picture.
+ */
+function withFrames<T extends Record<string, unknown>>(req: T, d: Draft): T {
+  const mine = framesOf(d);
+  if (!mine.start && !mine.end) return req;
+  const on = (screenOf(d)?.request?.frames ?? {}) as Record<string, unknown>;
+  const frames = { ...((req.frames ?? {}) as Record<string, unknown>) };
+  for (const k of ['start', 'end'] as const) { const f = mine[k]; if (f && frameKey(on[k]) === f.over) frames[k] = { url: f.url }; }
+  return { ...req, frames };
+}
+
+/** Photo (ci_40e89e2a9fd6): what the Photo composer's Generate sends (POST /v1/suite/photos), priced by Photo's rules. */
+export function photoRequestOf(d: Draft): Record<string, unknown> {
+  const toks = tokensOf(d), rig = (d.rig ?? {}) as Rig, extra = d as Record<string, unknown>;
+  const mention = (k: string) => toks.find((x): x is Extract<Token, { t: 'mention' }> => x.t === 'mention' && x.kind === k)?.id;
+  const screen = screenOf(d)?.request ?? {};
+  // The screen's photo request (references, preset, product …) under Claude's values.
+  const base: Record<string, unknown> = {};
+  for (const k of ['modelId', 'outfitId', 'presetId', 'productImage', 'references', 'imageModel', 'engineModel', 'aspect', 'count', 'seed', 'lockSeed', 'shuffleSeed', 'gradeLook'] as const)
+    if (screen[k] !== undefined && screen[k] !== null) base[k] = screen[k];
+  const engine = typeof extra.engineModel === 'string' ? extra.engineModel : undefined;
+  const modelId = mention('character') ?? (base.modelId as string | undefined), outfitId = (mention('outfit') ?? extra.outfitId ?? base.outfitId) as string | undefined;
+  const camera = cameraOf(rig, []);
+  const aspect = d.aspect && PHOTO_ASPECTS.has(d.aspect) ? d.aspect : base.aspect;
+  const out: Record<string, unknown> = { ...base, prompt: promptText(toks), count: d.count ?? base.count ?? 1, draft: d,
+    ...(modelId ? { modelId } : {}), ...(outfitId ? { outfitId } : {}), ...(camera ? { camera } : {}), ...(aspect ? { aspect } : {}),
+    ...(rig.gradeLook === false ? { gradeLook: false } : {}), ...sentOfDraft(d) };
+  // The pinned image model: a custom one ("c_…") is engineModel; a Replicate "owner/name" is imageModel.
+  if (engine) { delete out.imageModel; delete out.engineModel; if (engine.startsWith('c_')) out.engineModel = engine; else out.imageModel = engine; }
+  return out;
 }
 
 /**
@@ -152,7 +226,7 @@ export function referencesOf(d: Draft): DraftReference[] {
 /** Claude's changes to the draft: each given field replaces the draft's; the prompt keeps the @model first and the #moves last. */
 export const SetBody = z.object({
   modelId: z.string().max(80).nullable().optional(), outfitId: z.string().max(80).nullable().optional(),
-  prompt: z.string().max(2000, 'at most 2000 characters (the models\' limit): shorten it, keep the skeleton and cut repeats').optional(), rig: RigSchema.omit({ moves: true }).optional(),
+  prompt: z.string().max(SHOT_PROMPT_CEILING, `at most ${SHOT_PROMPT_CEILING} characters (MUSE's limit): shorten it, keep the skeleton and cut repeats`).optional(), rig: RigSchema.omit({ moves: true }).optional(),
   moves: z.array(z.object({ id: z.string().max(40), intensity: z.number().min(0).max(1).optional() }).strict()).max(2).optional(),
   quality: z.enum(QUALITIES).optional(), aspect: z.enum(ASPECTS).optional(), duration: z.number().int().min(2).max(30).optional(), takes: z.number().int().min(1).max(4).optional(),
   sound: z.boolean().optional(), speaking: z.boolean().nullable().optional(),
@@ -175,14 +249,19 @@ export const SetBody = z.object({
   }).strict().nullable().optional(),
   /** New Swap: the part of the clip to use [from, to] seconds (the trimmer); null = the whole clip. */
   range: z.tuple([z.number().min(0), z.number().positive()]).nullable().optional(),
+  /** Shot's start / end frame slots (ci_91473102d2b0): a take's frame (at seconds | "first" | "last"), an upload or a
+   *  Library / studio picture; null empties Claude's frame (the slot goes back to what is on screen). */
+  startFrame: FrameInSchema.nullable().optional(), endFrame: FrameInSchema.nullable().optional(),
 }).strict();
 export type SetInput = z.infer<typeof SetBody>;
 
 export class SuiteAssist {
   constructor(private ctx: Ctx) {}
+  /** POST /v1/suite/photos/estimate's own pricing (set by routes/index.ts, where the Photo pipeline lives). */
+  photoEstimate?: (u: AuthUser, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
 
   view(r: Row) {
-    const d = r.draft as Draft, req = requestOf(d);
+    const d = r.draft as Draft, req = (d.tool === 'photo' ? photoRequestOf(d) : requestOf(d)) as ReturnType<typeof requestOf>;
     return { id: r.id, userId: r.userId, draft: d, revision: r.revision, request: req, onScreen: onScreen(d),
       warnings: rigCheck({ prompt: req.prompt, camera: req.camera as never, speaking: (req as { speaking?: boolean }).speaking ?? false }),
       pending: (r.pending as AssistPending[]).filter(p => p.status === 'waiting').concat((r.pending as AssistPending[]).filter(p => p.status !== 'waiting').slice(-3)),
@@ -225,18 +304,41 @@ export class SuiteAssist {
     if (!b.success) throw badRequest(b.error.issues[0]?.message ?? 'Invalid body');
     const r = await this.row(u, id);
     if (b.data.baseRevision !== undefined && b.data.baseRevision !== r.revision) throw new ApiError(409, 'stale', 'Claude changed the shot meanwhile · reload it');
-    // Images sent (images/sent.ts): an app that doesn't know `sent` keeps Claude's choice; `sent: null` clears it (Reset).
     const incoming = { ...((b.data.draft ?? {}) as Record<string, unknown>) };
-    const had = (r.draft as Record<string, unknown>).sent;
-    if (!('sent' in incoming) && had) incoming.sent = had;
-    if (incoming.sent === null) delete incoming.sent;
+    const prev = r.draft as Record<string, unknown>;
+    const tool = typeof incoming.tool === 'string' ? incoming.tool : (prev.tool as string | undefined) ?? 'shot';
+    // The app's first sync after Claude's change can echo the composer from before it (ci_40e89e2a9fd6: engineModel,
+    // outfitId and count went back once after opening; ci_62c3c2fdcdbf: a reset images-sent list came back). A field
+    // that comes back exactly as it was before Claude changed it keeps Claude's value, on that one sync only.
+    const echo = prev.claudeSet as ClaudeSet | undefined;
+    if (echo && echo.tool === tool) {
+      for (const [k, v] of Object.entries(echo.fields)) {
+        // An explicit null is the person's own Reset / Auto, never an echo.
+        if (incoming[k] === null || !same(incoming[k], v.before) || same(v.before, v.after)) continue;
+        if (v.after === undefined) delete incoming[k]; else incoming[k] = v.after;
+      }
+    }
+    delete incoming.claudeSet;
+    // Images sent (images/sent.ts), per tool (ci_62c3c2fdcdbf: a new Shot carried Photo's list): an app that doesn't know
+    // `sent` keeps this tool's choice; another tool's list arriving with a tool switch is left with that tool; null clears.
+    const byTool = { ...((prev.sentByTool ?? {}) as Record<string, unknown>) };
+    if (prev.sent && prev.tool && !byTool[prev.tool as string]) byTool[prev.tool as string] = prev.sent;
+    if (!('sent' in incoming)) { if (byTool[tool]) incoming.sent = byTool[tool]; }
+    else if (incoming.sent === null) { delete incoming.sent; delete byTool[tool]; }
+    else if (tool !== prev.tool && !byTool[tool] && Object.entries(byTool).some(([t, v]) => t !== tool && same(v, incoming.sent))) delete incoming.sent;
+    else byTool[tool] = incoming.sent;
+    if (Object.keys(byTool).length) incoming.sentByTool = byTool; else delete incoming.sentByTool;
+    // Claude's start / end frames: the apps don't send them back (the request's frames win once the person changes that slot).
+    if (!('frames' in incoming) && prev.frames) incoming.frames = prev.frames;
     return this.view(await this.save(r, { draft: parseDraft(incoming), revision: r.revision + 1 }));
   }
 
   /** Undo of one "What I changed" row (claude/cards.ts): fn turns the draft as it is now into the draft to keep. */
   async rewrite(u: AuthUser, id: string, fn: (d: Record<string, unknown>) => Record<string, unknown>) {
     const r = await this.row(u, id);
-    return this.view(await this.save(r, { draft: parseDraft(fn({ ...(r.draft as Record<string, unknown>) })), revision: r.revision + 1 }));
+    // The person undid Claude's change: the app's next sync showing the old value is theirs, not an echo (see patch).
+    const { claudeSet: _echo, ...d } = fn({ ...(r.draft as Record<string, unknown>) });
+    return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
   }
   /** suite_set_draft: Claude's changes, checked against the composer's visible options. */
   async set(u: AuthUser, id: string, input: unknown) {
@@ -245,6 +347,7 @@ export class SuiteAssist {
     const b = p.data;
     const r = await this.row(u, id);
     const d = { ...(r.draft as Draft) } as Draft & Record<string, unknown>;
+    const before = { ...(r.draft as Record<string, unknown>) };
     let toks = [...tokensOf(d)];
     let key = toks.reduce((m, x) => Math.max(m, 'key' in x ? x.key : 0), 0);
     if (b.modelId !== undefined) {
@@ -306,8 +409,41 @@ export class SuiteAssist {
       }
       if (b.range !== undefined) { if (b.range === null) delete d.range; else d.range = b.range; }
     }
+    // Start / end frames (ci_91473102d2b0): the same request slots the apps fill (frames.start / frames.end).
+    for (const [slot, f] of [['start', b.startFrame], ['end', b.endFrame]] as const) {
+      if (f === undefined) continue;
+      if (d.tool !== 'shot' && f !== null) throw new ApiError(409, 'not_a_shot', `${slot}Frame: start and end frames are the Shot composer's (this draft is ${d.tool})`);
+      const cur = { ...framesOf(d) };
+      if (f === null) delete cur[slot];
+      else {
+        const on = (screenOf(d)?.request?.frames as Record<string, unknown> | undefined)?.[slot];
+        cur[slot] = { url: await this.frameUrl(u, f), label: f.label ?? frameLabel(f), over: frameKey(on) };
+      }
+      if (cur.start || cur.end) d.frames = cur; else delete d.frames;
+    }
     (d as Record<string, unknown>).tokens = toks;
+    // The prompt against the limit of the model it will run on (ci_9a79f3707f79).
+    if (b.prompt !== undefined || b.engineModel !== undefined) {
+      const words = toks.filter(x => x.t === 'text').map(x => (x as { text: string }).text).join('').trim();
+      const lim = promptLimit(d.tool, typeof d.engineModel === 'string' ? d.engineModel : undefined);
+      if (words.length > lim.max) throw badRequest(`prompt: ${words.length} characters, but ${lim.why}: shorten it, keep the skeleton and cut repeats${typeof d.engineModel === 'string' && d.tool !== 'photo' ? ', or pick a model that takes more (suite_models)' : ''}`);
+    }
+    // What Claude changed, so the app's first sync echoing the old composer doesn't undo it (see patch).
+    const fields: ClaudeSet['fields'] = {};
+    for (const k of ECHO_FIELDS) if (!same(before[k], (d as Record<string, unknown>)[k])) fields[k] = { before: before[k], after: (d as Record<string, unknown>)[k] };
+    if (Object.keys(fields).length) d.claudeSet = { tool: d.tool, fields } satisfies ClaudeSet; else delete d.claudeSet;
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
+  }
+
+  /** A frame's studio picture: a take's frame (first, last or at seconds), an upload, or a Library / studio picture. */
+  private async frameUrl(u: AuthUser, f: z.infer<typeof FrameInSchema>): Promise<string> {
+    if (f.takeId) {
+      const ref = await sentImagesOf(this.ctx).takeFrame(u.studioId, f.takeId, f.at === 'first' ? 0 : f.at);
+      const m = ref.url ? /\/uploads\/[a-z]+\/[A-Za-z0-9._-]+$/.exec(ref.url) : null;
+      if (!m) throw badRequest('That take has no stored picture to use as a frame');
+      return m[0];
+    }
+    return this.referenceUrl(u, f.uploadId, f.image);
   }
 
   /**
@@ -369,12 +505,24 @@ export class SuiteAssist {
   async setSent(u: AuthUser, id: string, sent: SentInput | null) {
     const r = await this.row(u, id);
     const d = { ...(r.draft as Draft) } as Draft & Record<string, unknown>;
+    const before = d.sent;
     if (sent) d.sent = sent; else delete d.sent;
+    const tool = d.tool ?? 'shot';
+    const byTool = { ...((d.sentByTool ?? {}) as Record<string, unknown>) };
+    if (sent) byTool[tool] = sent; else delete byTool[tool];
+    if (Object.keys(byTool).length) d.sentByTool = byTool; else delete d.sentByTool;
+    // A reset that the app's next sync would undo (ci_62c3c2fdcdbf) is kept, as Claude's other changes are.
+    if (!same(before, d.sent)) d.claudeSet = { tool, fields: { sent: { before, after: d.sent } } } satisfies ClaudeSet;
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
   }
   /** suite_estimate: the price, caps and warnings of what Generate would send (nothing held). */
   async estimate(u: AuthUser, id: string) {
     const v = this.view(await this.row(u, id));
+    // Photo (ci_40e89e2a9fd6): priced as the Photo composer's Generate (POST /v1/suite/photos/estimate), on its image model.
+    if (v.draft.tool === 'photo') {
+      if (!this.photoEstimate) throw new ApiError(503, 'not_ready', 'Photo pricing is starting up · try again');
+      return { assistId: id, tool: 'photo', estimate: await this.photoEstimate(u, v.request as Record<string, unknown>), warnings: v.warnings };
+    }
     if (v.request.mode === 'remix') { if (!v.request.clipId) throw badRequest('New Swap: add the video first (suite_set_draft clipId, or the person adds it)'); }
     else if (!v.request.modelId) throw badRequest('Pick the model first (suite_set_draft modelId)');
     return { assistId: id, estimate: await this.ctx.suite.estimate(u, v.request), warnings: v.warnings };
@@ -422,6 +570,19 @@ export class SuiteAssist {
     return p;
   }
 }
+
+/** Fields the app's first sync could echo back from before Claude's change. */
+const ECHO_FIELDS = ['engineModel', 'resolution', 'outfitId', 'count', 'sent'] as const;
+type ClaudeSet = { tool?: string; fields: Record<string, { before: unknown; after: unknown }> };
+/** Deep equality for JSON values (undefined and absent alike). */
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return a == null && b == null;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  const ka = Object.keys(a as object).filter(k => (a as Record<string, unknown>)[k] !== undefined).sort(), kb = Object.keys(b as object).filter(k => (b as Record<string, unknown>)[k] !== undefined).sort();
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i] && same((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+const frameLabel = (f: z.infer<typeof FrameInSchema>) => (f.takeId ? `${f.at === 'last' ? 'last frame' : f.at === 'first' || f.at === undefined ? 'first frame' : `frame at ${f.at} s`} of ${f.takeId}` : f.uploadId ? `upload ${f.uploadId}` : 'studio picture');
 
 function parseDraft(v: unknown): Draft {
   const p = DraftSchema.safeParse(v);

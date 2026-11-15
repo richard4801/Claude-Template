@@ -41,7 +41,7 @@ import type { Look } from '../editor/look.js';
 import { previewLayouts } from '../suite/previewLayouts.js'; // the take viewer's safe zones
 import { freePhotoPrompt, PhotoRequestSchema, photoAspects, photoButton, photoSize, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
-import { referencesOf } from '../suite/assist.js';
+import { assistOf, referencesOf } from '../suite/assist.js';
 import { modelChoice } from '../engines/service.js'; // WS13: model choice everywhere
 import type { StepOverrides } from '../images/steps.js'; // WS13
 import { mediaProfile } from '../lib/resources.js';
@@ -1096,15 +1096,18 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const row = list.models?.find(m => m.model === model);
     return { id: row ? model : null, name: row?.label ?? null, auto };
   };
-  app.post('/v1/suite/photos/estimate', async req => {
-    const { p, s, notes, graded, shape } = await photoPlan(req.user, req.body);
+  const photoEstimate = async (u: AuthUser, body: unknown) => {
+    const { p, s, notes, graded, shape } = await photoPlan(u, body);
     const estimate = s.count * s.plan.perShot, money = P.aboutMoney(estimate);
     const aspects = photoAspects(shape.aspects), aspect = p.aspect ?? '9:16';
     return { tool: 'photo', count: s.count, perPhoto: s.plan.perShot, estimate, priceLine: `${money} · ${s.count} photo${s.count === 1 ? '' : 's'}`,
       buttonLabel: photoButton(s.count, P.money(estimate)), ok: true, warnings: notes, rig: photoRigCheck(p), look: graded?.look ?? null, sentImages: s.plan.sentImages,
-      aspect, makes: aspects.find(a => a.id === aspect)?.makes ?? null, aspects, model: await photoModelView(req.user, shape.model, !p.imageModel && !p.engineModel),
+      aspect, makes: aspects.find(a => a.id === aspect)?.makes ?? null, aspects, model: await photoModelView(u, shape.model, !p.imageModel && !p.engineModel),
       ...(s.kind === 'template' ? { preset: { id: s.t.id, name: s.t.name } } : { prompt: s.kind === 'free' ? s.text : s.custom ?? s.built.text }) };
-  });
+  };
+  app.post('/v1/suite/photos/estimate', async req => photoEstimate(req.user, req.body));
+  // Claude's suite_estimate on a Photo draft prices it exactly as this route does (ci_40e89e2a9fd6).
+  assistOf(ctx).photoEstimate = photoEstimate;
   // Every photo run is a job (WS19): a `render` row with request.engine 'photo', so the Queue, the hub and the Suite's
   // stage show it while it runs, like a video. The stills stay jobless takes (the Library's as before); the job lists
   // their ids. `async: true` (the Mac app) answers with the running job once the price is held; without it the call

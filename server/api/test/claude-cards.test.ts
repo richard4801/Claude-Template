@@ -143,6 +143,10 @@ describe('cards in a chat (Suite, mock provider)', () => {
     expect(all).toHaveLength(n); // the same card, updated
     expect(all.at(-1)!.tool.ui.card.steps.map((s: any) => s.done)).toEqual([true, true, false]);
     await expect(run('show_plan', { chatId, planId: 'other' })).rejects.toMatchObject({ code: 'bad_request' });
+    // ci_f7f14f1386f4: an update with no plan says so plainly and names the chat's plans; with steps it is made.
+    await expect(run('show_plan', { chatId, planId: 'grwm', done: [0] })).rejects.toThrow(/no plan "grwm" in this chat.*"swap"/);
+    expect(await run('show_plan', { chatId, planId: 'grwm', steps: ['Pick the outfit', 'Shoot'], done: [0] })).toMatchObject({ ok: true, planId: 'grwm' });
+    expect((await cards()).at(-1)!.tool.ui.card.steps.map((s: any) => s.done)).toEqual([true, false]);
     await expect(run('show_clip', { chatId, id: 'take_nope', moments: [{ from: 0, label: 'Start' }] })).rejects.toBeTruthy();
     await expect(run('show_plan', { chatId, steps: [{ text: 'x' }] }, { ...ownerU, id: 'someone_else' })).rejects.toBeTruthy();
   });
