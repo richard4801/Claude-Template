@@ -20,9 +20,11 @@ import { putFile } from '../storage/objects.js';
 import type { JobRow } from '../gpu/controller.js';
 import type { VideoRef } from './camera.js';
 import { buildInput, type MediaUrls } from './inputs.js';
-import { billedSeconds, shotNote, type ShotPlan } from './plan.js';
+import { billedSeconds, modelName as specLabel, shotNote, type ShotPlan } from './plan.js';
 import { modelById, refFor, type ProviderId } from './registry.js';
 import { fallbackRoute } from './routes.js';
+import { providerLabel } from '../engines/labels.js';
+import { GENJUTSU_NO_ACCESS } from '../engines/purposes.js';
 import type { SuiteService } from './service.js';
 import type { ProviderStatus, VideoProvider } from './providers.js';
 
@@ -330,11 +332,14 @@ export class SuiteRunner {
       modelName = model.name ?? modelName;
       let provider = this.suite.providerFor(plan);
       let ref = plan.ref;
-      // Owner 2026-11-14: the same model on another provider at the same resolution (registry `family`; MiniMax H3 2K on
-      // Higgsfield ↔ Replicate, Seedance, Kling 3.0 Omni, Wan 2.7) takes the shot when this provider refuses at start.
+      // The same model on its other provider at the same resolution (registry `family`): it takes the shot when this
+      // provider refuses at start ONLY when the studio opted in (owner 2026-11-15: each provider stands on its own;
+      // default off). Off: the shot fails, refunded, and the message names that other provider to pick.
       const live = this.suite.mode === 'live';
-      const alt = fallbackRoute(model, plan, x => (live ? this.suite.providerFor({ provider: x.provider }).configured() : this.suite.available().has(x.provider))
+      const optedIn = !!(await this.suite.prefs(job.studioId).catch(() => ({} as { providerFallback?: boolean }))).providerFallback;
+      const other = fallbackRoute(model, plan, x => (live ? this.suite.providerFor({ provider: x.provider }).configured() : this.suite.available().has(x.provider))
         && (plan.provider !== 'byo') && !x.byo);
+      const alt = optedIn ? other : null;
       let moved = false;
       const moveToAlt = () => { model = alt!; provider = this.suite.providerFor({ provider: alt!.provider }); ref = refFor(alt!, plan.kind, plan.resolution); moved = true; };
       // A shot that already moved (its provider refused at its start) resumes on the route it moved to, never back.
@@ -385,8 +390,16 @@ export class SuiteRunner {
             // The provider refused before anything ran (no credit, bad key, busy, down): skip it for a while and run the
             // same shot on the model's other route at the same resolution (same prompt and references). The quoted price
             // stands (the studio absorbs the difference); the owner sees why in the log. Nothing was charged.
-            const canMove = !moved && alt && e instanceof ReplicateError && ['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind) && !takes.some(t => t.id);
-            if (!canMove) throw e;
+            const refusedAtStart = e instanceof ReplicateError && ['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind) && !takes.some(t => t.id);
+            const canMove = !moved && alt && refusedAtStart;
+            if (!canMove) {
+              // Say which provider refused, that nothing was charged, and the same model on the other provider to pick.
+              if (refusedAtStart && e.message !== GENJUTSU_NO_ACCESS) {
+                const why = e.kind === 'out_of_credit' ? 'is out of credit' : e.kind === 'rate_limited' ? 'is busy right now' : 'refused the request (key or service)';
+                (e as ReplicateError & { userMessage?: string }).userMessage = `${providerLabel(provider.id)} ${why} · you weren't charged${other ? ` · pick ${specLabel(other)}` : ''}`;
+              }
+              throw e;
+            }
             // Higgsfield is skipped for a while on any refusal (as before); Replicate only when it has no credit or key.
             if (provider.id === 'higgsfield' || (provider.id !== 'mock' && (e as ReplicateError).kind !== 'rate_limited')) this.suite.markDown(provider.id as ProviderId);
             ctx.log.warn({ job: job.id, from: model.id, to: alt!.id, reason: (e as Error).message }, `${provider.id} refused at start: running the shot on ${alt!.provider}`);

@@ -128,6 +128,9 @@ function providerSaid(e: ReplicateError): string | null {
 
 /** Why a run failed, for the job: a member-safe message shown as-is and the machine code (the details go to the log). */
 export function failureOf(e: unknown): { message: string; code: string; retryable: boolean } {
+  // A refusal at start the runner has already put in words (which provider, that nothing was charged, what to pick).
+  const own = (e as { userMessage?: string } | null)?.userMessage;
+  if (own && e instanceof ReplicateError && !(e as { paid?: boolean }).paid) return { ...failureOf(Object.assign(new ReplicateError(e.message, e.kind, e.status), {})), message: own };
   if (e instanceof ReplicateError) {
     if ((e as { paid?: boolean }).paid) return e.kind === 'refused' ? { message: REFUSED_PAID, code: 'provider_refused', retryable: false } : { message: FAILED_PAID, code: 'provider_failed', retryable: false };
     if (e.kind === 'refused') return { message: REFUSED_CLIP, code: 'provider_refused', retryable: false };
@@ -379,9 +382,17 @@ export class ReplicateVideo {
       state.images = imageUrls.length;
       return { onHf, gj: !!gj, model, input, replicateInput, imageUrls };
     })());
-    /** Higgsfield out of credit, down or busy at the start of a take → that take and the rest run on Replicate H3. */
+    // Owner 2026-11-15: each provider stands on its own. Only a studio that opted in (suite settings providerFallback,
+    // default off) has a refused Higgsfield swap moved to Replicate H3; otherwise it fails, refunded, saying what to pick.
+    const fallbackOk = !!(await ctx.suite.prefs(job.studioId).catch(() => ({} as { providerFallback?: boolean }))).providerFallback;
+    /** Higgsfield out of credit, down or busy at the start of a take → (opted in) that take and the rest run on Replicate H3. */
     const toReplicate = (e: unknown, s: Start) => {
-      if (!s.onHf || !ctx.replicate.configured || !(e instanceof ReplicateError) || !['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind)) return false;
+      if (!s.onHf || !(e instanceof ReplicateError) || !['out_of_credit', 'unavailable', 'rate_limited'].includes(e.kind)) return false;
+      if (!fallbackOk || !ctx.replicate.configured) {
+        const why = e.kind === 'out_of_credit' ? 'is out of credit' : e.kind === 'rate_limited' ? 'is busy right now' : 'refused the request (key or service)';
+        (e as ReplicateError & { userMessage?: string }).userMessage = `Higgsfield ${why} · you weren't charged${ctx.replicate.configured ? ' · pick MiniMax H3 · Replicate' : ''}`;
+        return false;
+      }
       ctx.log.warn({ job: job.id, err: e.message }, 'Higgsfield swap moved to Replicate H3');
       ctx.suite.markDown('higgsfield');
       s.onHf = false; s.model = c.REPLICATE_VIDEO_MODEL; s.input = { ...s.replicateInput, resolution: '2K' };
@@ -521,7 +532,8 @@ export class ReplicateVideo {
       }
       const f = failureOf(e);
       ctx.log.warn({ job: job.id, code: f.code, err: (e as Error).message }, 'Replicate job failed');
-      if (f.code === 'provider_out_of_credit') await ctx.engines.outOfCredit(job.studioId, 'replicate', (e as Error).message);
+      // Only Replicate's own credit problem is reported as Replicate's (a Higgsfield refusal carries its own words).
+      if (f.code === 'provider_out_of_credit' && !(e as { userMessage?: string }).userMessage) await ctx.engines.outOfCredit(job.studioId, 'replicate', (e as Error).message);
       await ctx.jobs.fail(job.id, f.message, f.retryable, f.code);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
