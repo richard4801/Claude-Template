@@ -216,11 +216,11 @@ final class ClaudeContextTests: XCTestCase {
             outfit: { $0 == "of_1" ? ("Hoodie", nil) : nil },
             clipPoster: { $0 == "clip_1" ? ImageRef(url: "/uploads/poster.jpg") : nil },
             modelLabel: { _ in "not used: the screen names it" }))
-        XCTAssertEqual(items.map(\.label), ["Clip", "Her", "Outfit", "Background", "Product", "Style", "Guide", "Model"])
+        XCTAssertEqual(items.map(\.label), ["Clip", "Her", "Outfit", "Background", "Product", "Style", "Guide"]) // no "Model" tile: the composer shows it
         XCTAssertEqual(items[0].image?.url, "/uploads/poster.jpg")
         XCTAssertEqual(items[1].detail, "Ava")
         XCTAssertEqual(items[3].words, "a beach at dusk")
-        XCTAssertEqual(items.last?.detail, "Seedance 2.0 · Higgsfield") // the server's label, never built in the app
+        XCTAssertFalse(items.contains { $0.kind == .model })
         XCTAssertEqual(Set(items.map(\.id)).count, items.count) // stable, unique ids (the strip animates by id)
         XCTAssertTrue(ClaudeContext.items(screen: .null).isEmpty)
     }
