@@ -215,13 +215,14 @@ final class ClaudeAlwaysRulesTests: XCTestCase {
             XCTAssertEqual(card.alwaysLabel, "Allow always: shell commands", cmd)
             XCTAssertEqual(verdict(cmd, rules: [], folders: [movies], shell: .folders), .allow, cmd)
         }
-        // Code typed into the command is its own kind (bundle-24): it asks until "Let Claude run code it writes" is on.
+        // Code typed into the command with no risky calls: "shell commands" covers it (bundle-22, kept in bundle-24), and so
+        // does "Let Claude run code it writes" without that grant.
         for cmd in ["python3 -c 'import os; print(1)'", "node -e 'require(1)'", "bash -c 'ls'"] {
             XCTAssertEqual(check(cmd).why, "it runs code typed into the command", cmd)
-            guard case .ask(let card) = verdict(cmd, rules: [], folders: [movies], shell: .folders) else { return XCTFail("ran: \(cmd)") }
-            XCTAssertNil(card.alwaysLabel, cmd)
-            XCTAssertEqual(card.alwaysAsksBecause, "Always asks: \(ClaudeKindGrants.codeReason)", cmd)
-            XCTAssertEqual(ClaudeFilePolicy.verdict(bash(cmd), mode: .ask, folders: [movies], cwd: cwd, home: home, shell: .folders, runCode: true), .allow, cmd)
+            guard case .ask(let card) = verdict(cmd, rules: [], folders: [movies]) else { return XCTFail("ran: \(cmd)") }
+            XCTAssertEqual(card.alwaysLabel, "Allow always: shell commands", cmd)
+            XCTAssertEqual(verdict(cmd, rules: [], folders: [movies], shell: .folders), .allow, cmd)
+            XCTAssertEqual(ClaudeFilePolicy.verdict(bash(cmd), mode: .ask, folders: [movies], cwd: cwd, home: home, runCode: true), .allow, cmd)
         }
     }
 

@@ -129,8 +129,8 @@ public enum ClaudeKindGrants {
     /// the one kind; what still asks is what can hurt beyond the folders: admin rights, deleting, moving, the network and
     /// installs, stopping programs, other apps and system settings, ~/Library, keys, and (scoped) paths outside the folders.
     /// Code Claude typed into the command (`python3 -c`, `node -e`, a here-document fed to python or bash, `uv run … python`)
-    /// is its own kind: it asks "it runs code Claude wrote" unless `runCode` ("Let Claude run code it writes") is on, and
-    /// then still asks when that code deletes, runs programs, uses the network or controls apps. Risk words count only in
+    /// still asks when it deletes, runs programs, uses the network or controls apps; otherwise "shell commands" covers it,
+    /// and `runCode` ("Let Claude run code it writes") lets it run without that grant and lets `uv --with` fetch packages. Risk words count only in
     /// the shell itself, never inside such code (the owner's `open(p)` in Python is not the macOS `open`). `folders` are
     /// the allowed folders; the chat's folder (`cwd`) and temporary files always count.
     public static func shellCheck(_ command: String, scope: ClaudeShellScope, folders: [String], cwd: String, home: String,
@@ -326,8 +326,11 @@ public enum ClaudeKindGrants {
         }
         r.needFolders = need
         r.code = !codes.isEmpty || uvInstall
-        if r.code, !runCode {
-            r.why = codes.isEmpty ? packagesReason : (uvInstall ? codeAndPackagesReason : codeReason)
+        // Code with none of the risky calls above is part of "shell commands" (as since bundle-22: a `python3 -c` read in
+        // /tmp must not ask again); the switch also lets it run without that grant. Downloading packages (`uv --with`)
+        // needs the switch.
+        if uvInstall, !runCode {
+            r.why = codes.isEmpty ? packagesReason : codeAndPackagesReason
             r.needFolders = []
         }
         return r

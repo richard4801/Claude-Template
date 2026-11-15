@@ -59,8 +59,6 @@ final class ClaudeKindGrantsTests: XCTestCase {
         XCTAssertEqual(tool.action, "Use suite_add_reference")
         always(tool, into: &s)
 
-        // 4. Code Claude types into a command is its own opt-in (bundle-24): the owner turns it on in Settings.
-        s.runCode = true
         // The settings survive a relaunch (they're stored as JSON in the app's defaults).
         let saved = try JSONDecoder().decode(ClaudeFileSettings.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(saved, s)
@@ -331,7 +329,9 @@ final class ClaudeRunCodeTests: XCTestCase {
                        "Always asks: the code Claude wrote deletes files")
     }
 
-    func testPlainCodeRunsOnlyWithTheSwitch() {
+    /// Run 675: with "shell commands" on and the switch off, harmless code still runs (bundle-22); only `uv --with` waits
+    /// for the switch. Without the shell grant, the card offers it, and the switch alone lets code run too.
+    func testPlainCodeRunsWithShellCommandsOrTheSwitch() {
         let ok = [
             "python3 -c \"from PIL import Image; print(Image.open('/tmp/grwm/a.png').size)\"",
             "cd \(project) && python3 - <<'EOF'\nimport json\nd = json.load(open('beats.json'))\nprint(len(d))\nEOF",
@@ -341,10 +341,15 @@ final class ClaudeRunCodeTests: XCTestCase {
             "cat > /tmp/a.py <<'EOF'\nprint(open('/tmp/a.txt').read())\nEOF\npython3 /tmp/a.py",
         ]
         for cmd in ok {
-            guard case .ask(let c) = verdict(cmd) else { return XCTFail("ran without the switch: \(cmd)") }
-            XCTAssertNil(c.alwaysLabel, cmd)
-            XCTAssertTrue(c.alwaysAsksBecause?.contains("Settings → Claude can allow this") == true, "\(cmd): \(c.alwaysAsksBecause ?? "")")
+            XCTAssertEqual(verdict(cmd, shell: nil, runCode: true), .allow, cmd)
             XCTAssertEqual(verdict(cmd, runCode: true), .allow, cmd)
+            if cmd.hasPrefix("uv ") {
+                XCTAssertEqual(why(verdict(cmd)), "Always asks: \(ClaudeKindGrants.packagesReason)", cmd)
+                continue
+            }
+            XCTAssertEqual(verdict(cmd), .allow, cmd)
+            guard case .ask(let c) = verdict(cmd, shell: nil) else { return XCTFail("ran with nothing allowed: \(cmd)") }
+            XCTAssertEqual(c.alwaysLabel, "Allow always: shell commands", cmd)
         }
         XCTAssertEqual(why(verdict("uv run --with numpy python /tmp/beats.py", script: "print(1)")), "Always asks: \(ClaudeKindGrants.packagesReason)")
         // A data here-document with no interpreter is just a file being written: the shell kind covers it.

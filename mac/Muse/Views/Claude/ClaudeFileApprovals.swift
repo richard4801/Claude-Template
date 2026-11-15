@@ -46,7 +46,8 @@ struct ClaudeFileCardView: View {
                 .lineLimit(6).truncationMode(.middle).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             if let why = card.alwaysAsksBecause {
-                Text(why).scaled(t.scale.caption, r.ink2).lineLimit(2)
+                // Up to three lines (run 675: the code reason was cut to one line in the chat).
+                Text(why).scaled(t.scale.caption, r.ink2).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("claude.card.why")
             } else if let covers = card.alwaysCovers(home: NSHomeDirectory()) {
                 Text(covers).scaled(t.scale.caption, r.ink2).lineLimit(2).truncationMode(.middle)
