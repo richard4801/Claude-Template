@@ -112,6 +112,8 @@ public enum ClaudeAlwaysRules {
     public static func tooWide(_ folder: String, home: String) -> String? {
         let parts = folder.split(separator: "/").map(String.init)
         if ClaudeFilePolicy.inside(folder, home + "/Library") { return "it's in ~/Library" }
+        // Temporary files (/tmp, the per-user /var/folders/…/T) can be always allowed (ci_c64e3cab2c7f).
+        if ClaudeKindGrants.isTemp(folder) { return nil }
         if parts.count <= 1 { return "a top-level folder is too wide to always allow" }
         if folder == home || ClaudeFilePolicy.inside(home, folder) { return "your whole home folder is too wide to always allow" }
         if ["System", "Library", "usr", "bin", "sbin", "etc", "private", "var", "Applications", "opt", "dev", "cores", "Network"].contains(parts[0]) {

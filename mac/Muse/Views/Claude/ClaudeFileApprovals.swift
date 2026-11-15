@@ -3,9 +3,9 @@ import SwiftUI
 
 /// Files on this Mac (owner, 2026-11-11; Allow always 2026-11-12): the approval cards of one chat, above its composer. Each
 /// says exactly what Claude wants to do (read a file, change a file, run a command…) and waits: nothing happens until the
-/// person answers, and a stopped or finished turn ends its cards as a no. "Allow always" saves the folder, or the kind of
-/// command ("Allow always: ffmpeg commands"), for every chat on this Mac; deleting, moving, network, installs, admin rights,
-/// ~/Library and chained commands never offer it and say why in one line.
+/// person answers, and a stopped or finished turn ends its cards as a no. "Allow always" saves the KIND for every chat on
+/// this Mac (ci_c64e3cab2c7f): the project folder, "shell commands", or a MUSE tool by name; deleting, moving, network,
+/// installs, admin rights and ~/Library never offer it and say why in one line.
 struct ClaudeFileApprovals: View {
     @Environment(\.theme) private var t
     @ObservedObject private var service: ClaudeCodeService = .shared
@@ -82,6 +82,7 @@ struct ClaudeFileSettingsSection: View {
     @ObservedObject private var service: ClaudeCodeService = .shared
 
     private func short(_ p: String) -> String {
+        if ClaudeKindGrants.isTemp(p) { return "Temporary files (\(p))" }
         let home = NSHomeDirectory()
         return ClaudeFilePolicy.inside(p, home) ? "~" + p.dropFirst(home.count) : p
     }
@@ -127,11 +128,38 @@ struct ClaudeFileSettingsSection: View {
                 .scaled(t.scale.caption, t.roles.ink2).padding(.top, Space.s3)
                 .accessibilityIdentifier("settings.claude.alwaysAllowed")
                 .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings always allowed") } }
-            if s.allowedFolders.isEmpty && s.rules.isEmpty {
+            if s.allowedFolders.isEmpty && s.rules.isEmpty && s.shellScope == nil && s.tools.isEmpty {
                 SettingRow("Nothing yet", hint: "Choose Allow always on a card in a chat") { EmptyView() }
             }
+            // The kinds (ci_c64e3cab2c7f): shell commands with their scope, then each MUSE tool.
+            if let scope = s.shellScope {
+                SettingRow("Shell commands", hint: scope == .folders
+                           ? "Any command inside your folders and temporary files. Deleting, moving, network, installs, admin and ~/Library still ask."
+                           : "Any command anywhere on this Mac. Deleting, moving, network, installs, admin and ~/Library still ask.") {
+                    HStack(spacing: Space.s2) {
+                        Picker("Where", selection: Binding(get: { scope }, set: { service.setShellScope($0) })) {
+                            ForEach(ClaudeShellScope.allCases, id: \.self) { sc in Text(sc.label).tag(sc) }
+                        }
+                        .labelsHidden().pickerStyle(.menu).fixedSize()
+                        .accessibilityIdentifier("settings.claude.shellScope")
+                        RButton("Remove", kind: .plain, small: true) { service.removeShellCommands() }
+                            .accessibilityLabel("Remove shell commands")
+                    }
+                }
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings shell commands") } }
+                .opacity(s.askAll ? 0.6 : 1)
+            }
+            ForEach(s.tools, id: \.self) { tool in
+                let name = ClaudeKindGrants.toolLabel(tool)
+                SettingRow(name, hint: "MUSE tool: runs without asking. Spending, deleting and posting still ask on their own cards") {
+                    RButton("Remove", kind: .plain, small: true) { service.removeAlwaysTool(tool) }
+                        .accessibilityLabel("Remove \(name)")
+                }
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings tool \(name)") } }
+                .opacity(s.askAll ? 0.6 : 1)
+            }
             ForEach(s.allowedFolders, id: \.self) { f in
-                SettingRow(short(f), hint: "Folder: Claude reads and writes here in every chat") {
+                SettingRow(short(f), hint: "Folder: Claude reads, writes and uploads from here in every chat") {
                     RButton("Remove", kind: .plain, small: true) { service.removeAllowedFolder(f) }
                         .accessibilityLabel("Remove \(short(f))")
                 }
