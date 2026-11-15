@@ -58,7 +58,7 @@ final class ClaudeFileAccessTests: XCTestCase {
     func testCommandsAskUntilARuleCoversThemAndDangerousOnesNeverOfferAlways() {
         guard case .ask(let ls) = ClaudeFilePolicy.verdict(ask("Bash", ["command": .string("ls -la ~/Movies/Shoot")]), mode: .ask, folders: [], cwd: cwd, home: home) else { return XCTFail() }
         XCTAssertNil(ls.folder)
-        XCTAssertEqual(ls.alwaysLabel, "Allow always: ls commands")
+        XCTAssertEqual(ls.alwaysLabel, "Allow always: shell commands")
         for (cmd, why) in [("rm -rf out", "Always asks: it deletes files"), ("mv a /tmp/b", "Always asks: it moves or renames files"),
                            ("sudo ls", "Always asks: it needs admin rights"), ("curl https://x.y", "Always asks: it uses the network or installs software"),
                            ("/bin/rm x", "Always asks: it deletes files")] {

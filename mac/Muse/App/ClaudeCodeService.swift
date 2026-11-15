@@ -427,6 +427,23 @@ final class ClaudeCodeService: ObservableObject {
         saveFileSettings()
     }
 
+    /// Settings → Claude: "Shell commands" off (Remove), or its scope (inside the folders and temp, or anywhere).
+    func removeShellCommands() {
+        fileSettings.removeShell()
+        saveFileSettings()
+    }
+
+    func setShellScope(_ scope: ClaudeShellScope) {
+        fileSettings.shellScope = scope
+        saveFileSettings()
+        recheckFileAsks()
+    }
+
+    func removeAlwaysTool(_ name: String) {
+        fileSettings.removeTool(name)
+        saveFileSettings()
+    }
+
     /// "Ask before anything": every rule stays on the list but none counts; open cards lose their "Allow always".
     func setAskEverything(_ on: Bool) {
         fileSettings.askEverything = on
@@ -438,7 +455,7 @@ final class ClaudeCodeService: ObservableObject {
     private func fileVerdict(_ a: ClaudePermissionAsk, cwd: String) -> ClaudeFileVerdict {
         let s = fileSettings
         return ClaudeFilePolicy.verdict(a, mode: s.mode, folders: s.activeFolders, cwd: cwd, home: NSHomeDirectory(),
-                                        rules: s.activeRules, askAll: s.askAll,
+                                        rules: s.activeRules, askAll: s.askAll, shell: s.activeShell, tools: s.activeTools,
                                         isDirectory: { p in var d: ObjCBool = false; return FileManager.default.fileExists(atPath: p, isDirectory: &d) && d.boolValue },
                                         readScript: { p in
                                             guard let n = (try? FileManager.default.attributesOfItem(atPath: p)[.size] as? NSNumber)?.intValue, n <= 512 * 1024 else { return nil }
@@ -499,7 +516,13 @@ final class ClaudeCodeService: ObservableObject {
         guard let a = fileAsks.first(where: { $0.id == id }) else { return }
         fileAsks.removeAll { $0.id == id }
         if answer == .always, !fileSettings.askAll, a.card.alwaysLabel != nil {
-            if let rule = a.card.rule {
+            // The KIND (ci_c64e3cab2c7f): shell commands, a MUSE tool by name, or the project folder's files.
+            if a.card.shell {
+                fileSettings.allowShell()
+                for f in a.card.ruleFolders { fileSettings.allowFolder(f) }
+            } else if let tool = a.card.tool {
+                fileSettings.allowTool(tool)
+            } else if let rule = a.card.rule {
                 fileSettings.allowRule(rule)
                 for f in a.card.ruleFolders { fileSettings.allowFolder(f) }
             } else if let f = a.card.folder {
