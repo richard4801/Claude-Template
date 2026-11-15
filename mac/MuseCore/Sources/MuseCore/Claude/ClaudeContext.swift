@@ -87,11 +87,8 @@ public enum ClaudeContext {
             out.append(ClaudeContextItem(id: "in:\(slot)", kind: k, label: label, detail: str(i["label"]), image: imageOf(i, video: kind == "video"),
                                          clipId: str(i["clipId"]), isVideo: kind == "video", words: nil))
         }
-        // The picked model, by the label the server gives it (settings.modelLabel, the Model pill's words).
-        if let e = str(request["engineModel"]) ?? str(settings["modelLabel"]) {
-            let label = str(settings["modelLabel"]) ?? lookups.modelLabel(e) ?? e
-            out.append(ClaudeContextItem(id: "model:\(e)", kind: .model, label: "Model", detail: label, image: nil, clipId: nil, isVideo: false, words: nil))
-        }
+        // No "Model" tile (owner 2026-11-15: the composer already shows the model; it only crowded the strip). Claude
+        // still reads the picked model from the screen itself.
         return out
     }
 
