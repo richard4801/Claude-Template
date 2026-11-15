@@ -16,7 +16,11 @@ extension AppStore {
             suite.photo.imageModel = m?.model
             return
         }
+        // Owner 2026-11-14: a model without the current resolution moves to its nearest one, and says so.
+        let wanted = resolution ?? (suite.composer.engineModel == nil ? nil : suite.composer.resolution)
+        let note = m.flatMap { ComposerModelPicker.resolutionNote($0, wanted: wanted) }
         suite.composer = ComposerModelPicker.pin(suite.composer, m, resolution: resolution, catalog: suite.catalog, settings: suite.settings)
+        if let note { showToast(note) }
     }
 
     /// The model the composer's tool is pinned to (nil = Auto).

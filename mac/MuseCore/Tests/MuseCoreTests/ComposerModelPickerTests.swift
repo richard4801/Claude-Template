@@ -64,8 +64,10 @@ final class ComposerModelPickerTests: XCTestCase {
         XCTAssertEqual(ComposerModelPicker.label(p, catalog: c, settings: nil), "Veo 3.1 Lite, 720p")
         XCTAssertEqual(ComposerModelPicker.price(veo, resolution: "720p"), "$0.050/s")
         XCTAssertEqual(ComposerModelPicker.limits(veo), "4, 6 or 8 s, 9:16 and 16:9")
-        // No resolution named: the one its ladder runs it at; an unknown one: the same.
-        XCTAssertEqual(ComposerModelPicker.pin(d, veo, resolution: "8k", catalog: c, settings: nil).resolution, veo.resolution)
+        // A resolution it doesn't make: the nearest it makes (owner 2026-11-14), said in a note.
+        XCTAssertEqual(ComposerModelPicker.pin(d, veo, resolution: "8k", catalog: c, settings: nil).resolution, "1080p")
+        XCTAssertEqual(ComposerModelPicker.resolutionNote(veo, wanted: "8k"), "\(veo.shownName) makes 720p, 1080p · using 1080p")
+        XCTAssertNil(ComposerModelPicker.resolutionNote(veo, wanted: "720p"))
         // Kling 4.0 runs 3–30 s: 13 s is kept, 1:1 is one of its shapes.
         let kling = c.engines!.first { $0.model == "kling-v4" }!
         let k = ComposerModelPicker.pin(d, kling, catalog: c, settings: nil)
@@ -164,7 +166,32 @@ final class ComposerModelPickerTests: XCTestCase {
         XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "2K"), "1080p", "the nearest in pixels")
         XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "480p"), "720p")
         XCTAssertEqual(ComposerModelPicker.snapResolution(kling, nil), "4k", "no ladder resolution: its best")
+        XCTAssertEqual(ComposerModelPicker.snapResolution(kling, "8k"), "4k")
         XCTAssertEqual(ComposerModelPicker.pixels("768P"), 768)
         XCTAssertEqual(ComposerModelPicker.pixels("2K"), 1440)
+    }
+
+    /// One model on several providers (server 2026-11-14): each resolution says the provider it runs on.
+    func testEachResolutionNamesItsProvider() throws {
+        let json = #"{"enabled":true,"test":false,"tiers":[],"camera":{},"engines":[{"model":"seedance-2.5","name":"Seedance 2.5","label":"Seedance 2.5 · Replicate + Higgsfield","kind":"video","custom":false,"tier":"cinema","tiers":["cinema"],"resolution":"720p","resolutions":[{"id":"480p","label":"480p","perSec":0.1028,"provider":"replicate","providerName":"Replicate","modelLabel":"Seedance 2.5 · Replicate"},{"id":"720p","label":"720p","perSec":0.2312,"provider":"replicate","providerName":"Replicate","modelLabel":"Seedance 2.5 · Replicate"},{"id":"1080p","label":"1080p","perSec":0,"provider":"higgsfield","providerName":"Higgsfield","modelLabel":"Seedance 2.5 · Higgsfield","livePrice":true}],"perSec":0.2312,"minSeconds":4,"maxSeconds":30,"aspectRatios":["9:16","16:9"]},{"model":"kling-v4","name":"Kling 4.0","kind":"video","custom":false,"tier":"standard","tiers":["standard"],"resolution":"720p","resolutions":[{"id":"720p","label":"720p","perSec":0.157},{"id":"1080p","label":"1080p","perSec":0.235}],"perSec":0.157,"minSeconds":3,"maxSeconds":30,"aspectRatios":["9:16","16:9"]}]}"#
+        let c = try JSONDecoder().decode(SuiteCatalog.self, from: Data(json.utf8))
+        let sd = c.engines!.first { $0.model == "seedance-2.5" }!
+        XCTAssertEqual(sd.resolutions.map(\.provider), ["replicate", "replicate", "higgsfield"])
+        XCTAssertTrue(sd.resolutions[2].pricedAtGenerate)
+        XCTAssertFalse(sd.resolutions[0].pricedAtGenerate)
+        XCTAssertEqual(ComposerModelPicker.price(sd, resolution: "1080p"), "priced at Generate")
+        XCTAssertEqual(ComposerModelPicker.price(sd, resolution: "720p"), "$0.23/s")
+        let p = ComposerModelPicker.pin(ComposerDraft(duration: 6), sd, resolution: "1080p", catalog: c, settings: nil)
+        XCTAssertEqual(ComposerModelPicker.label(p, catalog: c, settings: nil), "Seedance 2.5 · Higgsfield, 1080p")
+        XCTAssertEqual(ComposerModelPicker.label(ComposerModelPicker.pin(p, sd, resolution: "480p", catalog: c, settings: nil), catalog: c, settings: nil), "Seedance 2.5 · Replicate, 480p")
+        // Switching to a model keeps the resolution when it has it, else the nearest, with a note.
+        let kling = c.engines!.first { $0.model == "kling-v4" }!
+        XCTAssertEqual(ComposerModelPicker.pin(p, kling, catalog: c, settings: nil).resolution, "1080p")
+        let low = ComposerModelPicker.pin(p, sd, resolution: "480p", catalog: c, settings: nil)
+        XCTAssertEqual(ComposerModelPicker.pin(low, kling, catalog: c, settings: nil).resolution, "720p")
+        XCTAssertEqual(ComposerModelPicker.resolutionNote(kling, wanted: "480p"), "Kling 4.0 makes 720p, 1080p · using 720p")
+        // An older server: no provider fields, nothing changes.
+        XCTAssertNil(kling.resolutions[0].modelLabel)
+        XCTAssertFalse(kling.resolutions[0].livePrice)
     }
 }

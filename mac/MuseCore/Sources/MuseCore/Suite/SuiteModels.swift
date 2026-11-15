@@ -1174,18 +1174,36 @@ public struct SuiteResolution: Codable, Hashable, Sendable {
     public var id: String
     public var label: String
     public var perSec: Double
-    enum CodingKeys: String, CodingKey { case id, label, perSec }
-    public init(id: String, label: String, perSec: Double) {
+    /// One model on several providers (server 2026-11-14): the provider this resolution runs on ("higgsfield"), its name
+    /// and the model as it runs here ("Seedance 2.5 · Higgsfield"). Nil from older servers, and for members while the
+    /// studio hides provider names.
+    public var provider: String?
+    public var providerName: String?
+    public var modelLabel: String?
+    /// Priced by the provider when the shot is planned: `perSec` is 0 here, the price shows on Generate.
+    public var livePrice: Bool
+    enum CodingKeys: String, CodingKey { case id, label, perSec, provider, providerName, modelLabel, livePrice }
+    public init(id: String, label: String, perSec: Double, provider: String? = nil, providerName: String? = nil, modelLabel: String? = nil, livePrice: Bool = false) {
         self.id = id
         self.label = label
         self.perSec = perSec
+        self.provider = provider
+        self.providerName = providerName
+        self.modelLabel = modelLabel
+        self.livePrice = livePrice
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.v(.id, "")
         label = c.v(.label, id)
         perSec = c.v(.perSec, 0)
+        provider = c.o(.provider)
+        providerName = c.o(.providerName)
+        modelLabel = c.o(.modelLabel)
+        livePrice = c.v(.livePrice, false)
     }
+    /// Priced only when the shot is planned (no per-second price to show yet).
+    public var pricedAtGenerate: Bool { livePrice && perSec <= 0 }
 }
 
 /// One model of the registry as the owner sees it.

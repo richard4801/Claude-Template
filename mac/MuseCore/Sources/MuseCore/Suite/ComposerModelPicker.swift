@@ -337,8 +337,9 @@ public enum ComposerModelPicker {
         return Int(digits)
     }
 
-    /// One of the model's own resolutions: `wanted` when it makes it (any letter case), else the one its ladder runs it at,
-    /// else the nearest in pixels, else its best. MiniMax H3 (Higgsfield) makes 2K only: every pick lands on 2K.
+    /// One of the model's own resolutions: `wanted` when it makes it (any letter case), else the nearest in pixels (the
+    /// larger on a tie; owner 2026-11-14: "keep the resolution if that model has it, else the nearest"), else the one its
+    /// ladder runs it at, else its best. MiniMax H3 at 768P: every pick lands on 768P or 2K, whichever is nearer.
     public static func snapResolution(_ e: SuiteModelOption, _ wanted: String?) -> String? {
         let ids = e.resolutions.map(\.id)
         guard !ids.isEmpty else { return wanted ?? e.resolution }
@@ -346,12 +347,23 @@ public enum ComposerModelPicker {
             if ids.contains(w) { return w }
             if let same = ids.first(where: { $0.caseInsensitiveCompare(w) == .orderedSame }) { return same }
         }
-        if let r = e.resolution, ids.contains(r) { return r }
         if let px = wanted.flatMap({ pixels($0) }) {
-            let near = ids.compactMap { id in pixels(id).map { (id, abs($0 - px)) } }.min { $0.1 < $1.1 }
+            let near = ids.compactMap { id in pixels(id).map { (id, abs($0 - px), $0) } }
+                .min { $0.1 != $1.1 ? $0.1 < $1.1 : $0.2 > $1.2 }
             if let near { return near.0 }
         }
+        if let r = e.resolution, ids.contains(r) { return r }
         return ids.last
+    }
+
+    /// When `wanted` isn't one of the model's resolutions: what it makes and what picking it uses, for a notice
+    /// ("Seedance 2.5 · Replicate makes 480p, 720p · using 720p"). Nil when it makes it (or nothing was asked).
+    public static func resolutionNote(_ e: SuiteModelOption, wanted: String?) -> String? {
+        guard let w = wanted, !e.resolutions.isEmpty, let used = snapResolution(e, w),
+              used.caseInsensitiveCompare(w) != .orderedSame else { return nil }
+        let names = e.resolutions.map { resLabel($0.label) }.joined(separator: ", ")
+        let usedLabel = resLabel(e.resolutions.first { $0.id == used }?.label ?? used)
+        return "\(e.shownName) makes \(names) · using \(usedLabel)"
     }
 
     /// Pins a video model at a resolution (nil = Auto, the quality's ladder), then fits the draft to it. Without a
@@ -361,7 +373,10 @@ public enum ComposerModelPicker {
     public static func pin(_ d: ComposerDraft, _ e: SuiteModelOption?, resolution: String? = nil, catalog: SuiteCatalog?, settings: SuiteSettings?) -> ComposerDraft {
         var x = d
         x.engineModel = e?.model
-        x.resolution = e.flatMap { e in snapResolution(e, resolution ?? e.resolution) }
+        // Switching models keeps the current resolution when the new one makes it, else the nearest (owner 2026-11-14);
+        // from Auto (no resolution yet): the one its ladder runs it at.
+        let current = d.engineModel == nil ? nil : d.resolution
+        x.resolution = e.flatMap { e in snapResolution(e, resolution ?? current ?? e.resolution) }
         if let e, !e.tiers.isEmpty, !e.tiers.contains(d.quality), let q = e.tiers.first { x.quality = q }
         return fitted(x, catalog: catalog, settings: settings)
     }
@@ -413,8 +428,10 @@ public enum ComposerModelPicker {
     public static func label(_ d: ComposerDraft, catalog: SuiteCatalog?, settings: SuiteSettings?) -> String {
         guard let id = d.engineModel else { return "Auto" }
         let e = pinned(d, catalog, settings)
-        let name = e?.shownName ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
-        let res = e?.resolutions.first { $0.id == d.resolution }?.label ?? d.resolution
+        let r = e?.resolutions.first { $0.id == d.resolution }
+        // The provider the chosen resolution runs on ("Seedance 2.5 · Higgsfield, 1080p"), when the server says it.
+        let name = r?.modelLabel ?? e?.shownName ?? catalog?.tier(d.quality)?.models?.first { $0.model == id }?.name ?? id
+        let res = r?.label ?? d.resolution
         return res.map { "\(name), \(resLabel($0))" } ?? name
     }
 
@@ -442,7 +459,7 @@ public enum ComposerModelPicker {
 
     /// "$0.08/s" at this resolution, "$0.05 a photo", "$0.40 a run", or "" when the price is unknown.
     public static func price(_ e: SuiteModelOption, resolution: String? = nil) -> String {
-        if let r = resolution, let p = e.resolutions.first(where: { $0.id == r })?.perSec { return perSecond(p) }
+        if let r = resolution, let x = e.resolutions.first(where: { $0.id == r }) { return x.pricedAtGenerate ? "priced at Generate" : perSecond(x.perSec) }
         if let run = e.perRun { return money(run) + (e.kind == "image" ? " a photo" : " a run") }
         if let p = e.perSec { return perSecond(p) }
         return ""
