@@ -19,12 +19,12 @@ import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
 import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
-import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixGroup, REMIX_GROUPS, remixIncomplete, remixModels, remixSpan, remixView, sourceLimits, togglesOn } from './remix.js';
+import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixGroup, REMIX_GROUPS, remixIncomplete, remixModels, remixResolution, remixRoutes, remixSpan, remixSupport, remixView, routeOf, sourceLimits, togglesOn, type RemixPick } from './remix.js';
 import { z } from 'zod';
 import { billedSeconds, buildPlan, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, familyOf, refFor, inputSlotsOf, isRoute, MODELS, NO_INPUTS, modelById, modelView, MOCK_MODEL, publicModels, routesOf, TIER_INFO, TIERS, type ModelSpec, type ProviderId, type Tier } from './registry.js';
-import { familySpec, providersKey, quoteBody, routesAt, samplePlan, unionResolutions, type RateFn } from './routes.js';
+import { byPrice, familySpec, providersKey, quoteBody, routesAt, samplePlan, unionResolutions, type RateFn } from './routes.js';
 import { SuiteRunner } from './runner.js';
 import { suiteSettings } from './schema.js';
 import { rigCheck } from './rigcheck.js';
@@ -33,7 +33,7 @@ import { renderBreakdown, shotBreakdown } from './breakdown.js';
 import { ByoService } from '../byo/service.js'; // WS5: bring your own provider
 import { modelName } from '../images/steps.js';
 import { applySwapEngine, ModelChoice, modelChoice, type Choice } from '../engines/service.js';
-import { baseName, labelList, providerLabel, relabelText } from '../engines/labels.js'; // owner 2026-11-11: "<Model> · <Provider>" everywhere
+import { baseName, labelList, modelLabel, providerLabel, relabelText } from '../engines/labels.js'; // owner 2026-11-11: "<Model> · <Provider>" everywhere
 import { placeWords, purposeOfShot, recastIntent, SWAP_ENGINES, swapEngineById, videoPurposes } from '../engines/purposes.js';
 
 /** WS13: the studio's default model can't make this shot, so the quality ladder picked one (member-safe). */
@@ -506,7 +506,7 @@ export class SuiteService {
     const prefs = await this.prefs(u.studioId);
     // 4c: members pick any model the owner hasn't hidden from them; Auto skips the hidden ones too.
     const hidden = u.role === 'owner' ? new Set<string>() : (await modelChoice(this.ctx).memberRules(u.studioId)).hidden;
-    if (r.engineModel && hidden.has(r.engineModel)) throw new ApiError(403, 'owner_only', 'That model isn’t offered to members');
+    if (r.engineModel && (hidden.has(r.engineModel) || hidden.has(familyOf(r.engineModel)))) throw new ApiError(403, 'owner_only', 'That model isn’t offered to members');
     const pick = pickRemix(x, { prefs, providers: this.configured(), down: this.downProviders(), engineModel: r.engineModel, hidden, studioId: u.studioId });
     if ('error' in pick) {
       const words = await this.wordsFor(u);
@@ -524,9 +524,24 @@ export class SuiteService {
     }
     if (x.outfit?.kind === 'outfit' && !(her?.outfit ?? outfitOnly)?.images.length) throw badRequest('Outfit: this outfit has no pictures yet');
     const texts = await this.ctx.prompts.texts(u.studioId);
-    const plan = buildRemixPlan(r, x, pick, { her, outfitOnly }, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
-    await this.livePrice(plan, prefs);
-    return { swap: false as const, plan, pick: { model: pick.model, resolution: pick.model.resolutions.find(z => z.id === plan.resolution)!, seconds: plan.seconds, tried: [] }, prefs,
+    // Owner 2026-11-14: the model's provider routes that take the clip the same way (set up, not refusing lately) at the
+    // resolution asked (else its usual one, or a sharper one for no more per second); each priced, the cheapest runs.
+    const routes = remixRoutes(modelById(familyOf(pick.model.id)) ?? pick.model, { prefs, providers: this.available(), hidden, studioId: u.studioId }).filter(m => routeOf(m) === pick.support.route);
+    const cands0 = routes.some(m => m.id === pick.model.id) ? routes : [pick.model, ...routes];
+    const res = remixResolution(pick.model, r.resolution, cands0);
+    const atRes = byPrice(cands0.filter(m => m.resolutions.some(z => z.id === res)), res);
+    const tryOn: RemixPick[] = (atRes.length ? atRes : [pick.model]).map(m => (m.id === pick.model.id ? pick : { ...pick, model: m, support: remixSupport(m, x) }));
+    const priced: { p: RemixPick; plan: ShotPlan }[] = [];
+    let err: unknown;
+    for (const p of tryOn) {
+      const plan = buildRemixPlan({ ...r, resolution: res }, x, p, { her, outfitOnly }, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[p.model.id]?.priceScale });
+      try { await this.livePrice(plan, prefs); priced.push({ p, plan }); } catch (e) { err ??= e; }
+    }
+    if (!priced.length) throw err;
+    const best = priced.reduce((a, b) => (b.plan.estimate < a.plan.estimate - 1e-9 ? b : a));
+    const plan = best.plan;
+    if (tryOn.length > 1) plan.routes = tryOn.map(p => ({ model: p.model.id, provider: p.model.provider, estimate: priced.find(q => q.p === p)?.plan.estimate ?? null }));
+    return { swap: false as const, plan, pick: { model: best.p.model, resolution: best.p.model.resolutions.find(z => z.id === plan.resolution)!, seconds: plan.seconds, tried: [] }, prefs,
       tried: pick.tried.map(t => ({ ...t, resolution: '' })), talk: { speaking: false, source: 'default' as const } };
   }
 
@@ -562,30 +577,55 @@ export class SuiteService {
     const down = this.downProviders();
     const o = { prefs, providers: this.configured(), down, hidden, studioId: u.studioId };
     const auto = togglesOn(x).length ? pickRemix(x, o) : null;
-    const autoId = auto && !('error' in auto) ? auto.model.id : null;
+    // Auto may pick a provider route (MiniMax H3 on Higgsfield): the list marks its model.
+    const autoId = auto && !('error' in auto) ? familyOf(auto.model.id) : null;
     const words = await this.wordsFor(u);
+    const rules = u.role === 'owner' ? null : await modelChoice(this.ctx).memberRules(u.studioId);
+    const showProviders = !rules || rules.showProviderNames;
     // Owner 2026-11-12: every video model is listed, defaults first; none is greyed out. `support` says how MUSE uses it
     // (yes / prompt / adapted, with `notes`); only `unavailable` (can't run at all) keeps one from running.
-    const models = remixModels(x, o).filter(c => !(u.role !== 'owner' && hidden.has(c.model.id))).map(({ model: m, support, unavailable }) => {
-      const scale = prefs.models?.[m.id]?.priceScale ?? 1, route = support.route, e = m.edit;
-      const res = (e ? m.resolutions.find(z => z.id === e.defaultResolution) : undefined) ?? m.resolutions.find(z => z.id === '720p' || z.id === '768P' || z.id === '720') ?? m.resolutions.at(-1)!;
+    // Owner 2026-11-14: one entry per model; `resolutions[]` across its provider routes, each priced for this clip on the
+    // route it runs on (the cheapest known; Higgsfield's are priced when picked).
+    const models = remixModels(x, o).filter(c => !(u.role !== 'owner' && hidden.has(c.model.id))).map(({ model: m, support, unavailable, routes }) => {
+      const route = support.route, e = m.edit;
+      const ways = routes.length ? routes : [m];
       const videoIn = route === 'edit' || route === 'reference';
       const kind = route === 'edit' ? 'guide' : route === 'reference' ? 'ref2v' : route === 'frames' ? 'i2v' : 't2v';
-      const perSec = m.livePrice ? null : round4(perSecond(m, res, { videoInput: videoIn, audio: false, kind }) * scale);
       const span = clipSeconds != null ? remixSpan(m, clipSeconds, range ?? null) : null;
       const used = span ? (span.needed ? span.max : span.seconds) : null;
       const seconds = used != null ? outputSeconds(m, used, route) : null;
       const [minS, maxS] = sourceLimits(m, route);
       const keeps = e?.keepsAudio ?? false;
+      /** One resolution on one route: its $/s and, with the clip known, the price of this clip there (null = priced when picked). */
+      const priceOn = (r: ModelSpec, resId: string) => {
+        const z = r.resolutions.find(q => q.id === resId)!, scale = prefs.models?.[r.id]?.priceScale ?? 1;
+        const perSec = r.livePrice ? null : round4(perSecond(r, z, { videoInput: videoIn, audio: false, kind }) * scale);
+        const usd = seconds != null && perSec != null ? round4(perSec * billedSeconds(r, route === 'edit' ? Math.max(seconds, minS) : seconds, { videoInput: videoIn, guideSeconds: used ?? seconds }) + (r.byo ? r.byo.perRunUsd * scale : 0)) : null;
+        return { perSec, usd, z };
+      };
+      const ids: string[] = [];
+      for (const r of ways) for (const z of r.resolutions) if (!ids.includes(z.id)) ids.push(z.id);
+      const resolutions = ids.map(id => {
+        const r = byPrice(ways.filter(w => w.resolutions.some(z => z.id === id)), id)[0]!;
+        const q = priceOn(r, id);
+        return { id, label: q.z.label, shortSide: q.z.shortSide, perSec: q.perSec, ...(q.usd != null ? { usd: q.usd } : {}),
+          ...(showProviders ? { provider: r.provider, providerName: providerLabel(r.provider), modelLabel: specName(r) } : {}), ...(r.livePrice ? { livePrice: true } : {}), _r: r };
+      }).sort((a, b) => a.shortSide - b.shortSide);
+      const resId = remixResolution(m, undefined, ways);
+      const at = resolutions.find(z => z.id === resId) ?? resolutions.at(-1)!;
+      const r = at._r, q = priceOn(r, at.id);
+      const provs = [...new Set(ways.map(w => w.provider))];
+      const downNow = provs.filter(pv => down.has(pv));
       return {
-        model: m.id, label: words(specName(m)), support: support.support, reason: support.reason ? words(support.reason) : null, notes: support.notes.map(words), route, group: remixGroup(m, x),
-        ...(down.has(m.provider) && !unavailable ? { warning: `${providerLabel(m.provider)} refused a run in the last 30 minutes (out of credit, busy or down): it may refuse again` } : {}),
+        model: m.id, label: words(provs.length > 1 && showProviders ? modelLabel(m.name, providersKey(provs)) : specName(m)), support: support.support, reason: support.reason ? words(support.reason) : null, notes: support.notes.map(words), route, group: remixGroup(m, x),
+        ...(downNow.length && !unavailable ? { warning: `${downNow.map(providerLabel).join(' and ')} refused a run in the last 30 minutes (out of credit, busy or down): it may refuse again` } : {}),
         unavailable, tested: e?.tested ?? true, auto: m.id === autoId,
         ...(m.id === autoId && auto && !('error' in auto) ? { why: words(auto.why ?? '') } : {}),
-        limits: { minSeconds: minS, maxSeconds: maxS, resolutions: m.resolutions.map(z => z.id), maxImages: pictureRoom(m, route), keepsAudio: keeps,
+        limits: { minSeconds: minS, maxSeconds: maxS, resolutions: resolutions.map(z => z.id), maxImages: pictureRoom(m, route), keepsAudio: keeps,
           soundNote: keeps ? 'keeps the clip’s sound' : 'MUSE puts the clip’s sound back' },
-        price: { resolution: res.id, perSec, ...(seconds != null ? { seconds, trimNeeded: span!.needed, ...(perSec != null ? { usd: round4(perSec * billedSeconds(m, route === 'edit' ? Math.max(seconds, minS) : seconds, { videoInput: videoIn, guideSeconds: used ?? seconds }) + (m.byo ? m.byo.perRunUsd * scale : 0)) } : {}) } : {}),
-          inputBilled: m.livePrice ? 'priced live by the provider when you pick it' : m.id === 'genjutsu-light' ? 'the clip’s seconds are billed too (in the rate)' : videoIn && res.perSecWithVideo != null ? 'the clip is priced into the rate' : 'only the new video is billed' },
+        resolutions: resolutions.map(({ _r, shortSide: _s, ...z }) => z),
+        price: { resolution: at.id, perSec: q.perSec, ...(showProviders ? { provider: r.provider } : {}), ...(seconds != null ? { seconds, trimNeeded: span!.needed, ...(q.usd != null ? { usd: q.usd } : {}) } : {}),
+          inputBilled: r.livePrice ? 'priced live by the provider when you pick it' : m.id === 'genjutsu-light' ? 'the clip’s seconds are billed too (in the rate)' : videoIn && q.z.perSecWithVideo != null ? 'the clip is priced into the rate' : 'only the new video is billed' },
       };
     });
     return { toggles: togglesOn(x), groups: REMIX_GROUPS, auto: autoId ? { model: autoId, why: models.find(m => m.auto)?.why ?? null } : auto && 'error' in auto ? { model: null, why: words(auto.message) } : null, models };

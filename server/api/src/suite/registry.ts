@@ -196,6 +196,8 @@ export const MODELS: ModelSpec[] = [
   // plan's 30% (dearer than Replicate's $0.2312), so 480p/720p normally stay on Replicate and 1080p runs here.
   { id: 'seedance-2.5-hf', family: 'seedance-2.5', name: 'Seedance 2.5', provider: 'higgsfield', livePrice: true,
     ref: { t2v: 'bytedance/seedance-2.5/text-to-video', i2v: 'bytedance/seedance-2.5/image-to-video', ref2v: 'bytedance/seedance-2.5/reference-to-video' }, adapter: 'hf-seedance',
+    // New Swap: the clip as [Video1] on reference-to-video, exactly as Replicate's Seedance 2.5 takes it (remix mode).
+    edit: { sourceSeconds: [4, 30], maxImages: 9, keepsAudio: false, tested: false, defaultResolution: '720p', does: { background: 'yes', outfit: 'yes', character: 'yes', look: 'yes', face: 'prompt' } },
     modes: { text: true, image: true, reference: true, guide: true }, frames: { start: true, end: true, middle: 0, withRefs: false, endNeedsStart: true },
     refs: { images: 30, videos: 10, audios: 10, videoSecondsMax: 30 }, duration: { min: 4, max: 30 },
     resolutions: [R('480p', '480p', 480, 0), R('720p', '720p', 720, 0), R('1080p', '1080p', 1080, 0)],

@@ -96,8 +96,12 @@ apps keep working unchanged.
   resolution, note}` per model (a resolution never forces a model). Owner estimate `engine`: `family`, `providerName`,
   `routes[{model, provider, providerName, estimate, chosen}]`. Old ids (`h3-hf`) resolve as their model everywhere
   (engineModel, studio defaults, ladders). Classic Swap: `h3` at HD runs on Higgsfield (`swapRoute`) when it can.
-- **Not merged**: New Swap's model list (`/v1/suite/remix/models`) still shows MiniMax H3 per provider and leaves the
-  new routes out (it prices one resolution per entry).
+- **New Swap** (`/v1/suite/remix/models`, branch claude/model-resolutions-2): one entry per model too. Each entry has
+  `resolutions[{id, label, perSec, usd?, provider, providerName, modelLabel, livePrice?}]` over its routes that take the
+  clip the same way, and `price.provider`; providers hidden from members with provider names off. Default resolution:
+  the model's usual one, or a sharper one a route makes for no more per second (MiniMax H3 → 2K on Higgsfield). A
+  remix estimate prices each route at that resolution and runs the cheapest (`engine.routes`). `auto.model` is the
+  model's id (`h3`), the plan's route may be `h3-hf`. Seedance 2.5 on Higgsfield takes New Swap via reference-to-video.
 - **App follow-up (not built)**: show `resolutions[i].modelLabel` in the pill and chips instead of the entry label;
   Android: show live-priced chips ("priced at Generate") instead of hiding perSec 0; Mac `snapResolution`: nearest
   resolution before the ladder's, with `resolutionFit.note`.

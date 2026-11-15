@@ -15,6 +15,7 @@ import { buildPlan, needOf, pickAdapted, pickModel, ShotRequestSchema, type Char
 import { familyOf, isRoute, MODELS, modelById, publicModels, refFor, routesOf, type ProviderId } from '../src/suite/registry.js';
 import { fallbackRoute, familySpec, routesAt, unionResolutions } from '../src/suite/routes.js';
 import { pickExtend } from '../src/suite/extend.js';
+import { pickRemix, remixModels, remixResolution, remixRoutes } from '../src/suite/remix.js';
 import { resolutionFit } from '../src/engines/service.js';
 import { demoModel, makeApp, people, until } from './helpers.js';
 
@@ -133,6 +134,29 @@ describe('Extend: a resolution runs on the route that makes it', () => {
     expect('model' in q && q.model.id).toBe('seedance-2.5');
     const r = pickExtend('hd', n, { providers: REP, engineModel: 'seedance-2.5', resolution: '1080p' });
     expect(r).toMatchObject({ error: 'nothing_fits' });
+  });
+});
+
+describe('New Swap: one entry per model, its provider routes behind it', () => {
+  const her = { character: { kind: 'model' as const, modelId: 'm' } };
+  it('lists heads only; routes are the same way of taking the clip; the resolution is the asked one, else the usual or a sharper one for no more', () => {
+    const list = remixModels(her, { providers: ALL });
+    expect(list.some(c => isRoute(c.model))).toBe(false);
+    const h3 = list.find(c => c.model.id === 'h3')!;
+    expect(h3.routes.map(m => m.id)).toEqual(['h3', 'h3-hf']);
+    expect(list.find(c => c.model.id === 'seedance-2.5')!.routes.map(m => m.id)).toEqual(['seedance-2.5', 'seedance-2.5-hf']);
+    expect(list.find(c => c.model.id === 'kling-v3-omni')!.routes.map(m => m.id)).toEqual(['kling-v3-omni']); // O3 takes no clip there: frames, another way
+    expect(remixResolution(modelById('h3')!, undefined, h3.routes)).toBe('2K');
+    expect(remixResolution(modelById('h3')!, undefined, [modelById('h3')!])).toBe('768P'); // no Higgsfield: the usual one
+    expect(remixResolution(modelById('seedance-2.5')!, undefined, remixRoutes(modelById('seedance-2.5')!, { providers: ALL }))).toBe('720p');
+    expect(remixResolution(modelById('seedance-2.5')!, '1080p', remixRoutes(modelById('seedance-2.5')!, { providers: ALL }))).toBe('1080p');
+    expect(remixResolution(modelById('seedance-2.5')!, '1080p', remixRoutes(modelById('seedance-2.5')!, { providers: REP }))).toBe('720p');
+  });
+  it('a picked model whose own provider is off runs on its other route; Auto still picks H3 on Higgsfield for her', () => {
+    const p = pickRemix(her, { providers: new Set(['higgsfield']), engineModel: 'seedance-2.5' });
+    expect('model' in p && p.model.id).toBe('seedance-2.5-hf');
+    const a = pickRemix(her, { providers: ALL, prefs: { models: { 'genjutsu-light': { enabled: false }, genjutsu: { enabled: false } } } });
+    expect('model' in a && a.model.id).toBe('h3-hf');
   });
 });
 

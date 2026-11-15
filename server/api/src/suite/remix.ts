@@ -12,7 +12,7 @@ import { DEFAULT_TEXTS, type PromptTexts } from '../prompt/library.js';
 import { run } from '../prompt/scripts/builders.js';
 import { sanitizeDirection } from '../prompt/engine.js';
 import { billedSeconds, extraPerTake, joinTokens, perSecond, planRefSent, token, type Character, type RemixToggles, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
-import { MODELS, customModelsOf, isRoute, modelById, refFor, type EditDo, type EditToggle, type ModelSpec, type ProviderId } from './registry.js';
+import { MODELS, customModelsOf, familyOf, isRoute, modelById, refFor, routesOf, type EditDo, type EditToggle, type ModelSpec, type ProviderId } from './registry.js';
 
 /** The toggles that are on, in the order the apps show them (character "face" is the optional face swap). */
 export function togglesOn(x: RemixToggles): EditToggle[] {
@@ -130,11 +130,11 @@ export const REMIX_GROUPS: { id: RemixGroup; label: string }[] = [
   { id: 'frames', label: 'From frames' }, { id: 'text', label: 'From words only' },
 ];
 /** A model's group for these toggles: Auto's order first, else how the clip reaches it. */
-export const remixGroup = (m: ModelSpec, x: RemixToggles): RemixGroup => (autoOrder(x).includes(m.id) ? 'auto' : routeOf(m));
+export const remixGroup = (m: ModelSpec, x: RemixToggles): RemixGroup => (autoOrder(x).map(familyOf).includes(m.id) ? 'auto' : routeOf(m));
 type PickOpts = { prefs?: SuitePrefs; providers: Set<ProviderId>; engineModel?: string; /** 4c: models the owner hides from this member. */ hidden?: Set<string>; studioId?: string;
   /** Providers that refused a run recently: still listed and pickable; Auto skips them. */ down?: Set<ProviderId> };
 /** Why a model can't run at all right now (not set up, switched off), or null. The only refusals left. */
-const usable = (m: ModelSpec, o: PickOpts) => {
+export const usable = (m: ModelSpec, o: PickOpts) => {
   const pref = o.prefs?.models?.[m.id];
   if (m.status === 'removed') return 'removed';
   if (o.hidden?.has(m.id)) return 'not offered to members';
@@ -150,14 +150,43 @@ const ROUTE_RANK: Record<RemixRoute, number> = { edit: 0, reference: 1, frames: 
  * edit models, then the ones MUSE adapts (reference video, frames, words). Each with what it does and, when it can't
  * run at all, why.
  */
-export function remixModels(x: RemixToggles, o: PickOpts): (RemixCandidate & { unavailable: string | null })[] {
-  // New Swap prices each entry at one resolution, so it keeps one entry per provider for H3 (h3-hf, Auto's pick for her)
-  // and leaves out the other provider routes (registry `family`), which the shot pickers merge into their model.
-  const all = [...MODELS.filter(m => m.status !== 'removed' && (!isRoute(m) || m.id === 'h3-hf')), ...(o.studioId ? customModelsOf(o.studioId) : [])];
-  const order = autoOrder(x);
+export function remixModels(x: RemixToggles, o: PickOpts): (RemixCandidate & { unavailable: string | null; routes: ModelSpec[] })[] {
+  // One entry per model (owner 2026-11-14): a provider route (registry `family`) is listed under its model.
+  const all = [...MODELS.filter(m => m.status !== 'removed' && !isRoute(m)), ...(o.studioId ? customModelsOf(o.studioId) : [])];
+  const order = autoOrder(x).map(familyOf);
   const rank = (m: ModelSpec) => { const i = order.indexOf(m.id); return i >= 0 ? i : 100 + ROUTE_RANK[routeOf(m)] * 100 + (m.byo ? 50 : 0); };
   return all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i)
-    .map(({ m }) => ({ model: m, support: remixSupport(m, x), unavailable: usable(m, o) }));
+    .map(({ m }) => { const routes = remixRoutes(m, o); return { model: m, support: remixSupport(m, x), unavailable: routes.length ? null : usable(m, o), routes }; });
+}
+
+/**
+ * The routes of model `m` New Swap can run it on: its provider routes that take the clip the same way (route type),
+ * not switched off and set up; the head first. A route on a provider that refused recently stays (Auto skips it).
+ */
+export function remixRoutes(m: ModelSpec, o: PickOpts): ModelSpec[] {
+  const way = routeOf(m);
+  return routesOf(m.id).filter(r => routeOf(r) === way && !usable(r, o));
+}
+
+/** A model's usual New Swap resolution: its edit default, else 720p / 768P, else its best. */
+export function baseRemixResolution(m: ModelSpec) {
+  return ((m.edit ? m.resolutions.find(z => z.id === m.edit!.defaultResolution) : undefined)
+    ?? m.resolutions.find(z => z.id === '720p' || z.id === '768P' || z.id === '720') ?? m.resolutions.at(-1)!).id;
+}
+
+/**
+ * The resolution New Swap runs `m` at: the asked one when one of its routes makes it; else its usual one, or a sharper
+ * one a route makes for no more per second (MiniMax H3: 2K on Higgsfield at $0.065 against 768P at $0.08).
+ */
+export function remixResolution(m: ModelSpec, asked: string | undefined, routes: ModelSpec[]): string {
+  if (asked && routes.some(r => r.resolutions.some(z => z.id === asked))) return asked;
+  const base = baseRemixResolution(m), b = m.resolutions.find(z => z.id === base)!;
+  const known = (r: ModelSpec) => !r.livePrice;
+  if (!known(m)) return base;
+  let best = { id: base, side: b.shortSide };
+  for (const r of routes.filter(known)) for (const z of r.resolutions)
+    if (z.shortSide > best.side && z.perSec > 0 && z.perSec <= b.perSec) best = { id: z.id, side: z.shortSide };
+  return best.id;
 }
 
 export type RemixPick = { model: ModelSpec; support: RemixSupport; why: string | null; tried: { model: string; why: string }[] };
@@ -165,10 +194,12 @@ export type RemixPick = { model: ModelSpec; support: RemixSupport; why: string |
 export function pickRemix(x: RemixToggles, o: PickOpts): RemixPick | { error: string; message: string; tried: RemixPick['tried'] } {
   const tried: RemixPick['tried'] = [];
   if (o.engineModel) {
-    const m = modelById(o.engineModel);
-    if (!m) return { error: 'unknown_model', message: 'That model isn’t in MUSE', tried };
-    const off = usable(m, o);
-    if (off) return { error: 'engine_unavailable', message: `${name(m)} can’t run right now: ${off}`, tried };
+    const m0 = modelById(o.engineModel);
+    if (!m0) return { error: 'unknown_model', message: 'That model isn’t in MUSE', tried };
+    // A model whose own provider can't run but another of its routes can (registry `family`) runs there.
+    const off = usable(m0, o);
+    const m = off ? remixRoutes(modelById(familyOf(m0.id)) ?? m0, o).find(r => routeOf(r) === routeOf(m0)) : m0;
+    if (!m) return { error: 'engine_unavailable', message: `${name(m0)} can’t run right now: ${off}`, tried };
     return { model: m, support: remixSupport(m, x), why: null, tried };
   }
   for (const id of autoOrder(x)) {
@@ -350,8 +381,7 @@ export function buildRemixPlan(r: ShotRequest, x: RemixToggles, p: RemixPick, pe
   const used = span.needed ? span.max : span.seconds; // priced at the model's maximum until trimmed
   const seconds = outputSeconds(m, used, route);
   const keepAudio = r.keepAudio ?? true;
-  const res = m.resolutions.find(z => z.id === r.resolution) ?? (m.edit ? m.resolutions.find(z => z.id === m.edit!.defaultResolution) : undefined)
-    ?? m.resolutions.find(z => z.id === '720p' || z.id === '768P' || z.id === '720') ?? m.resolutions.at(-1)!;
+  const res = m.resolutions.find(z => z.id === r.resolution) ?? m.resolutions.find(z => z.id === baseRemixResolution(m))!;
   const kind = route === 'edit' ? 'guide' : route === 'reference' ? 'ref2v' : route === 'frames' ? (fr?.start ? 'i2v' : 'ref2v') : 't2v';
   const videoIn = route === 'edit' || route === 'reference';
   const scale = o.priceScale ?? 1;

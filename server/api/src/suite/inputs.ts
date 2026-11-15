@@ -26,7 +26,7 @@ export function buildInput(m: ModelSpec, p: ShotPlan, u: MediaUrls): Record<stri
       i.duration = Math.round(p.seconds); i.resolution = p.resolution; i.generate_audio = p.mode === 'remix' ? false : p.audio;
       if (p.kind === 'i2v') { i.image_url = u.start; set(i, 'end_image_url', u.end); break; } // the picture sets the shape
       i.aspect_ratio = p.aspect;
-      if (p.kind === 'ref2v') {
+      if (p.kind === 'ref2v' || p.mode === 'remix') { // New Swap: the clip as [Video1] on reference-to-video
         set(i, 'image_urls', u.refs.slice(0, m.refs.images)); set(i, 'video_urls', u.videos.slice(0, m.refs.videos));
         set(i, 'audio_urls', u.audio ? [u.audio] : undefined);
       }

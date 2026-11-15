@@ -46,7 +46,7 @@ describe('New Swap · registry and Auto (unit)', () => {
     expect(modelById('wan-2.7-edit')).toMatchObject({ provider: 'replicate', ref: 'wan-video/wan-2.7-videoedit', adapter: 'wan-2.7-edit',
       modes: { text: false, image: false, reference: false }, edit: { sourceSeconds: [2, 10], maxImages: 1, keepsAudio: true, tested: false, defaultResolution: '1080p' } });
     const edit = MODELS.filter(m => m.edit);
-    expect(edit.map(m => m.id).sort()).toEqual(['genjutsu', 'genjutsu-light', 'h3-max-recast', 'kling-o1', 'kling-v4', 'seedance-2.5', 'wan-2.2-animate', 'wan-2.7-edit']);
+    expect(edit.map(m => m.id).sort()).toEqual(['genjutsu', 'genjutsu-light', 'h3-max-recast', 'kling-o1', 'kling-v4', 'seedance-2.5', 'seedance-2.5-hf', 'wan-2.2-animate', 'wan-2.7-edit']);
     for (const m of edit) expect(m.resolutions.some(r => r.id === m.edit!.defaultResolution), m.id).toBe(true);
   });
 
@@ -364,11 +364,21 @@ describe.skipIf(!hasFfmpeg)('Wan 3.0 on Higgsfield: built in, priced live from t
     const body = { clipId: 'c_w', remix: { character: { kind: 'model', modelId: mia.id }, outfit: { kind: 'words', words: 'a red dress' }, background: { mode: 'describe', words: 'a beach' } } };
     const m = (await owner.req('POST', '/v1/suite/remix/models', body)).body;
     expect(m.groups.map((g: any) => g.label)).toEqual(['Auto picks', 'Edits the clip', 'Uses the clip as reference', 'From frames', 'From words only']);
-    expect(m.models.slice(0, 3).map((x: any) => [x.model, x.group])).toEqual([['genjutsu-light', 'auto'], ['genjutsu', 'auto'], ['h3-hf', 'auto']]);
-    expect(m.models.find((x: any) => x.model === 'h3-hf')).toMatchObject({ label: 'MiniMax H3 · Higgsfield', unavailable: null, route: 'reference' });
+    // One entry per model (owner 2026-11-14): MiniMax H3 once, 2K on Higgsfield (its usual 768P is dearer per second).
+    expect(m.models.slice(0, 3).map((x: any) => [x.model, x.group])).toEqual([['genjutsu-light', 'auto'], ['genjutsu', 'auto'], ['h3', 'auto']]);
+    expect(m.models.filter((x: any) => x.model === 'h3-hf')).toEqual([]);
+    const h3m = m.models.find((x: any) => x.model === 'h3');
+    expect(h3m).toMatchObject({ label: 'MiniMax H3 · Replicate + Higgsfield', unavailable: null, route: 'reference', price: { resolution: '2K', perSec: 0.065, provider: 'higgsfield' } });
+    expect(h3m.resolutions.map((z: any) => [z.id, z.provider, z.perSec])).toEqual([['768P', 'replicate', 0.08], ['2K', 'higgsfield', 0.065]]);
+    const sd = m.models.find((x: any) => x.model === 'seedance-2.5');
+    expect(sd.resolutions.map((z: any) => [z.id, z.provider, z.livePrice ?? false])).toEqual([['480p', 'replicate', false], ['720p', 'replicate', false], ['1080p', 'higgsfield', true]]);
+    expect(m.models.some((x: any) => x.model.endsWith('-hf'))).toBe(false);
+    const viaH3 = (await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'remix', ...body, engineModel: 'h3' })).body;
+    expect(viaH3.engine).toMatchObject({ model: 'h3-hf', family: 'h3', resolution: '2K' });
+    expect(viaH3.engine.routes.map((x: any) => x.model)).toEqual(['h3-hf', 'h3']);
     a.ctx.suite.markDown('higgsfield');
     const d = (await owner.req('POST', '/v1/suite/remix/models', body)).body;
-    const hf = d.models.find((x: any) => x.model === 'h3-hf');
+    const hf = d.models.find((x: any) => x.model === 'h3');
     expect(hf).toMatchObject({ unavailable: null, warning: expect.stringMatching(/^Higgsfield refused a run in the last 30 minutes/) });
     expect(d.auto.model).toBe('kling-o1'); // Auto skips a provider that refused recently; the person can still pick it
     const est = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'remix', ...body, engineModel: 'h3-hf' });
