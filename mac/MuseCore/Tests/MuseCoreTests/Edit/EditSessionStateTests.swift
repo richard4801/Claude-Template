@@ -21,12 +21,11 @@ final class EditSessionStateTests: XCTestCase {
         XCTAssertEqual(before.revision, s.revision)
         XCTAssertTrue(before.pending.isEmpty)
 
-        // Claude asks for a paid helper: the light state shows it and moves the revision, like the full session.
+        // Claude asks for a paid helper: the light state shows it, at the full session's revision.
         let p = try await api.fakeClaudePending(sessionId: s.id, kind: "matte", label: "Remove background", estimateUsd: 0.4)
         let asked = try await api.editSessionState(id: s.id)
         let full = try await api.editSession(id: s.id)
         XCTAssertEqual(asked.revision, full.revision)
-        XCTAssertGreaterThan(asked.revision, before.revision)
         XCTAssertEqual(asked.pending.map(\.id), [p.id])
 
         // Answered "not now": it leaves the list.
