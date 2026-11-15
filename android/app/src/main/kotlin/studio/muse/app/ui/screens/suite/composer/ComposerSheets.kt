@@ -95,6 +95,8 @@ class SheetContext(
     val onStoryboard: () -> Unit,
     /** Recast: where the clip's first frame comes from (null = no clip yet). */
     val frame: FrameSource? = null,
+    /** A short notice ("Kling 4.0 makes 720p, 1080p · using 720p"). */
+    val toast: (String) -> Unit = {},
     /** Recast: a tap on the first frame → the person's index (null = full). */
     val onTapFace: (android.graphics.Bitmap, Float, Float) -> Int? = { _, _, _ -> null },
     /** "+ New location": a name and a photo; the screen uploads it and adds it to the library. */
@@ -375,7 +377,7 @@ private fun ColumnScope.SettingsBody(x: SheetContext) {
                 SIc(if (open) "chevd" else "chev", 16.dp, m.t.muted)
             }
             if (open) {
-                ModelPickerList(d, groups) { e, r -> x.update { it.pinEngine(e, r) } }
+                ModelPickerList(d, groups) { e, r -> d.pinNote(e, r)?.let(x.toast); x.update { it.pinEngine(e, r) } }
                 T("Length, shape and the input slots follow the pinned model", m.type.tiny, m.t.muted)
             }
         }

@@ -91,21 +91,51 @@ data class PickerEngine(
     /** A resolution's short label ("720p"). */
     fun resLabel(r: String): String = resolutions.firstOrNull { it.id == r }?.label?.substringBefore(' ')?.ifBlank { null } ?: r
 
-    /** The row's price chips, shared with the Mac: one per resolution ("720p  $0.050/s"), or one "$0.05 a photo" / "$0.40 a run". */
+    /**
+     * The row's price chips, shared with the Mac: one per resolution ("720p  $0.050/s"; a live-priced one "1080p  priced at
+     * Generate"), or one "$0.05 a photo" / "$0.40 a run".
+     */
     val chips: List<Pair<String?, String>> get() {
-        val res = resolutions.filter { (it.perSec) > 0 }
-        if (kind == "video" && res.isNotEmpty()) return res.map { it.id to "${resLabel(it.id)}  ${ModelPicker.perSec(it.perSec)}" }
+        val res = resolutions.filter { it.perSec > 0 || it.pricedAtGenerate }
+        if (kind == "video" && res.isNotEmpty()) return res.map { it.id to "${resLabel(it.id)}  ${if (it.pricedAtGenerate) PRICED_AT_GENERATE else ModelPicker.perSec(it.perSec)}" }
         if (kind == "video" && (perSec ?: 0.0) > 0) return listOf(resolution to listOfNotNull(resolution?.let(::resLabel), ModelPicker.perSec(perSec!!)).joinToString("  "))
         return perRun?.takeIf { it > 0 }?.let { listOf(null to "${ModelPicker.money(it)} ${if (kind == "image") "a photo" else "a run"}") } ?: emptyList()
     }
 
-    /** One price, for menus: "720p  $0.157/s", "$0.04 a photo". */
+    /** One price, for menus: "720p  $0.157/s", "1080p  priced at Generate", "$0.04 a photo". */
     fun price(res: String? = resolution): String =
-        perSecAt(res)?.takeIf { kind == "video" && it > 0 }?.let { listOfNotNull(res?.let(::resLabel), ModelPicker.perSec(it)).joinToString("  ") }
+        resolutions.firstOrNull { it.id == res && it.pricedAtGenerate }?.let { "${resLabel(it.id)}  $PRICED_AT_GENERATE" }
+            ?: perSecAt(res)?.takeIf { kind == "video" && it > 0 }?.let { listOfNotNull(res?.let(::resLabel), ModelPicker.perSec(it)).joinToString("  ") }
             ?: perRun?.takeIf { it > 0 }?.let { "${ModelPicker.money(it)} ${if (kind == "image") "a photo" else "a run"}" }
             ?: res?.let(::resLabel).orEmpty()
 
     val price: String get() = price(resolution)
+
+    /** The model as it runs at [res]: that resolution's provider label when the server sends it ("Seedance 2.5 · Higgsfield"), else its name. */
+    fun nameAt(res: String?): String = resolutions.firstOrNull { it.id == res }?.modelLabel?.ifBlank { null } ?: name
+
+    /**
+     * One of its resolutions for [wanted]: the same (any letter case), else the nearest in pixels (the larger on a tie;
+     * owner 2026-11-14: "keep the resolution if that model has it, else the nearest"); null when it lists none.
+     */
+    fun snapRes(wanted: String?): String? {
+        if (resolutions.isEmpty() || wanted == null) return null
+        resolutions.firstOrNull { it.id.equals(wanted, ignoreCase = true) }?.let { return it.id }
+        val px = ModelPicker.pixels(wanted) ?: return null
+        return resolutions.mapNotNull { r -> ModelPicker.pixels(r.id)?.let { Triple(r.id, kotlin.math.abs(it - px), it) } }
+            .minWithOrNull(compareBy<Triple<String, Int, Int>> { it.second }.thenByDescending { it.third })?.first
+    }
+
+    /** When [wanted] isn't one of its resolutions: "Kling 4.0 makes 720p, 1080p · using 720p" (as the Mac); else null. */
+    fun resolutionNote(wanted: String?): String? {
+        val used = snapRes(wanted) ?: return null
+        if (used.equals(wanted, ignoreCase = true)) return null
+        return "$name makes ${resolutions.joinToString(", ") { resLabel(it.id) }} · using ${resLabel(used)}"
+    }
+
+    companion object {
+        const val PRICED_AT_GENERATE = "priced at Generate"
+    }
 }
 
 /** The three groups the picker shows. */
@@ -120,6 +150,13 @@ object ModelPicker {
 
     /** A photo or a run, in cents: "$0.05", "$0.40". */
     fun money(v: Double): String = "$" + String.format(java.util.Locale.US, "%.2f", v)
+
+    /** Pixels on the short side a resolution id stands for ("768P" 768, "1080p" 1080, "2K" 1440, "4k" 2160), as the Mac. */
+    fun pixels(id: String): Int? {
+        val s = id.lowercase()
+        if (s.endsWith("k")) return s.dropLast(1).toDoubleOrNull()?.let { k -> if (k >= 4) 2160 else if (k >= 2) 1440 else (k * 1080).toInt() }
+        return s.takeWhile { it.isDigit() }.toIntOrNull()
+    }
 
     /**
      * Every [kind] engine in the owner's catalog: `engines[]` (WS5) when the server sends it; else, for video, each tier's
@@ -191,7 +228,10 @@ object ModelPicker {
 fun ComposerDraft.pinEngine(e: PickerEngine?, res: String? = null): ComposerDraft {
     if (e == null) return copy(engineModel = null, resolution = null)
     val q = if (e.tiers.isEmpty() || quality in e.tiers) quality else e.tiers.first()
-    var d = copy(engineModel = e.id, resolution = res ?: e.resolutionOn(q), quality = q)
+    // Owner 2026-11-14: switching models keeps the current resolution when the new one makes it, else the nearest
+    // (pinNote says so); from Auto, the one this quality's ladder runs it at.
+    val wanted = res ?: resolution.takeIf { engineModel != null }
+    var d = copy(engineModel = e.id, resolution = e.snapRes(wanted) ?: res ?: e.resolutionOn(q), quality = q)
     val lo = e.minSeconds; val hi = e.maxSeconds
     if (lo != null && hi != null && hi >= lo) d = d.copy(duration = d.duration.coerceIn(lo, hi))
     else if (hi != null) d = d.copy(duration = d.duration.coerceAtMost(hi))
@@ -200,9 +240,16 @@ fun ComposerDraft.pinEngine(e: PickerEngine?, res: String? = null): ComposerDraf
     return d
 }
 
-/** The pinned model as the Mac writes it: "Kling 4.0, 1080p" (a comma, no middle dot); "Auto" on Auto. */
+/** What pinning [e] (at [res]) would say: the resolution it can't keep and the one it uses, or null. */
+fun ComposerDraft.pinNote(e: PickerEngine?, res: String? = null): String? =
+    e?.resolutionNote(res ?: resolution.takeIf { engineModel != null })
+
+/**
+ * The pinned model as the Mac writes it: "Kling 4.0, 1080p" (a comma, no middle dot), with the provider the chosen
+ * resolution runs on when the server says it ("Seedance 2.5 · Higgsfield, 1080p"); "Auto" on Auto.
+ */
 fun ComposerDraft.modelLabel(cat: SuiteCatalog?): String =
-    ModelPicker.find(cat, engineModel)?.let { e -> e.name + ((resolution ?: e.resolutionOn(quality))?.let { r -> ", " + e.resLabel(r) } ?: "") }
+    ModelPicker.find(cat, engineModel)?.let { e -> val r = resolution ?: e.resolutionOn(quality); e.nameAt(r) + (r?.let { ", " + e.resLabel(it) } ?: "") }
         ?: if (engineModel == null) "Auto" else engineModel
 
 /** The pill: "Model" on Auto, else the pinned model ("Kling 4.0, 1080p"). */

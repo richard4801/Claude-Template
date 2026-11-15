@@ -506,8 +506,18 @@ data class SuiteShot(val job: Job, val warnings: List<String> = emptyList(), val
 @Serializable
 data class SuiteLadderStep(val model: String, val resolution: String)
 
+/**
+ * One resolution of a model. One model on several providers (server 2026-11-14): [provider] / [providerName] say where
+ * this resolution runs and [modelLabel] the model as it runs there ("Seedance 2.5 · Higgsfield"); null from older servers
+ * and for members while the studio hides provider names. [livePrice]: priced by the provider when the shot is planned
+ * ([perSec] 0 here).
+ */
 @Serializable
-data class SuiteResolution(val id: String, val label: String = "", val shortSide: Int = 0, val perSec: Double = 0.0)
+data class SuiteResolution(val id: String, val label: String = "", val shortSide: Int = 0, val perSec: Double = 0.0,
+    val provider: String? = null, val providerName: String? = null, val modelLabel: String? = null, val livePrice: Boolean = false) {
+    /** No per-second price to show yet: it is priced on Generate. */
+    val pricedAtGenerate: Boolean get() = livePrice && perSec <= 0
+}
 
 /** A registry model's lengths: min–max, or only the [allowed] ones. */
 @Serializable
