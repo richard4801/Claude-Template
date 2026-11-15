@@ -130,6 +130,12 @@ extension FakeMuseAPI {
 
     public func editSession(id: String) throws -> EditSession { view(try record(id)) }
 
+    /// Like the server's light route: the revision and the waiting/running helpers only.
+    public func editSessionState(id: String) throws -> EditSessionState {
+        let s = view(try record(id), history: false)
+        return EditSessionState(revision: s.revision, pending: s.pending)
+    }
+
     public func pushEditPatch(sessionId id: String, _ req: EditPatchRequest) throws -> EditChangeResult {
         let r = try record(id)
         guard req.baseRevision == r.session.revision else { throw staleError(id, req.baseRevision) }

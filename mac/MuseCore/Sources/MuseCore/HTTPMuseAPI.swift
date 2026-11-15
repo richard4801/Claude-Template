@@ -480,6 +480,7 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     private func es(_ id: String) -> String { "v1/edit-sessions/\(Self.pathKey(id))" }
     public func openEditSession(_ req: EditSessionOpenRequest) async throws -> EditSession { try await call("POST", "v1/edit-sessions", req) }
     public func editSession(id: String) async throws -> EditSession { try await call("GET", es(id)) }
+    public func editSessionState(id: String) async throws -> EditSessionState { try await call("GET", "\(es(id))/state") }
     public func pushEditPatch(sessionId: String, _ req: EditPatchRequest) async throws -> EditChangeResult { try await call("POST", "\(es(sessionId))/patch", req) }
     public func undoEditChange(sessionId: String, entryId: Int, device: String) async throws -> EditChangeResult {
         try await call("POST", "\(es(sessionId))/undo", UndoBody(entryId: entryId, device: device))

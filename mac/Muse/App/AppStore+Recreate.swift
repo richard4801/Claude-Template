@@ -1455,14 +1455,15 @@ extension AppStore {
         watchRecreateClaude()
     }
 
-    /// While the panel is open: the session every 3 s. A paid step Claude asked for waits for the owner's answer here;
-    /// a change Claude made (apply_recipe) refreshes the fill, the match and "Your edit".
+    /// While the panel is open: the session's light state (revision + waiting helpers, GET …/state) every 3 s, never the
+    /// whole project. A paid step Claude asked for waits for the owner's answer here; a new revision (Claude's
+    /// apply_recipe) reloads the fill, the match and "Your edit".
     private func watchRecreateClaude() {
         recreate.claudeWatch?.cancel()
         recreate.claudeWatch = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.recreate.claudeOpen else { return }
-                if let sid = self.recreate.claudeSessionId, let s = try? await self.api.editSession(id: sid) {
+                if let sid = self.recreate.claudeSessionId, let s = try? await self.api.editSessionState(id: sid) {
                     let ask = s.pending.first { $0.status == "waiting" }
                     if ask?.id != self.recreate.claudeAsk?.id { self.recreate.claudeAsk = ask }
                     if let before = self.recreate.claudeRevision, s.revision != before, let ref = self.recreate.reference?.id {

@@ -260,6 +260,8 @@ public protocol MuseAPI: AnyObject, Sendable {
     func openEditSession(_ req: EditSessionOpenRequest) async throws -> EditSession
     /// GET /v1/edit-sessions/{id} (with history)
     func editSession(id: String) async throws -> EditSession
+    /// GET …/{id}/state: {revision, pending (waiting/running)} only, for polling. The default reads the full session.
+    func editSessionState(id: String) async throws -> EditSessionState
     /// POST …/{id}/patch {baseRevision, patch, label, device}: `stale_revision` when the session moved on.
     func pushEditPatch(sessionId: String, _ req: EditPatchRequest) async throws -> EditChangeResult
     /// POST …/{id}/undo {entryId, device}: `already_undone` / `cannot_undo`.
@@ -340,6 +342,14 @@ public protocol MuseAPI: AnyObject, Sendable {
 
     /// Live job progress, balance, generation, LoRA, post and add-on engine updates. Each call returns a new subscription.
     func events() -> AsyncStream<ApiEvent>
+}
+
+extension MuseAPI {
+    /// For APIs without the light route (fakes, previews): the same answer from the full session.
+    public func editSessionState(id: String) async throws -> EditSessionState {
+        let s = try await editSession(id: id)
+        return EditSessionState(revision: s.revision, pending: s.pending.filter { $0.status == "waiting" || $0.status == "running" })
+    }
 }
 
 extension MuseAPI {

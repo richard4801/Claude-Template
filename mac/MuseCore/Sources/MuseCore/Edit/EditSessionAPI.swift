@@ -47,6 +47,22 @@ public struct EditHistoryEntry: Codable, Hashable, Sendable, Identifiable {
     public var canUndo: Bool { !undone && kind != "tool" }
 }
 
+/// GET /v1/edit-sessions/{id}/state: the light poll (owner only). The revision and the open paid-helper requests
+/// (waiting or running), without the project, history or presence: the Recreate Claude panel polls this every 3 s.
+public struct EditSessionState: Codable, Hashable, Sendable {
+    public var revision: Int
+    public var pending: [EditPending]
+
+    public init(revision: Int, pending: [EditPending] = []) { self.revision = revision; self.pending = pending }
+
+    enum CodingKeys: String, CodingKey { case revision, pending }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        revision = try c.decode(Int.self, forKey: .revision)
+        pending = (try? c.decode([EditPending].self, forKey: .pending)) ?? []
+    }
+}
+
 /// A paid helper Claude asked for, waiting for the owner's yes.
 public struct EditPending: Codable, Hashable, Sendable, Identifiable {
     public var id: String
