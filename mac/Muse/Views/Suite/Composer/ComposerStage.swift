@@ -46,6 +46,9 @@ struct ComposerStage: View {
             if showsTake, let job = stageJob {
                 // The redesign's Shot stage: title and actions above the take, the timeline under it.
                 ShotStageTake(job: job)
+            } else if store.suite.composer.tool == .photo && stageJob == nil && !store.suite.generating {
+                // The Photo tab before this session's run (approved frames plans/design/photo/*-empty, *-filled).
+                PhotoEmptyStage()
             } else {
                 VStack(spacing: Space.s3) {
                     Spacer(minLength: 0)
@@ -58,8 +61,11 @@ struct ComposerStage: View {
                     }
                     .frame(maxWidth: width ?? .infinity, maxHeight: maxPictureHeight)
                     // The strip of this tool's takes: never narrower than its thumbnails need (build 582 cut it at the 9:16 width).
-                    ComposerTakesStrip(pinned: $pinned)
-                        .frame(maxWidth: max(width ?? .infinity, 560), alignment: .center)
+                    // Photo has its own strip under the run (StagePhotoStrip), never older takes (the approved frames).
+                    if store.suite.composer.tool != .photo {
+                        ComposerTakesStrip(pinned: $pinned)
+                            .frame(maxWidth: max(width ?? .infinity, 560), alignment: .center)
+                    }
                     Spacer(minLength: 0)
                 }
             }
@@ -67,6 +73,52 @@ struct ComposerStage: View {
         .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .suiteStagePanel(t)
+    }
+}
+
+/// The Photo tab's stage before a run: "Photo" and what the run will be (her, the outfit, the count) or "Nothing generated
+/// yet", then four dashed photo shapes, "Your photos appear here" and the run's line ("1 to 4 photos per run" until the
+/// inputs are filled, then "4 photos, one run").
+struct PhotoEmptyStage: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+
+    var body: some View {
+        let filled = store.photoRequest != nil
+        let n = store.suite.photo.count
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Photo").font(t.body(15, .semibold)).foregroundStyle(t.roles.ink).lineLimit(1)
+                Text(filled ? meta(n) : "Nothing generated yet").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).lineLimit(1)
+            }
+            Spacer(minLength: Space.s3)
+            VStack(spacing: Space.s3) {
+                HStack(spacing: Space.s2) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: t.radii.chip)
+                            .strokeBorder(t.roles.ink2.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .frame(width: 56, height: 70)
+                    }
+                }
+                .padding(.bottom, Space.s1)
+                Text("Your photos appear here").font(t.body(14, .semibold)).foregroundStyle(t.roles.ink)
+                Text(filled ? "\(PhotoEstimate.photos(n)), one run" : "1 to \(PhotoRequest.maxCount) photos per run")
+                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
+            }
+            .frame(maxWidth: .infinity)
+            Spacer(minLength: Space.s3)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .combine)
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "photo empty stage") } }
+    }
+
+    /// "Zelphira · Hoodie · 4 photos" (value pairs, as on the stage's other headers).
+    private func meta(_ n: Int) -> String {
+        let m = store.composerCharacter
+        let outfits = store.outfits(for: m)
+        let o = outfits.first { $0.id == (store.suite.composer.tokens.outfitId ?? store.suite.composer.outfitId) } ?? outfits.first
+        return [m?.shortName, m == nil ? nil : o?.name, PhotoEstimate.photos(n)].compactMap { $0 }.joined(separator: " · ")
     }
 }
 
