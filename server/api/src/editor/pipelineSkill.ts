@@ -11,6 +11,9 @@
 // Not a third memory: the person's memory (claude/memory.ts, playbook_rules: facts and preferences, enforced on edits)
 // stays the one memory; this is the procedure. House style never copies a rule already in memory. Owner only, free,
 // credentials redacted from every text.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -63,6 +66,45 @@ export type Change = { op: ChangeOp; why: string; text?: string; line?: string; 
 export type ChangelogLine = { what: string; why: string; editId?: string; kind: 'small' | 'big' | 'owner' | 'rollback' | 'seed' };
 
 export const seedSnapshot = (): Snapshot => ({ core: PLACEHOLDER_CORE, pages: [], houseStyle: [] });
+
+/** Version 1's content, written by the coordinator from the Icon edit (assets/pipeline-skill: core.md, pages/*.md). */
+export const SEED_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../assets/pipeline-skill');
+/** The edit every seeded page was learned in (the Icon edit). */
+export const SEED_EVIDENCE = { editId: 'es_90f88fe3b4a9', revision: 166 } as const;
+export const HOUSE_STYLE_PAGE = 'house-style';
+
+/** The seed from files: the core (front matter dropped), one page per file (slug = file name; proven when a [proven] core
+ *  rule points to it, else trial; evidence = the Icon edit), and house-style.md's lines as the house style. */
+export function fileSeed(dir = SEED_DIR, now = Date.now()): Snapshot | null {
+  let core: string;
+  try { core = fs.readFileSync(path.join(dir, 'core.md'), 'utf8'); } catch { return null; }
+  core = redactCredentials(core.replace(/^---\n[\s\S]*?\n---\n+/, '')).text.trim() + '\n';
+  if (core.length > PIPELINE_LIMITS.coreChars) throw new Error(`pipeline seed: core.md is ${core.length} characters (budget ${PIPELINE_LIMITS.coreChars})`);
+  const lines = core.split('\n');
+  const proven = (name: string) => lines.some(l => l.includes(`page \`${name}\``) && /\[proven\b/.test(l));
+  const pages: Page[] = [];
+  let houseStyle: StyleEntry[] = [];
+  const pdir = path.join(dir, 'pages');
+  for (const f of (fs.existsSync(pdir) ? fs.readdirSync(pdir) : []).filter(f => f.endsWith('.md')).sort()) {
+    const name = f.slice(0, -3);
+    const text = redactCredentials(fs.readFileSync(path.join(pdir, f), 'utf8')).text.trim();
+    const [head = '', ...rest] = text.split('\n');
+    if (name === HOUSE_STYLE_PAGE) {
+      houseStyle = rest.map(l => l.trim()).filter(l => /^[-*]\s+/.test(l)).slice(0, PIPELINE_LIMITS.styleEntries).map((l, i) => {
+        const t = l.replace(/^[-*]\s+/, '').slice(0, PIPELINE_LIMITS.styleChars);
+        return { id: `hs_seed${i + 1}`, text: t, sentiment: /\blove|loved|perfect\b/i.test(t) ? 'like' as const : 'neutral' as const,
+          evidence: [{ editId: SEED_EVIDENCE.editId, reaction: 'seeded from the Icon edit', at: now }] };
+      });
+      continue;
+    }
+    const title = head.replace(/^#+\s*/, '').replace(/\s*\[[^\]]*\].*$/, '').replace(/\s+—.*$/, '').trim().slice(0, PIPELINE_LIMITS.titleChars) || name;
+    const body = rest.join('\n').trim().slice(0, PIPELINE_LIMITS.pageChars);
+    pages.push({ name, title, body: head.length > title.length + 2 ? `${head.replace(/^#+\s*/, '')}\n\n${body}`.slice(0, PIPELINE_LIMITS.pageChars) : body,
+      evidence: [{ editId: SEED_EVIDENCE.editId, revision: SEED_EVIDENCE.revision, result: 'worked', note: 'Icon edit (seed v1)', at: now }],
+      score: 1, status: proven(name) ? 'proven' : 'trial', createdAt: now, updatedAt: now });
+  }
+  return { core, pages, houseStyle };
+}
 const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s)) as Snapshot;
 
 // ------------------------------------------------------------------ words: duplicates and contradictions
@@ -338,6 +380,12 @@ export type ProposeResult = {
 };
 
 export class PipelineSkill {
+  /** What version 1 is: the files in assets/pipeline-skill, else the short placeholder. Tests may swap it. */
+  seed: () => { snapshot: Snapshot; line: string } = () => {
+    const f = fileSeed();
+    return f ? { snapshot: f, line: 'Version 1 from the Icon edit (PIPELINE-BRIEF + PIPELINE-LOG, es_90f88fe3b4a9 rev 166)' }
+      : { snapshot: seedSnapshot(), line: 'Started the edit pipeline skill (placeholder core)' };
+  };
   constructor(private ctx: Ctx) {}
   private get db() { return this.ctx.db; }
 
@@ -346,8 +394,9 @@ export class PipelineSkill {
     const [row] = await this.db.select().from(pipelineSkillVersions).where(eq(pipelineSkillVersions.studioId, studioId)).orderBy(desc(pipelineSkillVersions.version)).limit(1);
     if (row) return row;
     try {
-      const [r] = await this.db.insert(pipelineSkillVersions).values({ studioId, version: 1, snapshot: seedSnapshot() as unknown as Record<string, unknown>,
-        changelog: [{ what: 'Started the edit pipeline skill (placeholder core)', why: 'first use', kind: 'seed' }], by: 'seed', createdAt: Date.now() }).returning();
+      const seed = this.seed();
+      const [r] = await this.db.insert(pipelineSkillVersions).values({ studioId, version: 1, snapshot: seed.snapshot as unknown as Record<string, unknown>,
+        changelog: [{ what: seed.line, why: 'first use', kind: 'seed' }], by: 'seed', createdAt: Date.now() }).returning();
       return r!;
     } catch (e) { if (!isConflict(e)) throw e; return this.current(studioId); }
   }
@@ -381,6 +430,9 @@ export class PipelineSkill {
     const cur = await this.current(u.studioId);
     const s = cur.snapshot as unknown as Snapshot;
     if (typeof o.page === 'string' && o.page) {
+      if (o.page === HOUSE_STYLE_PAGE && !s.pages.some(x => x.name === HOUSE_STYLE_PAGE))
+        return { version: cur.version, page: { name: HOUSE_STYLE_PAGE, title: 'House style (the owner\'s taste)', status: 'proven', body: s.houseStyle.map(e => `- ${e.text}`).join('\n'),
+          entries: s.houseStyle.map(e => ({ id: e.id, text: e.text, times: e.evidence.length })) } };
       const p = s.pages.find(x => x.name === o.page);
       if (!p) throw notFound('Technique page');
       return { version: cur.version, page: { name: p.name, title: p.title, status: p.status, score: p.score, repeatable: !!p.repeatable, body: p.body,
@@ -673,6 +725,7 @@ export function skillFiles(s: Snapshot, version: number): { path: string; text: 
   const style = s.houseStyle.length ? `\n\n## House style (the owner's taste)\n${s.houseStyle.map(e => `- ${e.text}`).join('\n')}\n` : '';
   const index = live.length ? `\n\n## Technique pages\n${live.map(p => `- [${p.title}](reference/${p.name}.md) (${p.status}, score ${p.score})`).join('\n')}\n` : '';
   return [{ path: 'SKILL.md', text: `${head}${s.core.trim()}${style}${index}` },
+    ...(s.houseStyle.length && !live.some(p => p.name === HOUSE_STYLE_PAGE) ? [{ path: `reference/${HOUSE_STYLE_PAGE}.md`, text: `# House style (the owner's taste)\n\n${s.houseStyle.map(e => `- ${e.text}`).join('\n')}\n` }] : []),
     ...live.map(p => ({ path: `reference/${p.name}.md`, text: `# ${p.title}\n\nStatus: ${p.status} · score ${p.score}\n\n${p.body}\n` }))];
 }
 

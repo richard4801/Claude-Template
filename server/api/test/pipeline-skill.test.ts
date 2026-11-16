@@ -10,7 +10,7 @@ import { registryByName } from '../src/claude/registry.js';
 import { threadBrief } from '../src/camera/claude.js';
 import { EDIT_PROMPT } from '../src/recreate/assistant.js';
 import {
-  applyChange, classify, contradicts, coreRules, failingRun, PIPELINE_LIMITS, PROVEN_AFTER, rescore, seedSnapshot, similarity, skillFiles,
+  applyChange, classify, fileSeed, pipelineOf, SEED_EVIDENCE, contradicts, coreRules, failingRun, PIPELINE_LIMITS, PROVEN_AFTER, rescore, seedSnapshot, similarity, skillFiles,
   type Change, type Page, type Snapshot,
 } from '../src/editor/pipelineSkill.js';
 import { makeApp, people, sql, type Client } from './helpers.js';
@@ -84,7 +84,7 @@ describe('pipeline skill (unit)', () => {
   it('core rules and skill files', () => {
     expect(coreRules(snap().core)).toEqual(['Cut on the strong beats', 'Captions sit above the lower third']);
     const files = skillFiles(snap({ pages: [page(), page({ name: 'old', title: 'Old', status: 'retired' })], houseStyle: [{ id: 'h', text: 'Owner likes warm', sentiment: 'like', evidence: [] }] }), 7);
-    expect(files.map(f => f.path)).toEqual(['SKILL.md', 'reference/whip-pan.md']);
+    expect(files.map(f => f.path)).toEqual(['SKILL.md', 'reference/house-style.md', 'reference/whip-pan.md']);
     expect(files[0]!.text).toMatch(/^---\nname: muse-edit-pipeline\n/);
     expect(files[0]!.text).toContain('House style');
     expect(files[0]!.text).toContain('reference/whip-pan.md');
@@ -112,6 +112,8 @@ describe('pipeline skill (service, tools and routes)', () => {
     studioId = ((await a.ctx.db.execute(sql`select studio_id from users where id = ${owner.id}`)) as any).rows[0].studio_id;
     const u = async (c: Client, role: 'owner' | 'member'): Promise<AuthUser> => { const [x] = await a.ctx.db.select().from(users).where(eq(users.id, c.id)); return { id: x!.id, studioId, email: x!.email, role, studioName: 'S', sessionId: null }; };
     ownerU = await u(owner, 'owner'); memberU = await u(member, 'member');
+    // These flows start from the short placeholder; the real version 1 (the Icon edit's files) has its own test.
+    pipelineOf(a.ctx).seed = () => ({ snapshot: seedSnapshot(), line: 'placeholder' });
   });
   afterAll(async () => { await a?.close?.(); });
 
@@ -274,5 +276,42 @@ describe('pipeline skill (service, tools and routes)', () => {
     expect(files.files.map((f: any) => f.path)).toEqual(expect.arrayContaining(['SKILL.md', 'reference/beat-cuts.md', 'reference/whip-pan.md']));
     const vs = (await owner.req('GET', '/v1/pipeline-skill/versions')).body;
     expect(vs[0].changelog[0]).toMatchObject({ kind: 'owner', why: 'brief v1' });
+  });
+});
+
+describe('pipeline skill · version 1 from the Icon edit (assets/pipeline-skill)', () => {
+  it('the files: the core within budget without its front matter, 13 pages by file name, house-style.md as house style', () => {
+    const f = fileSeed()!;
+    expect(f.core.length).toBeLessThanOrEqual(PIPELINE_LIMITS.coreChars);
+    expect(f.core.startsWith('# MUSE Edit Pipeline (core)')).toBe(true);
+    expect(f.pages.map(p => p.name)).toEqual(['checking', 'comic-page', 'cutouts', 'entrance-wash', 'eye-lens', 'hits', 'lyrics', 'muse-mechanics', 'shell', 'sound', 'sources', 'timing', 'windows-panels']);
+    for (const p of f.pages) {
+      expect(p.title.length, p.name).toBeLessThanOrEqual(PIPELINE_LIMITS.titleChars);
+      expect(p.body.length, p.name).toBeGreaterThan(50);
+      expect(p.evidence).toEqual([expect.objectContaining({ editId: SEED_EVIDENCE.editId, revision: 166, result: 'worked' })]);
+    }
+    expect(f.pages.find(p => p.name === 'cutouts')!.status).toBe('proven'); // "→ page `cutouts` [proven]"
+    expect(f.pages.find(p => p.name === 'lyrics')!.status).toBe('trial');
+    expect(f.houseStyle.length).toBeGreaterThanOrEqual(5);
+    expect(f.houseStyle.some(e => e.text.startsWith('These edits are cut like comics'))).toBe(true);
+  });
+
+  it('a new studio starts at version 1 with that content; the house-style page reads; the skill files carry it', async () => {
+    const a = await makeApp();
+    try {
+      const { owner } = await people(a, 0) as any;
+      const r = (await owner.req('GET', '/v1/pipeline-skill')).body;
+      expect(r).toMatchObject({ version: 1 });
+      expect(r.pages).toHaveLength(13);
+      const [x] = await a.ctx.db.select().from(users).where(eq(users.id, owner.id));
+      const u: AuthUser = { id: x!.id, studioId: x!.studioId, email: x!.email, role: 'owner', studioName: 'S', sessionId: null };
+      const run = (name: string, args: Record<string, unknown>) => registryByName.get(name)!.run({ ctx: a.ctx, user: u, source: 'chat' } as any, args) as Promise<any>;
+      expect((await run('pipeline_skill_read', {})).core).toContain('## Order of work');
+      expect((await run('pipeline_skill_read', { page: 'house-style' })).page.body).toContain('cut like comics');
+      expect((await run('pipeline_skill_read', { page: 'hits' })).page).toMatchObject({ name: 'hits', status: 'trial' });
+      const files = (await owner.req('GET', '/v1/pipeline-skill/skill-files')).body.files.map((f: any) => f.path);
+      expect(files).toEqual(expect.arrayContaining(['SKILL.md', 'reference/cutouts.md', 'reference/house-style.md']));
+      expect((await owner.req('GET', '/v1/pipeline-skill/versions')).body[0].changelog[0].what).toContain('Icon edit');
+    } finally { await a.close(); }
   });
 });
