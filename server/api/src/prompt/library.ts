@@ -46,6 +46,7 @@ export const PROMPT_DEFS: PromptDef[] = [
   d('shoot.outfit.set', 'photoshoot', 'Outfit · reference set', 'An outfit with photos.', 'Wearing: {outfit} (outfit reference set).', [['outfit', 'the outfit name, lower case', true]]),
   d('shoot.outfit.described', 'photoshoot', 'Outfit · described', 'An outfit described in words, with no photos yet.', 'Wearing: {outfit}.', [['outfit', 'the description', true]]),
   d('shoot.outfit.product', 'photoshoot', 'Outfit · product photo', 'An outfit from a product photo.', 'Wearing: the outfit from the product photo reference ({outfit}).', [['outfit', 'the outfit name, lower case']]),
+  d('shoot.outfit.product.extra', 'photoshoot', 'Outfit · product photo · your words', 'Added after the product-photo line when the outfit has its own words (a new hairstyle, piercing, make-up).', 'For this look also: {extra}.', [['extra', 'the outfit\u2019s description', true]]),
   d('shoot.scene', 'photoshoot', 'Scene line', 'The place.', 'Scene: {scene}.', [['scene', 'the chosen scene, lower case', true]]),
   d('shoot.camera', 'photoshoot', 'Camera line', 'Shot size, lens and aperture.', 'Camera: {shot} shot, {lens}mm lens, {aperture}{lensNote}.',
     [['shot', 'close, medium, full or wide'], ['lens', 'the lens in mm'], ['aperture', 'f/2.8 …'], ['lensNote', 'the wide or long lens note below, or empty']]),

@@ -136,7 +136,12 @@ function cameraWords(c: CameraSpec, t: PromptTexts) { return fill(t['shoot.camer
 export function outfitWords(o: OutfitSpec, t: PromptTexts = DEFAULT_TEXTS) {
   switch (o.source ?? 'reference-set') {
     case 'described': return fill(t['shoot.outfit.described']!, { outfit: trimEndChars((o.description ?? o.name).trim(), '.') });
-    case 'product-photo': return fill(t['shoot.outfit.product']!, { outfit: o.name.toLowerCase() });
+    case 'product-photo': {
+      const base = fill(t['shoot.outfit.product']!, { outfit: o.name.toLowerCase() });
+      // The person's own words with a reference photo (new hairstyle, piercing, make-up …) ride along (owner 2026-11-16).
+      const extra = trimEndChars((o.description ?? '').trim(), '.');
+      return extra && t['shoot.outfit.product.extra'] ? `${base} ${fill(t['shoot.outfit.product.extra']!, { extra })}` : base;
+    }
     default: return fill(t['shoot.outfit.set']!, { outfit: o.name.toLowerCase() });
   }
 }

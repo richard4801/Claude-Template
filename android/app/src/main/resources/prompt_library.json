@@ -218,6 +218,26 @@
    "updatedBy": null
   },
   {
+   "key": "shoot.outfit.product.extra",
+   "group": "photoshoot",
+   "title": "Outfit · product photo · your words",
+   "description": "Added after the product-photo line when the outfit has its own words (a new hairstyle, piercing, make-up).",
+   "kind": "text",
+   "default": "For this look also: {extra}.",
+   "current": "For this look also: {extra}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "extra",
+     "description": "the outfit’s description",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "shoot.scene",
    "group": "photoshoot",
    "title": "Scene line",
