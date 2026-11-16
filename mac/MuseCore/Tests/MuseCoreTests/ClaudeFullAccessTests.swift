@@ -95,6 +95,37 @@ final class ClaudeFullAccessTests: XCTestCase {
         guard case .ask = verdict(ask("Read", ["file_path": .string("~/Library/Preferences/x.plist")]), s) else { return XCTFail("read ~/Library") }
     }
 
+    /// Integrator review (bundle-26): ways to destroy files that aren't `rm` still ask.
+    func testWipesAndUnreadableCommandsAsk() {
+        let s = full
+        let wipes: [String] = [
+            "osascript -e 'tell application \"Finder\" to delete POSIX file \"/Users/user/Desktop/a.mp4\"'",
+            "osascript <<'EOF'\ntell application \"Finder\" to empty trash\nEOF",
+            "cd ~/MUSE/x && git reset --hard HEAD",
+            "git checkout -- .",
+            "git restore src/a.swift",
+            "git stash drop",
+            "truncate -s 0 ~/Movies/a.mp4",
+            ": > ~/Desktop/notes.txt",
+            "> ~/Desktop/notes.txt",
+            "dd if=/dev/zero of=/Users/user/Movies/a.mp4 bs=1m count=1",
+            "cp /dev/null ~/Desktop/notes.txt",
+        ]
+        for cmd in wipes { XCTAssertEqual(why(verdict(bash(cmd), s)), "Always asks: \(ClaudeFullAccess.wipesReason)", cmd) }
+        let deletes = ["perl -e 'unlink \"/Users/user/Desktop/a.mp4\"'", "ruby -e 'File.delete(\"/Users/user/Desktop/a.mp4\")'",
+                       "ruby -e 'require \"fileutils\"; FileUtils.rm_rf(\"/Users/user/x\")'"]
+        for cmd in deletes { XCTAssertEqual(why(verdict(bash(cmd), s)), "Always asks: \(ClaudeFullAccess.deletesReason)", cmd) }
+        for cmd in ["c=rm; $c -rf ~/x", "eval \"$CMD\"", "bash -c \"$cmd\"", "`echo rm` -rf ~/x", "source ~/x.sh"] {
+            XCTAssertEqual(why(verdict(bash(cmd), s)), "Always asks: \(ClaudeFullAccess.unreadableReason)", cmd)
+        }
+        // The same in temp folders, ordinary redirects and a readable activate script run.
+        for cmd in ["truncate -s 0 /tmp/a.log", ": > /tmp/a.log", "cd /tmp/repo && git reset --hard", "ffmpeg -i a.mp4 b.mp4 > /tmp/log.txt 2>&1",
+                    "echo hi > ~/Desktop/notes.txt", "source .venv/bin/activate && python3 x.py", "osascript -e 'display notification \"done\"'"] {
+            XCTAssertEqual(verdict(bash(cmd), s, script: "export A=1\n"), .allow, cmd)
+        }
+        XCTAssertEqual(why(verdict(bash("source ./env.sh"), s, script: "rm -rf ~/Movies\n")), "Always asks: \(ClaudeFullAccess.deletesReason)")
+    }
+
     func testKeysAreStillRefused() {
         let s = full
         for a in [bash("cat ~/.ssh/id_ed25519"), bash("python3 - <<'EOF'\nprint(open('/Users/user/.aws/credentials').read())\nEOF"),

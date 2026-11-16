@@ -15,11 +15,15 @@ public enum ClaudeFullAccess {
     public static let deletesReason = "it deletes files"
     public static let adminReason = "it needs admin rights"
     public static let libraryReason = "it reaches ~/Library"
+    /// git reset --hard, truncate, dd of=, `: > f`, AppleScript delete (integrator review, bundle-26).
+    public static let wipesReason = "it deletes or overwrites files"
+    /// The program is a variable, eval or a substitution: MUSE can't tell what runs.
+    public static let unreadableReason = "it runs a command built from variables, which MUSE can't read"
 
     /// What the confirmation says when the switch is turned on, in plain words.
     public static let confirmTitle = "Give Claude full access on this Mac?"
     public static let confirmAllows = "Claude can run any command, script or code it writes, use the internet and install software, and read, change and upload files in any folder, without asking you first."
-    public static let confirmStillAsks = "It still asks before deleting files (outside temporary folders), before anything that needs your admin password, and before touching ~/Library. It never reads or uploads keys, passwords or tokens, and spending or posting in MUSE still asks as before."
+    public static let confirmStillAsks = "It still asks before commands that delete or wipe files outside temporary folders (rm, trash, git reset --hard and the like), before commands it can't read, before anything that needs your admin password, and before touching ~/Library. Moving a file, or saving over one, doesn't ask. It never reads or uploads keys, passwords or tokens, and spending or posting in MUSE still asks as before."
     public static let confirmOff = "You can turn this off at any time in Settings → Claude."
     public static let rowHint = "On: Claude works in any folder without asking, except deleting files, admin rights and ~/Library. Keys, passwords and tokens stay off limits."
 
@@ -28,7 +32,7 @@ public enum ClaudeFullAccess {
     static let deletePrograms: Set<String> = ["rm", "rmdir", "unlink", "trash", "srm", "shred"]
     static let adminPrograms: Set<String> = ["sudo", "su", "doas", "visudo"]
     static let codeDeletes = ["shutil.rmtree", "rmtree(", "os.remove", "os.unlink", "os.rmdir", ".unlink(", ".rmdir(", "fs.rm", "fs.unlink",
-                              "unlinksync", "rmdirsync", "rmsync", ").rm(", "rimraf", "file.delete", "send2trash", "fileutils.rm", "deleteitem", "removeitem"]
+                              "unlinksync", "rmdirsync", "rmsync", ").rm(", "rimraf", "unlink ", "unlink(", "remove_tree", "rm_rf", "file.delete", "send2trash", "fileutils.rm", "deleteitem", "removeitem"]
 
     /// Why a command still asks with Full access on (nil: it runs). `secret` is set when it names keys (refused outright).
     public struct Check: Hashable, Sendable {
@@ -118,6 +122,14 @@ public enum ClaudeFullAccess {
             let words = segment.drop(while: { keywords.contains(base($0)) || isAssign($0) })
             guard let first = words.first else { return nil }
             let prog = base(first)
+            if first.hasPrefix("$") || first.hasPrefix("`") || prog == "eval" { return Check(why: unreadableReason) }
+            // `source x.sh` / `. venv/bin/activate`: the file's commands, read like a shell script.
+            if prog == "source" || prog == "." {
+                guard let f = words.dropFirst().first, !f.contains("$"),
+                      let text = readScript(ClaudeFilePolicy.resolve(expand(f), cwd: runCwd, home: home)) else { return Check(why: unreadableReason) }
+                let inner = check(text, cwd: runCwd, home: home, readScript: readScript, depth: depth + 1)
+                return inner.why != nil ? inner : nil
+            }
             if segment.contains(where: { adminPrograms.contains(base($0)) }) { return Check(why: adminReason) }
             let args = Array(words.dropFirst())
             if prog == "cd" {
@@ -151,9 +163,33 @@ public enum ClaudeFullAccess {
                 let roots = Array(args.prefix(while: { !$0.hasPrefix("-") && $0 != "(" && $0 != "!" }))
                 return targetsInTemp(roots.isEmpty ? ["."] : roots) ? nil : Check(why: deletesReason)
             }
+            let inTemp = ClaudeKindGrants.isTemp(runCwd)
             if prog == "git" {
-                let rest = args.filter { !$0.hasPrefix("-") }
-                if rest.first?.lowercased() == "clean" { return deletable(runCwd) || ClaudeKindGrants.isTemp(runCwd) ? nil : Check(why: deletesReason) }
+                let rest = args.filter { !$0.hasPrefix("-") }.map { $0.lowercased() }
+                let sub = rest.first ?? ""
+                if sub == "clean" { return inTemp ? nil : Check(why: deletesReason) }
+                // Throwing away work: reset --hard, checkout -- / . / -f, restore, stash drop/clear.
+                let wipes = (sub == "reset" && args.contains("--hard")) || sub == "restore"
+                    || (sub == "checkout" && (args.contains("--") || args.contains(".") || args.contains("-f") || args.contains("--force")))
+                    || (sub == "stash" && rest.dropFirst().contains { $0 == "drop" || $0 == "clear" })
+                if wipes, !inTemp { return Check(why: wipesReason) }
+            }
+            // AppleScript can delete through Finder.
+            if prog == "osascript",
+               ["delete", "to trash", "empty trash", "do shell script"].contains(where: { segment.joined(separator: " ").lowercased().contains($0) }) {
+                return Check(why: wipesReason)
+            }
+            if prog == "truncate" {
+                var ts: [String] = []
+                var skip = false
+                for a in args { if skip { skip = false; continue }; if a == "-s" || a == "-r" { skip = true; continue }; if !a.hasPrefix("-") { ts.append(a) } }
+                return targetsInTemp(ts) ? nil : Check(why: wipesReason)
+            }
+            if prog == "dd", let of = args.first(where: { $0.hasPrefix("of=") }) {
+                return targetsInTemp([String(of.dropFirst(3))]) ? nil : Check(why: wipesReason)
+            }
+            if prog == "cp", plain.first == "/dev/null", plain.count >= 2 {
+                return targetsInTemp(Array(plain.dropFirst())) ? nil : Check(why: wipesReason)
             }
             if prog == "rsync", args.contains(where: { $0.hasPrefix("--delete") || $0 == "--remove-source-files" }) {
                 return targetsInTemp(Array(plain.suffix(1))) ? nil : Check(why: deletesReason)
@@ -178,17 +214,35 @@ public enum ClaudeFullAccess {
             return nil
         }
 
+        var truncating = false
+        var heredocPrograms: [String] = []
         for t in tokens {
             switch t {
             case .word(let w):
+                if truncating {
+                    truncating = false
+                    let e = expand(w.text)
+                    if !deletable(ClaudeFilePolicy.resolve(e, cwd: runCwd, home: home)) || e.contains("$") { return Check(why: wipesReason) }
+                    continue
+                }
                 segment.append(w.text)
             case .op(let op):
-                if op == "<<" || op == "<<-" { heredocTargets.append(interpreterOf(segment)); continue }
+                if op == "<<" || op == "<<-" {
+                    heredocTargets.append(interpreterOf(segment))
+                    heredocPrograms.append(segment.first.map(base) ?? "")
+                    continue
+                }
+                // `> f` or `: > f` on its own empties the file.
+                if op == ">" || op == ">|", segment.isEmpty || segment == [":"] || segment == ["true"] { truncating = true; continue }
                 if op.contains(">") || op.contains("<") { continue }
                 if let c = finish() { return c }
             case .heredoc(let body):
                 let target = heredocIndex < heredocTargets.count ? heredocTargets[heredocIndex] : nil
+                let feeds = heredocIndex < heredocPrograms.count ? heredocPrograms[heredocIndex] : ""
                 heredocIndex += 1
+                if feeds == "osascript", ["delete", "to trash", "empty trash", "do shell script"].contains(where: { body.lowercased().contains($0) }) {
+                    return Check(why: wipesReason)
+                }
                 if let target, ClaudeKindGrants.isShell(target) {
                     let inner = check(body, cwd: runCwd, home: home, readScript: readScript, depth: depth + 1)
                     if inner.why != nil { return inner }
