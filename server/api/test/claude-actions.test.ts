@@ -7,7 +7,7 @@ import { jobs, users } from '../src/db/schema.js';
 import { CHAT_REGISTRY, registryByName } from '../src/claude/registry.js';
 import { ACTION_TOOLS, SETTINGS_TOOLS, priceOf } from '../src/claude/actions.js';
 import { toolsForUser } from '../src/claude/registry.js';
-import { makeApp, people, type Client } from './helpers.js';
+import { demoModel, makeApp, people, type Client } from './helpers.js';
 
 type App = Awaited<ReturnType<typeof makeApp>>;
 let a: App, owner: Client, member: Client, ownerU: AuthUser, memberU: AuthUser;
@@ -88,6 +88,15 @@ describe('B3: priced makes and settings', () => {
     expect(typeof look.estimateUsd).toBe('number');
     const after = await owner.req('GET', '/v1/models');
     expect(after.body.find((x: any) => x.id === m.body.id).slots.every((sl: any) => !sl.busy)).toBe(true);
+  });
+  it('character_retake_angle prices one sheet photo without confirm and leaves it as it is', async () => {
+    const m = await demoModel(owner);
+    const look = await run(ownerU, 'character_retake_angle', { modelId: m.id, slot: 'side' });
+    expect(look.needsConfirmation).toBe(true);
+    expect(look.would).toMatch(/Retake her side sheet photo/);
+    expect(typeof look.estimateUsd).toBe('number');
+    const after = (await owner.req('GET', '/v1/models')).body.find((x: any) => x.id === m.id);
+    expect(after.slots.find((sl: any) => sl.key === 'side')).toMatchObject({ image: { asset: 'g_side' }, busy: false });
   });
   it('settings: owner only, never keys or prices, changed only after her Approve', async () => {
     const mine = toolsForUser({ role: 'member' }).map(t => t.name);

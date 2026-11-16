@@ -147,10 +147,27 @@ const template: Script = {
 const sheetSections = () => [sec('identity', 'Identity'), sec('task', 'Task'), sec('style', 'Style'), sec('negative', 'Never add')];
 const sheetRules = () => [identity(), R('task', 'Sheet shot', 'task', 'sheet.task'), R('style', 'House style', 'style', 'shoot.style'), R('never', 'Never add', 'negative', 'shoot.never', [], { locked: true })];
 const ANGLE = en('angle', 'Angle', 'Which sheet image.', [['face', 'Face · front'], ['profile', 'Face · profile'], ['front', 'Body · front'], ['tq', 'Body · ¾'], ['side', 'Body · side'], ['back', 'Body · back'], ['faceTq', 'Face · ¾']], 'front');
+/** Her figure on a body photo of the sheet (owner 2026-11-16), and the sheet realism line: after the style line. */
+const BODY_ANGLES = ['front', 'tq', 'side', 'back'];
+const sheetFigureRule = () => R('figure', 'Her figure (body shape), on a body photo', 'figure', 'outfit.figure', [{ input: 'angle', op: 'in', value: BODY_ANGLES }], { locked: true });
+const sheetRealismRule = () => R('realism', 'Sheet realism (always)', 'realism', 'sheet.realism', [], { locked: true });
+const sheetTail = () => [sec('figure', 'Figure'), sec('realism', 'Realism')];
+const SHEET_VARS = [...SHOOT_VARS, { name: 'angle', description: 'body · front …', sample: 'body · front' }, { name: 'framing', description: 'full body, facing the camera …', sample: 'full body, facing the camera' },
+  { name: 'body', description: 'which image shows her figure', sample: 'her body photo (image 3)' }];
 const sheet: Script = {
   id: 'sheet', group: 'sheet', title: 'Character sheet image', description: 'One image of her character sheet (fill angles).', format: 'lines',
-  inputs: [ANGLE], sections: sheetSections(), rules: sheetRules(),
-  vars: [...SHOOT_VARS, { name: 'angle', description: 'body · front …', sample: 'body · front' }, { name: 'framing', description: 'full body, facing the camera …', sample: 'full body, facing the camera' }],
+  inputs: [ANGLE], sections: [...sheetSections().slice(0, 3), ...sheetTail(), sheetSections()[3]!],
+  rules: [...sheetRules().slice(0, 3), sheetFigureRule(), sheetRealismRule(), sheetRules()[3]!],
+  vars: SHEET_VARS,
+};
+/** Retake with AI on one sheet photo: an edit of the current photo (image 1), her figure from it, her face from her close-ups. */
+const sheetRetake: Script = {
+  id: 'sheet.retake', group: 'sheet', title: 'Retake a sheet photo', description: 'Retake with AI on one sheet photo: an edit of the current photo (sent first), keeping her figure and pose.',
+  format: 'lines', inputs: [ANGLE, bool('bodies', 'Other body photos sent', 'Her other body photos go too (for her proportions).')],
+  sections: [sec('identity', 'Identity'), sec('task', 'Task'), sec('bodies', 'Her other angles'), sec('style', 'Style'), ...sheetTail(), sec('negative', 'Never add')],
+  rules: [identity(), R('task', 'Retake (edit of image 1)', 'task', 'sheet.retake', [], { locked: true }), R('bodies', 'Her other angles (proportions)', 'bodies', 'sheet.retake.bodies', [is('bodies', true)]),
+    R('style', 'House style', 'style', 'shoot.style'), sheetFigureRule(), sheetRealismRule(), R('never', 'Never add', 'negative', 'shoot.never', [], { locked: true })],
+  vars: [...SHEET_VARS, { name: 'faces', description: 'her face close-ups sent', sample: 'image 2 (face, front), image 3 (face ¾)' }, { name: 'bodies', description: '"Images 4–5"', sample: 'Images 4–5' }],
 };
 const loraCandidate: Script = {
   id: 'lora.candidate', group: 'lora', title: 'LoRA candidate', description: 'One of the 30 LoRA training candidates: a sheet image plus a variation.', format: 'lines',
@@ -286,7 +303,7 @@ const collage: Script = {
   vars: [{ name: 'person', description: '"panel 1 shows" / "panels 1–3 show"', sample: 'panels 1–3 show' }],
 };
 
-export const SCRIPTS: Script[] = [collage, houseStyle, photoshoot, template, sheet, outfitAngle, outfitEdit, enhance, loraCandidate, videoReplicate, videoEdit, audioLine];
+export const SCRIPTS: Script[] = [collage, houseStyle, photoshoot, template, sheet, sheetRetake, outfitAngle, outfitEdit, enhance, loraCandidate, videoReplicate, videoEdit, audioLine];
 const BY_ID = new Map(SCRIPTS.map(s => [s.id, s]));
 export const scriptDef = (id: string) => BY_ID.get(id);
 /**

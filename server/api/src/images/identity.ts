@@ -79,3 +79,25 @@ export function outfitRefs(o: NonNullable<OutfitLike>, baseFace: ImageRef | null
   if (gone.length && note) note.why = `${note.why ?? whyOf(note.label, note.role)} · this outfit is missing its ${gone.join(', ')} (Redo them on the outfit)`;
   return list;
 }
+
+/** Her other body angles for a retake, nearest first (a face close-up gets the front and ¾). */
+const NEAREST: Record<string, BodySlot[]> = {
+  front: ['tq', 'side', 'back'], tq: ['front', 'side', 'back'], side: ['tq', 'back', 'front'], back: ['side', 'tq', 'front'],
+  face: ['front', 'tq'], faceTq: ['tq', 'front'], profile: ['side', 'tq'],
+};
+const SLOT_LABEL: Record<string, string> = { face: 'face', faceTq: 'face ¾', profile: 'face profile', front: 'body', tq: 'body', side: 'body', back: 'body' };
+/**
+ * The images a retake of sheet photo `key` sends (owner 2026-11-16), most important first: the current photo itself (its
+ * figure, pose and framing; the edit's image 1), her face close-ups (front, ¾, profile) for her identity, then her nearest
+ * other body angles for her proportions. The model's limit keeps the first ones.
+ */
+export function retakeRefs(m: ModelLike, key: string): IdentityRef[] {
+  const slot = (k: string) => m.slots.find(s => s.key === k && s.image)?.image ?? null;
+  const own = slot(key);
+  if (!own) return [];
+  const list: IdentityRef[] = [{ image: own, label: SLOT_LABEL[key] ?? 'body', role: 'person', why: 'the photo being retaken: her figure, pose and framing · always sent first' }];
+  for (const k of ['face', 'faceTq', 'profile'].filter(x => x !== key)) { const img = slot(k); if (img) list.push({ image: img, label: SLOT_LABEL[k]!, role: 'person', why: 'her face, for her identity' }); }
+  for (const k of NEAREST[key] ?? []) { const img = slot(k); if (img) list.push({ image: img, label: 'body', role: 'person', why: `her ${k === 'tq' ? '¾' : k} body photo, for her proportions` }); }
+  const seen = new Set<ImageRef>();
+  return list.filter(x => (seen.has(x.image) ? false : (seen.add(x.image), true)));
+}

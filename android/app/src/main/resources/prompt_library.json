@@ -584,6 +584,70 @@
    "updatedBy": null
   },
   {
+   "key": "sheet.retake",
+   "group": "sheet",
+   "title": "Retake a sheet photo",
+   "description": "Retake with AI on one sheet photo: an edit of the current photo (image 1), sent first. Her figure line and the realism line follow.",
+   "kind": "text",
+   "default": "Task: edit image 1, her {angle} photo, into a real photograph of a real human: the same person at the same angle, with the same framing ({framing}) and the same pose, on a plain light-grey studio background with even soft light. Her face exactly as in {faces}.",
+   "current": "Task: edit image 1, her {angle} photo, into a real photograph of a real human: the same person at the same angle, with the same framing ({framing}) and the same pose, on a plain light-grey studio background with even soft light. Her face exactly as in {faces}.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "angle",
+     "description": "face · front, body · side …",
+     "required": true
+    },
+    {
+     "name": "framing",
+     "description": "full body, side view …",
+     "required": false
+    },
+    {
+     "name": "faces",
+     "description": "her face close-ups: \"image 2 (face, front), image 3 (face ¾)\"",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "sheet.retake.bodies",
+   "group": "sheet",
+   "title": "Retake · her other angles",
+   "description": "Retake with AI, when her other body photos go too: they give her proportions only.",
+   "kind": "text",
+   "default": "{bodies} show her body from other angles: match her proportions from them, never their pose or framing.",
+   "current": "{bodies} show her body from other angles: match her proportions from them, never their pose or framing.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "bodies",
+     "description": "\"Images 5–6\" / \"Image 5\"",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "sheet.realism",
+   "group": "sheet",
+   "title": "Sheet realism",
+   "description": "Always on for sheet fills and retakes, after the style line: what makes a sheet photo look like a real human.",
+   "kind": "text",
+   "default": "Real human skin with visible pores, fine texture, natural tone variation and small imperfections; individual hair strands; natural soft studio light with real shadows; no plastic, waxy, airbrushed or CGI look, no beauty filter.",
+   "current": "Real human skin with visible pores, fine texture, natural tone variation and small imperfections; individual hair strands; natural soft studio light with real shadows; no plastic, waxy, airbrushed or CGI look, no beauty filter.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "outfit.task",
    "group": "outfits",
    "title": "Outfit angle task",

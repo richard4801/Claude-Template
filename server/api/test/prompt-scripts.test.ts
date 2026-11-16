@@ -28,7 +28,14 @@ describe('defaults reproduce the pre-script prompts exactly', () => {
       }
   });
   it('sheet, outfit angles and edits, LoRA candidates', () => {
-    for (const a of E.SHEET_ANGLES) expect(B.characterSheetShot(demo, a)).toEqual(E.characterSheetShot(demo, a));
+    // The same lines, plus her figure (body angles) and the sheet realism line after the style line (owner 2026-11-16).
+    const realism = DEFAULT_TEXTS['sheet.realism']!;
+    for (const a of E.SHEET_ANGLES) {
+      const was = E.characterSheetShot(demo, a), now = B.characterSheetShot(demo, a);
+      const body = ['front', 'tq', 'side', 'back'].includes(a.key);
+      expect(now.text).toBe(was.text.replace(/^(Style: .*)$/m, `$1\n${body ? `${B.outfitFigure(B.FIGURE_DEFAULT)}\n` : ''}${realism}`));
+      expect(now.slots.filter(x => x.layer !== 'figure' && (x.layer as string) !== 'realism')).toEqual(was.slots);
+    }
     for (const outfit of [{ name: 'Green set' }, { name: 'Knit', description: 'a sweater', source: 'described' as const }])
       for (const a of E.OUTFIT_ANGLES) {
         // The same lines, plus her figure after the task (owner 2026-11-16).

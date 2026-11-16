@@ -74,6 +74,17 @@ export const PROMPT_DEFS: PromptDef[] = [
   d('sheet.task', 'sheet', 'Sheet shot task', 'One character-sheet image (fill angles, LoRA sets).',
     'Task: {angle} shot on a plain light-grey studio background, even soft light, neutral expression, {framing}.',
     [['angle', 'face · front, body · ¾ …'], ['framing', 'head-and-shoulders, facing the camera …']]),
+  // Retake one sheet photo (owner 2026-11-16: a retaken side photo lost her figure, because the old photo was cleared
+  // first). The retake is an edit of the current photo (image 1): same person, angle, framing and pose, her figure from it.
+  d('sheet.retake', 'sheet', 'Retake a sheet photo', 'Retake with AI on one sheet photo: an edit of the current photo (image 1), sent first. Her figure line and the realism line follow.',
+    'Task: edit image 1, her {angle} photo, into a real photograph of a real human: the same person at the same angle, with the same framing ({framing}) and the same pose, on a plain light-grey studio background with even soft light. Her face exactly as in {faces}.',
+    [['angle', 'face · front, body · side …', true], ['framing', 'full body, side view …'], ['faces', 'her face close-ups: "image 2 (face, front), image 3 (face ¾)"', true]], { allowEmpty: false }),
+  d('sheet.retake.bodies', 'sheet', 'Retake · her other angles', 'Retake with AI, when her other body photos go too: they give her proportions only.',
+    '{bodies} show her body from other angles: match her proportions from them, never their pose or framing.',
+    [['bodies', '"Images 5–6" / "Image 5"', true]]),
+  d('sheet.realism', 'sheet', 'Sheet realism', 'Always on for sheet fills and retakes, after the style line: what makes a sheet photo look like a real human.',
+    'Real human skin with visible pores, fine texture, natural tone variation and small imperfections; individual hair strands; natural soft studio light with real shadows; no plastic, waxy, airbrushed or CGI look, no beauty filter.',
+    [], { allowEmpty: false }),
   // ---------------------------------------------------------------- outfits
   d('outfit.task', 'outfits', 'Outfit angle task', 'One angle of an outfit set.', 'Task: {angle}, plain studio background.', [['angle', 'full body front view …', true]]),
   d('outfit.never.extra', 'outfits', 'Never add (outfit sets)', 'Comma-separated. Added to never-add for outfit sets.', 'visible brand logos', [], { kind: 'list' }),

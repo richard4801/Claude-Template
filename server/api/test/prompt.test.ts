@@ -78,7 +78,7 @@ describe('prompt engine (port of PromptEngine.kt)', () => {
   });
   it('character sheet shot', () => {
     const p = E.characterSheetShot(demo, E.sheetAngle('profile')!);
-    expect(p.slots.map(s => s.layer)).toEqual(['identity', 'task', 'style', 'negative']);
+    expect(p.slots.map(s => s.layer)).toEqual(['identity', 'task', 'style', 'realism', 'negative']);
     expect(E.slotText(p, 'task')).toContain('plain light-grey studio background');
     expect(E.slotText(p, 'task')).toContain('side profile');
   });

@@ -67,8 +67,19 @@ export function photoshoot(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS): BuiltP
   return built(r, s.lockSeed ? seedFor(s.identity.name) : null, removed);
 }
 
-export function characterSheetShot(id: Identity, angle: SheetAngle, t: PromptTexts = DEFAULT_TEXTS): BuiltPrompt {
-  const r = run('sheet', t, { inputs: { angle: angle.key }, vars: { ...idVars(id, t), angle: angle.label.toLowerCase(), framing: angle.framing } });
+/** `body`: which sent image shows her figure, for a body angle (default: her body photos). */
+export function characterSheetShot(id: Identity, angle: SheetAngle, t: PromptTexts = DEFAULT_TEXTS, body = 'her body photos'): BuiltPrompt {
+  const r = run('sheet', t, { inputs: { angle: angle.key }, vars: { ...idVars(id, t), angle: angle.label.toLowerCase(), framing: angle.framing, body } });
+  return built(r, null, []);
+}
+/**
+ * Retake with AI on one sheet photo (owner 2026-11-16): an edit of the current photo, sent as image 1, so her figure and
+ * pose come from it. `faces`: her face close-ups sent ("image 2 (face, front), image 3 (face ¾)"); `bodies`: her other
+ * body photos sent ("Images 5–6"), or ''.
+ */
+export function sheetRetake(id: Identity, angle: SheetAngle, o: { faces: string; bodies: string }, t: PromptTexts = DEFAULT_TEXTS): BuiltPrompt {
+  const r = run('sheet.retake', t, { inputs: { angle: angle.key, bodies: !!o.bodies },
+    vars: { ...idVars(id, t), angle: angle.label.toLowerCase(), framing: angle.framing, body: 'image 1', faces: o.faces || 'image 1', bodies: o.bodies } });
   return built(r, null, []);
 }
 /** A LoRA candidate: the sheet image plus variation `n`. */

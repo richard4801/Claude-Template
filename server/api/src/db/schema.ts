@@ -15,7 +15,7 @@ export type PoolSlot = (typeof POOL_SLOTS)[number];
 export type VariationPool = Partial<Record<PoolSlot, string[]>>;
 export type VariationDraw = Partial<Record<PoolSlot | 'direction', string>>;
 export type SheetSlot = { key: string; image: ImageRef | null; source: 'upload' | 'generated'; busy: boolean };
-export type SheetVersion = { id: string; createdAt: number; reason: 'enhance' | 'restore'; slots: SheetSlot[] };
+export type SheetVersion = { id: string; createdAt: number; reason: 'enhance' | 'restore' | 'retake'; slots: SheetSlot[] };
 /** One image of an Enhance or Dress up run (plans/api.md "Model tools" §6). */
 export type ToolItem = { slot: string; label: string; before: ImageRef | null; results: { a?: ImageRef | null; b?: ImageRef | null };
   state: 'waiting' | 'running' | 'done' | 'failed'; decision: 'pending' | 'keep' | 'reject'; pick: 'a' | 'b' | null; cost: number; error?: string };

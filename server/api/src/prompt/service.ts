@@ -150,7 +150,8 @@ export function exampleFor(def: PromptDef, t: PromptTexts = DEFAULT_TEXTS): stri
         camera: def.key === 'shoot.camera.wide' ? { shot: 'Wide', lensMm: 24, aperture: 'f/5.6' } : def.key === 'shoot.camera.tele' ? { shot: 'Close', lensMm: 85, aperture: 'f/1.4' } : undefined,
         lockSeed: def.key === 'shoot.seed.locked', ...(def.key === 'shoot.outfit.described' ? { outfit: { name: 'Knit', description: 'a cream cable-knit sweater', source: 'described' } } : {}),
         ...(def.key === 'shoot.outfit.product' ? { outfit: { name: 'Green set', source: 'product-photo' } } : {}) }, t).text;
-    case 'sheet': return E.characterSheetShot(SAMPLE_ID, E.SHEET_ANGLES[2], t).text;
+    case 'sheet': return def.key.startsWith('sheet.retake') ? E.sheetRetake(SAMPLE_ID, E.SHEET_ANGLES[4], { faces: 'image 2 (face, front), image 3 (face ¾)', bodies: 'Images 4–5' }, t).text
+      : E.characterSheetShot(SAMPLE_ID, E.SHEET_ANGLES[2], t).text;
     case 'outfits': return def.key === 'outfit.face' ? E.outfitFacePrompt(1, t) : def.key === 'outfit.edit' ? E.outfitEditPrompt(E.OUTFIT_ANGLES[1], t) : E.outfitSet(SAMPLE_ID, outfit, 421337, t)[0]!.text;
     case 'enhance': return t['enhance.prompt']!;
     case 'templates': {

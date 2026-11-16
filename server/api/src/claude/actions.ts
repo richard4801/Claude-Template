@@ -235,6 +235,16 @@ export const ACTION_TOOLS: GatedTool[] = [
       if (!angles.length) throw new ApiError(409, 'nothing_missing', 'Her sheet has no missing angles');
       return { summary: `Fill ${angles.length} missing angle${angles.length === 1 ? '' : 's'} (${angles.join(', ')})`, method: 'POST', url: `/v1/models/${m}/fill-angles`, body: {}, ...priced(e) };
     } }),
+  gated({ name: 'character_retake_angle', title: 'Retake one sheet photo', scope: 'edit:write', gate: 'spend',
+    description: 'Retake with AI on one photo of the character sheet (as on her page), e.g. when it looks plastic or AI-made: an edit of the current photo that keeps her figure, proportions and pose, with her face from her close-ups. The old photo is kept as a sheet version. slot: face, faceTq, profile, front, tq, side or back. imageModel: the per-run model, as Fill missing angles. Paid: without confirm it gives the price.',
+    props: { modelId: str('The character', 80), slot: { type: 'string', enum: ['face', 'faceTq', 'profile', 'front', 'tq', 'side', 'back'], description: 'Which sheet photo' }, imageModel: str('Optional: the image model for this run', 200) },
+    required: ['modelId', 'slot'],
+    plan: async (env, a) => {
+      const m = enc(id(a.modelId, 'modelId')), slot = enc(id(a.slot, 'slot'));
+      const body = typeof a.imageModel === 'string' && a.imageModel ? { imageModel: a.imageModel } : {};
+      const e = await appCall(env.ctx, env.user, 'POST', `/v1/models/${m}/slots/${slot}/retake`, { ...body, dryRun: true });
+      return { summary: `Retake her ${String(a.slot)} sheet photo (keeps her figure and pose; the old one stays in Sheet versions)`, method: 'POST', url: `/v1/models/${m}/slots/${slot}/retake`, body, ...priced(e) };
+    } }),
   gated({ name: 'outfit_fill', title: 'Fill an outfit\'s missing angles', scope: 'edit:write', gate: 'spend',
     description: 'Makes an outfit\'s missing ¾, side and back pictures from its front (as on the outfit page). Paid: without confirm it gives the price.',
     props: { outfitId: str('The outfit', 80) }, required: ['outfitId'],

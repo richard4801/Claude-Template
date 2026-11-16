@@ -247,5 +247,5 @@ export function imageRange(ns: number[]): string {
 
 // ---- Prompt scripts (plans/prompt-scripts.md): every builder runs its script. Same signatures and, at default
 // settings, the same prompts as before (test/prompt-scripts.test.ts checks them against test/legacy/).
-import { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, outfitFigure, videoSwap, replicateSwap, collageLine, houseStyle } from './scripts/builders.js';
-export { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, outfitFigure, videoSwap, replicateSwap, collageLine, houseStyle };
+import { photoshoot, characterSheetShot, sheetRetake, outfitAngle, outfitEditPrompt, outfitFigure, videoSwap, replicateSwap, collageLine, houseStyle, FIGURE_DEFAULT } from './scripts/builders.js';
+export { photoshoot, characterSheetShot, sheetRetake, outfitAngle, outfitEditPrompt, outfitFigure, videoSwap, replicateSwap, collageLine, houseStyle, FIGURE_DEFAULT };

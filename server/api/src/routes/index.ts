@@ -10,13 +10,13 @@ import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { accounts, clips, invites, jobs, ledger, loras, models, outfits, posts, sessions, studioSettings, takes, uploads, users, wallets, type ImageRef, type SheetSlot } from '../db/schema.js';
+import { accounts, clips, invites, jobs, ledger, loras, models, outfits, posts, sessions, studioSettings, takes, uploads, users, wallets, type ImageRef, type SheetSlot, type SheetVersion } from '../db/schema.js';
 import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
-import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitKeepAngle, outfitKeepFront, outfitKeepParts, outfitSet, outfitFacePrompt, OUTFIT_FACES, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
-import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_MIN, type IdentityRef } from '../images/identity.js';
+import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitKeepAngle, outfitKeepFront, outfitKeepParts, outfitSet, outfitFacePrompt, OUTFIT_FACES, photoshoot, sheetAngle, sheetRetake, FIGURE_DEFAULT, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
+import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_MIN, retakeRefs, type IdentityRef } from '../images/identity.js';
 import { applySent, sameImage, sentImagesOf, sentOfBody, whyOf, type Resolved, type SentView } from '../images/sent.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
@@ -280,7 +280,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       for (const s of missing) {
         try {
           const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs, maxImages: refs.length, panels, bill, models: stepModels,
-            req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!, texts).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key] ?? 'face'] } });
+            req: { prompt: characterSheetShot(identity, sheetAngle(s.key)!, texts, figureOf(fillPlan, null, s.key) ?? FIGURE_DEFAULT).text, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[s.key] ?? 'face'] } });
           filled[s.key] = r.images[0]!;
         } catch { filled[s.key] = null; failed++; }
       }
@@ -298,6 +298,68 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return { model: modelView(u!), cost, sentImages: fillPlan.sentImages };
   };
   app.post<{ Params: { id: string } }>('/v1/models/:id/fill-angles', async req => fillAngles(req));
+
+  /**
+   * Retake with AI on one sheet photo (owner 2026-11-16: a retaken side photo lost her figure, because the old photo was
+   * cleared first and the model never saw it). The current photo stays and goes first as the edit's image 1 (her shape,
+   * proportions and pose), then her face close-ups (identity), then her nearest other body angles (proportions), within
+   * the model's limit. The slot changes only when the new photo comes out; the sheet as it was is saved as a version first
+   * (Sheet versions → Restore). Priced like one sheet angle; `dryRun` returns the price and the images.
+   */
+  const retakeSlot = async (req: { user: AuthUser; body: unknown; params: { id: string; slot: string } }) => {
+    const m = await model(req.user, req.params.id, true);
+    const key = req.params.slot;
+    const angle = sheetAngle(key);
+    if (!SLOT_KEYS.includes(key) || !angle) throw notFound('Slot');
+    const cur = m.slots.find(s => s.key === key);
+    if (!cur?.image) throw new ApiError(409, 'nothing_to_retake', 'This angle has no photo yet · Fill missing angles makes it');
+    if (cur.busy) throw new ApiError(409, 'slot_busy', 'This angle is being made · wait for it to finish');
+    const ids = retakeRefs(m, key);
+    const stepModels = await modelChoice(ctx).imageOverrides(req.user, 'character', (req.body ?? {}) as Record<string, unknown>); // as fill-angles
+    const plan = await ctx.images.shotPlan(req.user.studioId, ids, [], 1, undefined, stepModels, null);
+    const cost = plan.perShot;
+    if ((req.body as { dryRun?: unknown } | null)?.dryRun === true) return { dryRun: true, slot: key, cost, perShot: plan.perShot, sentImages: plan.sentImages };
+    const at = (i: number) => `${plan.sheet ? 'panel' : 'image'} ${i + 1}`;
+    const sent = ids.slice(0, plan.images.length);
+    const FACE_WORDS: Record<string, string> = { face: 'face, front', 'face ¾': 'face ¾', 'face profile': 'face in profile' };
+    const faces = sent.map((x, i) => (i > 0 && FACE_WORDS[x.label] ? `${at(i)} (${FACE_WORDS[x.label]})` : null)).filter(Boolean).join(', ');
+    const bodyIdx = sent.map((x, i) => (i > 0 && x.label.startsWith('body') ? i + 1 : 0)).filter(Boolean);
+    const word = plan.sheet ? 'Panel' : 'Image';
+    const bodies = !bodyIdx.length ? '' : bodyIdx.length === 1 ? `${word} ${bodyIdx[0]}`
+      : bodyIdx.every((n, i) => i === 0 || n === bodyIdx[i - 1]! + 1) ? `${word}s ${bodyIdx[0]}–${bodyIdx[bodyIdx.length - 1]}` : `${word}s ${bodyIdx.join(', ')}`;
+    const bill = await new PhotoBill(ctx, whoOf(req.user), `sheet_${uid('r')}`, cost, `Character sheet · retake ${angle.label}`).start();
+    const [u] = await db.update(models).set({ slots: m.slots.map(s => (s.key === key ? { ...s, busy: true } : s)) }).where(eq(models.id, m.id)).returning();
+    emitModel(u!);
+    const user = req.user, old = cur.image;
+    const retakeKey = `retake-${uid('r')}`;
+    resultsOf(ctx).link(user, retakeKey); // the result arrives in the chat
+    const texts = await ctx.prompts.texts(user.studioId);
+    const prompt = sheetRetake(await identityOf(u!, plan.persons), angle, { faces, bodies }, texts).text;
+    void (async () => {
+      let image: ImageRef | null = null;
+      try {
+        const r = await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'sheet', refId: m.id, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill, models: stepModels,
+          req: { prompt, width: 768, height: 1024, count: 1, simAssets: [SLOT_SAMPLE[key] ?? 'face'] } });
+        image = r.images[0] ?? null;
+      } catch { image = null; }
+      // Never above the price shown: anything the engine charged beyond it is studio overhead.
+      if (bill.spent > cost) { bill.waste(bill.spent - cost); bill.spent = cost; }
+      if (image) await bill.finish(); else await bill.fail();
+      const [now] = await db.select().from(models).where(eq(models.id, m.id));
+      if (!now) return;
+      const still = now.slots.find(s => s.key === key);
+      // Replaced only when it came out and nobody changed the photo meanwhile; the sheet as it was is kept as a version.
+      const replace = !!image && !!still && sameImage(still.image, old);
+      const slots: SheetSlot[] = now.slots.map(s => (s.key !== key ? s : replace ? { ...s, image: image!, source: 'generated', busy: false } : { ...s, busy: false }));
+      const version: SheetVersion = { id: uid('sv'), createdAt: Date.now(), reason: 'retake', slots: now.slots.map(s => (s.key === key ? { ...s, busy: false } : s)) };
+      const [v] = await db.update(models).set(replace ? { slots, sheetVersions: [version, ...(now.sheetVersions ?? [])].slice(0, 10) } : { slots }).where(eq(models.id, m.id)).returning();
+      emitModel(v!);
+      void resultsOf(ctx).report(retakeKey, { kind: 'character sheet', status: replace ? 'done' : 'failed', modelId: m.id, title: `Character sheet · retake ${angle.label}`,
+        ...(replace ? {} : { error: image ? 'The photo changed meanwhile · the retake wasn’t used' : 'The retake didn’t come out · her photo is unchanged' }) }).catch(() => undefined);
+    })().catch(e => ctx.log.error({ err: (e as Error).message }, 'retake failed'));
+    return { model: modelView(u!), slot: key, cost, sentImages: plan.sentImages };
+  };
+  app.post<{ Params: { id: string; slot: string } }>('/v1/models/:id/slots/:slot/retake', async req => retakeSlot(req));
 
   // ------------------------------------------------------------------ outfits
   app.get('/v1/outfits', async req => {

@@ -2259,6 +2259,18 @@
      "pick": "first"
     },
     {
+     "id": "figure",
+     "label": "Figure",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "realism",
+     "label": "Realism",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
      "id": "negative",
      "label": "Never add",
      "kind": "system",
@@ -2278,6 +2290,14 @@
     {
      "id": "style",
      "label": "Style"
+    },
+    {
+     "id": "figure",
+     "label": "Figure"
+    },
+    {
+     "id": "realism",
+     "label": "Realism"
     },
     {
      "id": "negative",
@@ -2329,12 +2349,19 @@
      "name": "framing",
      "description": "full body, facing the camera …",
      "sample": "full body, facing the camera"
+    },
+    {
+     "name": "body",
+     "description": "which image shows her figure",
+     "sample": "her body photo (image 3)"
     }
    ],
    "blocks": [
     "shoot.identity",
     "sheet.task",
     "shoot.style",
+    "outfit.figure",
+    "sheet.realism",
     "shoot.never"
    ],
    "variants": [],
@@ -2360,6 +2387,33 @@
      "target": "style",
      "when": [],
      "block": "shoot.style"
+    },
+    {
+     "id": "figure",
+     "label": "Her figure (body shape), on a body photo",
+     "target": "figure",
+     "when": [
+      {
+       "input": "angle",
+       "op": "in",
+       "value": [
+        "front",
+        "tq",
+        "side",
+        "back"
+       ]
+      }
+     ],
+     "block": "outfit.figure",
+     "locked": true
+    },
+    {
+     "id": "realism",
+     "label": "Sheet realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "sheet.realism",
+     "locked": true
     },
     {
      "id": "never",
@@ -2392,6 +2446,383 @@
      "target": "style",
      "when": [],
      "block": "shoot.style"
+    },
+    {
+     "id": "figure",
+     "label": "Her figure (body shape), on a body photo",
+     "target": "figure",
+     "when": [
+      {
+       "input": "angle",
+       "op": "in",
+       "value": [
+        "front",
+        "tq",
+        "side",
+        "back"
+       ]
+      }
+     ],
+     "block": "outfit.figure",
+     "locked": true
+    },
+    {
+     "id": "realism",
+     "label": "Sheet realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "sheet.realism",
+     "locked": true
+    },
+    {
+     "id": "never",
+     "label": "Never add",
+     "target": "negative",
+     "when": [],
+     "block": "shoot.never",
+     "locked": true
+    }
+   ],
+   "overridden": false,
+   "stale": false,
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "id": "sheet.retake",
+   "group": "sheet",
+   "title": "Retake a sheet photo",
+   "description": "Retake with AI on one sheet photo: an edit of the current photo (sent first), keeping her figure and pose.",
+   "format": "lines",
+   "inputs": [
+    {
+     "name": "angle",
+     "label": "Angle",
+     "description": "Which sheet image.",
+     "type": "enum",
+     "options": [
+      {
+       "id": "face",
+       "label": "Face · front"
+      },
+      {
+       "id": "profile",
+       "label": "Face · profile"
+      },
+      {
+       "id": "front",
+       "label": "Body · front"
+      },
+      {
+       "id": "tq",
+       "label": "Body · ¾"
+      },
+      {
+       "id": "side",
+       "label": "Body · side"
+      },
+      {
+       "id": "back",
+       "label": "Body · back"
+      },
+      {
+       "id": "faceTq",
+       "label": "Face · ¾"
+      }
+     ],
+     "sample": "front"
+    },
+    {
+     "name": "bodies",
+     "label": "Other body photos sent",
+     "description": "Her other body photos go too (for her proportions).",
+     "type": "bool",
+     "sample": true
+    }
+   ],
+   "sections": [
+    {
+     "id": "identity",
+     "label": "Identity",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "task",
+     "label": "Task",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "bodies",
+     "label": "Her other angles",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "style",
+     "label": "Style",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "figure",
+     "label": "Figure",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "realism",
+     "label": "Realism",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "negative",
+     "label": "Never add",
+     "kind": "system",
+     "pick": "first"
+    }
+   ],
+   "values": [],
+   "targets": [
+    {
+     "id": "identity",
+     "label": "Identity"
+    },
+    {
+     "id": "task",
+     "label": "Task"
+    },
+    {
+     "id": "bodies",
+     "label": "Her other angles"
+    },
+    {
+     "id": "style",
+     "label": "Style"
+    },
+    {
+     "id": "figure",
+     "label": "Figure"
+    },
+    {
+     "id": "realism",
+     "label": "Realism"
+    },
+    {
+     "id": "negative",
+     "label": "Never add"
+    }
+   ],
+   "vars": [
+    {
+     "name": "name",
+     "description": "her name",
+     "sample": "Demo model"
+    },
+    {
+     "name": "look",
+     "description": "her written look",
+     "sample": "young woman, shoulder-length dark brown hair, brown eyes, light olive skin"
+    },
+    {
+     "name": "refCount",
+     "description": "how many images of her are sent",
+     "sample": "3"
+    },
+    {
+     "name": "lora",
+     "description": "\" + LoRA demo_v2 (photo)\" or empty",
+     "sample": ""
+    },
+    {
+     "name": "outfit",
+     "description": "the outfit",
+     "sample": "green set"
+    },
+    {
+     "name": "style",
+     "description": "the house style: camera feel (unless the shot has its own camera) and realism (script \"House style\")",
+     "sample": "realistic smartphone photo, natural skin texture, true-to-life colour, no beauty filter, no AI gloss"
+    },
+    {
+     "name": "never",
+     "description": "her never-add list plus the base list",
+     "sample": "tattoos, rings, logos, extra fingers, warped jewellery"
+    },
+    {
+     "name": "angle",
+     "description": "body · front …",
+     "sample": "body · front"
+    },
+    {
+     "name": "framing",
+     "description": "full body, facing the camera …",
+     "sample": "full body, facing the camera"
+    },
+    {
+     "name": "body",
+     "description": "which image shows her figure",
+     "sample": "her body photo (image 3)"
+    },
+    {
+     "name": "faces",
+     "description": "her face close-ups sent",
+     "sample": "image 2 (face, front), image 3 (face ¾)"
+    },
+    {
+     "name": "bodies",
+     "description": "\"Images 4–5\"",
+     "sample": "Images 4–5"
+    }
+   ],
+   "blocks": [
+    "shoot.identity",
+    "sheet.retake",
+    "sheet.retake.bodies",
+    "shoot.style",
+    "outfit.figure",
+    "sheet.realism",
+    "shoot.never"
+   ],
+   "variants": [],
+   "rules": [
+    {
+     "id": "identity",
+     "label": "Who she is",
+     "target": "identity",
+     "when": [],
+     "block": "shoot.identity",
+     "locked": true
+    },
+    {
+     "id": "task",
+     "label": "Retake (edit of image 1)",
+     "target": "task",
+     "when": [],
+     "block": "sheet.retake",
+     "locked": true
+    },
+    {
+     "id": "bodies",
+     "label": "Her other angles (proportions)",
+     "target": "bodies",
+     "when": [
+      {
+       "input": "bodies",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "sheet.retake.bodies"
+    },
+    {
+     "id": "style",
+     "label": "House style",
+     "target": "style",
+     "when": [],
+     "block": "shoot.style"
+    },
+    {
+     "id": "figure",
+     "label": "Her figure (body shape), on a body photo",
+     "target": "figure",
+     "when": [
+      {
+       "input": "angle",
+       "op": "in",
+       "value": [
+        "front",
+        "tq",
+        "side",
+        "back"
+       ]
+      }
+     ],
+     "block": "outfit.figure",
+     "locked": true
+    },
+    {
+     "id": "realism",
+     "label": "Sheet realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "sheet.realism",
+     "locked": true
+    },
+    {
+     "id": "never",
+     "label": "Never add",
+     "target": "negative",
+     "when": [],
+     "block": "shoot.never",
+     "locked": true
+    }
+   ],
+   "defaultRules": [
+    {
+     "id": "identity",
+     "label": "Who she is",
+     "target": "identity",
+     "when": [],
+     "block": "shoot.identity",
+     "locked": true
+    },
+    {
+     "id": "task",
+     "label": "Retake (edit of image 1)",
+     "target": "task",
+     "when": [],
+     "block": "sheet.retake",
+     "locked": true
+    },
+    {
+     "id": "bodies",
+     "label": "Her other angles (proportions)",
+     "target": "bodies",
+     "when": [
+      {
+       "input": "bodies",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "sheet.retake.bodies"
+    },
+    {
+     "id": "style",
+     "label": "House style",
+     "target": "style",
+     "when": [],
+     "block": "shoot.style"
+    },
+    {
+     "id": "figure",
+     "label": "Her figure (body shape), on a body photo",
+     "target": "figure",
+     "when": [
+      {
+       "input": "angle",
+       "op": "in",
+       "value": [
+        "front",
+        "tq",
+        "side",
+        "back"
+       ]
+      }
+     ],
+     "block": "outfit.figure",
+     "locked": true
+    },
+    {
+     "id": "realism",
+     "label": "Sheet realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "sheet.realism",
+     "locked": true
     },
     {
      "id": "never",
@@ -3097,6 +3528,11 @@
      "name": "framing",
      "description": "full body, facing the camera …",
      "sample": "full body, facing the camera"
+    },
+    {
+     "name": "body",
+     "description": "which image shows her figure",
+     "sample": "her body photo (image 3)"
     },
     {
      "name": "variation",
