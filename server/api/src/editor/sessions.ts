@@ -23,6 +23,8 @@ import { sourceMatteCandidates, stripSourceMattes } from './repair.js';
 import { maskNotices } from './maskNotice.js';
 
 type Session = typeof editSessions.$inferSelect;
+/** An Edit template's paid cut-out (editTemplateLibrary.ts), carried on its pending request and its job. */
+export type TemplateMatte = { templateId: string; name?: string; reveal?: number; remove?: string[]; tracks?: string[]; layer?: { clip: string; name: string; aboveText: boolean } };
 type OpRow = typeof editOps.$inferSelect;
 /** A change without its patch and inverse (what the history and the events show). */
 type OpEntry = Omit<OpRow, 'patch' | 'inverse'>;
@@ -301,6 +303,24 @@ export class EditSessions {
       ...(rb ? { rebased: { from: base, over: rb.over, note: `Applied on top of revision ${s.revision}: the changes since your revision ${base} (${rb.over.join(' · ')}) touch other parts of the edit` } } : {}),
       ...(notice && r.entry ? { notice, undoEntryId: r.entry.id, tell: 'Say this to the person in one plain line (their app shows it with Undo; undo_edit with this entryId reverts exactly it).' } : {}) };
   }
+  /** A project checked like any change (size, the reference rules, the session's take). */
+  checkProject(p: M.EditProject, takeId?: string) { return this.check(p, takeId); }
+  /**
+   * A whole new project made on the server from the current one (an Edit template's expansion, editTemplateLibrary.ts):
+   * validated, held to the playbook when it is Claude's, committed as one undoable change. `baseRevision`, when sent,
+   * must be the current revision (the expansion was made from it).
+   */
+  async commitProject(u: AuthUser, id: string, b: { baseRevision?: number; from: number; project: M.EditProject; label: string; author: 'claude' | { device?: unknown }; meta?: Record<string, unknown> }) {
+    const s = await this.row(u, id);
+    if (s.revision !== b.from || (b.baseRevision !== undefined && b.baseRevision !== s.revision)) throw await this.stale(id, b.baseRevision ?? b.from);
+    if (b.author === 'claude') this.limit(id);
+    await this.linkUploads(s.studioId, b.project);
+    this.check(b.project, s.takeId);
+    if (b.author === 'claude') await (await import('../recreate/playbook.js')).guardClaudeChange(this.ctx, u, s.project as M.EditProject, b.project);
+    const r = await this.commit(s, b.project, { author: b.author === 'claude' ? 'claude' : this.author(b.author.device), kind: 'edit', label: b.label, ...(b.meta ? { meta: b.meta } : {}) });
+    const safe = newSafeIssues(s.project as M.EditProject, b.project, this.preview(id));
+    return { session: r.session, revision: r.session.revision, entry: r.entry ? this.entryView(r.entry) : null, durationSec: M.durationSec(b.project), ...(safe ? { safeAreaWarnings: safe } : {}) };
+  }
   private limit(id: string) {
     const now = Date.now(), list = (this.rate.get(id) ?? []).filter(t => now - t < 60_000);
     if (list.length >= SESSION_LIMITS.claudeOpsPerMin) throw new ApiError(429, 'rate_limited', 'Too many changes in a minute · slow down');
@@ -442,8 +462,17 @@ export class EditSessions {
     const list = s.pending as Pending[];
     const p = list.find(x => x.id === pid);
     if (!p || p.status !== 'waiting') throw notFound('Waiting request');
-    if (b.approve !== true) p.status = 'declined';
-    else if (p.kind === 'recreate_fill') {
+    const tpl = p.args.template as TemplateMatte | undefined;
+    if (b.approve === true && typeof p.args.maxUsd === 'number') {
+      // An Edit template's cut-out (editTemplateLibrary.ts): never more than the price on the button the owner pressed.
+      const now = await editorAi(this.ctx).estimate(u, p.args);
+      if (now.usd > p.args.maxUsd + 1e-9) throw new ApiError(409, 'price_changed', `This now costs $${now.usd.toFixed(2)}, more than the $${p.args.maxUsd.toFixed(2)} shown · apply the template again to see the new price`);
+    }
+    if (b.approve !== true) {
+      p.status = 'declined';
+      // A template's copies waiting for this cut-out come back out (they were hidden until it arrived).
+      if (tpl?.remove?.length) await this.dropTemplateItems(s, tpl);
+    } else if (p.kind === 'recreate_fill') {
       // Workstream 1 (Recreate this edit): a missing slot filled with a Suite shot. An ordinary job with its own events.
       const { recreateOf } = await import('../recreate/references.js');
       const r = await recreateOf(this.ctx).fillSlot(u, String(p.args.referenceId), String(p.args.slotId), p.args.body);
@@ -457,8 +486,8 @@ export class EditSessions {
     return p;
   }
   /** Job → session: when a job Claude started (or the owner approved) finishes, its result is applied as Claude's change. */
-  private watch = new Map<string, { sessionId: string; studioId: string; ownerId: string; kind: string; itemId?: string; reasons?: string[]; label: string }>();
-  track(jobId: string, w: { sessionId: string; studioId: string; ownerId: string; kind: string; itemId?: string; reasons?: string[]; label: string }) { this.watch.set(jobId, w); }
+  private watch = new Map<string, { sessionId: string; studioId: string; ownerId: string; kind: string; itemId?: string; reasons?: string[]; label: string; template?: TemplateMatte }>();
+  track(jobId: string, w: { sessionId: string; studioId: string; ownerId: string; kind: string; itemId?: string; reasons?: string[]; label: string; template?: TemplateMatte }) { this.watch.set(jobId, w); }
   private async jobFinished(jobId: string, state: string, result: Record<string, unknown> | null) {
     let w = this.watch.get(jobId);
     if (!w) { // approved from the app: find it in a session's pending list (only the session that has it, without its project)
@@ -467,7 +496,7 @@ export class EditSessions {
       const s = rows.find(r => (r.pending as Pending[]).some(p => p.jobId === jobId));
       const p = s && (s.pending as Pending[]).find(x => x.jobId === jobId);
       if (!s || !p) return;
-      w = { sessionId: s.id, studioId: s.studioId, ownerId: s.ownerId, kind: p.kind, itemId: p.args.itemId as string | undefined, reasons: p.args.reasons as string[] | undefined, label: p.label };
+      w = { sessionId: s.id, studioId: s.studioId, ownerId: s.ownerId, kind: p.kind, itemId: p.args.itemId as string | undefined, reasons: p.args.reasons as string[] | undefined, label: p.label, template: p.args.template as TemplateMatte | undefined };
       p.status = state === 'done' ? 'done' : 'failed';
       await this.ctx.db.update(editSessions).set({ pending: s.pending }).where(eq(editSessions.id, s.id));
       this.emit(s, { op: 'pending', pending: p });
@@ -475,7 +504,11 @@ export class EditSessions {
     this.watch.delete(jobId);
     const [s] = await this.ctx.db.select().from(editSessions).where(eq(editSessions.id, w.sessionId));
     if (!s) return;
-    if (state !== 'done' || !result) { await this.log(s, `${w.label} didn't finish`); return; }
+    if (state !== 'done' || !result) {
+      await this.log(s, `${w.label} didn't finish`);
+      if (w.template?.remove?.length) await this.dropTemplateItems(s, w.template).catch(() => {});
+      return;
+    }
     try {
       const next = this.applyResult(s.project as M.EditProject, { ...w, jobId }, result);
       if (!next) { await this.log(s, `${w.label}: nothing to change`); return; }
@@ -488,6 +521,19 @@ export class EditSessions {
       await this.log(s, `${w.label}: couldn't apply (the edit changed)`);
     }
   }
+  /** Takes an Edit template's waiting copies out again (its cut-out was declined or failed), as one undoable change. */
+  private async dropTemplateItems(s0: Pick<Session, 'id'>, tpl: TemplateMatte) {
+    const [s] = await this.ctx.db.select().from(editSessions).where(eq(editSessions.id, s0.id));
+    if (!s) return;
+    const p = JSON.parse(JSON.stringify(s.project)) as M.EditProject, gone = new Set(tpl.remove);
+    let n = 0;
+    for (const t of p.tracks) { const before = t.items.length; t.items = t.items.filter(i => !gone.has(i.id)); n += before - t.items.length; }
+    // Tracks the template made and that are empty now go too.
+    p.tracks = p.tracks.filter((t, i) => i === 0 || t.items.length > 0 || !!t.caption || !(tpl.tracks ?? []).includes(t.id));
+    if (!n) return;
+    try { this.check(p, s.takeId); await this.commit(s, p, { author: 'claude', kind: 'edit', label: `Took ${tpl.name ?? 'the template'}'s cut-out copies back out` }); }
+    catch (e) { this.ctx.log.warn({ err: (e as Error).message, session: s.id }, 'removing a template\'s copies failed'); }
+  }
   /** The main source asset (the session's take) or the asset of `itemId`. */
   sourceAsset(p: M.EditProject, takeId: string, itemId?: string): M.Asset {
     if (itemId) {
@@ -498,7 +544,7 @@ export class EditSessions {
     if (!first && !p.assets.some(a => a.take === takeId && a.kind === 'video')) throw badRequest('The edit has no clip yet · add a video first');
     return p.assets.find(a => a.take === takeId && a.kind === 'video') ?? p.assets.find(a => a.id === first!.asset)!;
   }
-  applyResult(p0: M.EditProject, w: { kind: string; itemId?: string; reasons?: string[]; jobId?: string }, result: Record<string, unknown>): M.EditProject | null {
+  applyResult(p0: M.EditProject, w: { kind: string; itemId?: string; reasons?: string[]; jobId?: string; template?: TemplateMatte }, result: Record<string, unknown>): M.EditProject | null {
     const p: M.EditProject = JSON.parse(JSON.stringify(p0));
     const asset = this.sourceAsset(p, p.sourceTakeId, w.itemId);
     switch (w.kind) {
@@ -526,8 +572,29 @@ export class EditSessions {
       case 'matte': {
         const a = result.asset as { upload?: string; take?: string; durationSec?: number; url?: string } | undefined;
         if (!a) return null;
-        const id = `bg${p.assets.length + 1}`;
+        let n0 = p.assets.length + 1;
+        while (p.assets.some(x => x.id === `bg${n0}`)) n0++;
+        const id = `bg${n0}`;
         p.assets.push({ id, kind: 'video', ...(a.upload ? { upload: a.upload } : { take: a.take! }), durationSec: a.durationSec, ...(a.url ? { url: a.url } : {}) });
+        if (w.template && result.alpha) {
+          // An Edit template's cut-out: the subject as a layer of its clip (text behind it), or the alpha of the
+          // template's hidden copy, which then shows at its own opacity.
+          const tp = w.template;
+          if (tp.layer) {
+            const clip = M.mainTrack(p).items.find(c => c.id === tp.layer!.clip) as M.VideoClip | undefined;
+            if (!clip || (clip.layers?.length ?? 0) >= M.LAYER_LIMITS.maxLayers) return null;
+            const used = new Set((clip.layers ?? []).map(l => l.id));
+            let k = 1;
+            while (used.has(`l${k}`)) k++;
+            clip.layers = [...(clip.layers ?? []), { id: `l${k}`, name: tp.layer.name.slice(0, M.LAYER_LIMITS.maxName), matte: id, ...(tp.layer.aboveText ? { aboveText: true } : {}) }];
+            return p;
+          }
+          const copy = p.tracks.flatMap(t => t.items).find(it => it.id === w.itemId) as M.VideoClip | undefined;
+          if (!copy) return null;
+          copy.alphaMatte = { asset: id };
+          if ((tp.reveal ?? 1) >= 1) delete copy.opacity; else copy.opacity = tp.reveal;
+          return p;
+        }
         for (const t of p.tracks) for (const it of t.items as M.VideoClip[]) if (it.asset === asset.id && (t.kind === 'main' || t.kind === 'video') && (!w.itemId || it.id === w.itemId)) {
           // workstream 1: an alpha matte on the original clip (fix 1, and tap to keep); older results were green composites.
           if (result.alpha) { it.alphaMatte = { asset: id }; delete it.chroma; }
