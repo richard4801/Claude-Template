@@ -168,7 +168,11 @@ final class FakePipelineSkill: @unchecked Sendable {
     private var history: [(PipelineVersion, Snap)] = []
     private var pending: [PipelineProposal] = []
 
-    private init() {
+    private init() { reset() }
+
+    /// Back to the demo's starting point (version 3, pp_demo1 waiting): the Settings click-through presses Undo, Roll back,
+    /// Approve and Decline on the same shared demo (run 705), so the review step starts from here, whatever ran before.
+    func reset() {
         let rules = ["Never time from the picture. A shot starts on a hit. [proven]", "One stage per note: count the notes before choosing panels. [proven]",
                      "Before building an effect to hide a weak cut, ask whether the shot should be there at all. [trial]"]
         let pages = [PipelinePage(name: "cutouts", title: "Cut-outs", status: "proven", score: 4, repeatable: nil, uses: 4),
@@ -178,13 +182,16 @@ final class FakePipelineSkill: @unchecked Sendable {
         var v2 = v1; v2.style.append(PipelineStyleEntry(id: "hs_2", text: "Avoid: “too fast” (the intro cuts)", times: 1))
         var v3 = v2; v3.pages.append(PipelinePage(name: "whip-pan", title: "Whip pan between moving shots", status: "trial", score: 1, repeatable: nil, uses: 1))
         let t = Date().timeIntervalSince1970 * 1000
-        history = [
+        let h: [(PipelineVersion, Snap)] = [
             (PipelineVersion(version: 1, changelog: [PipelineChangelogLine(what: "Version 1 from the Icon edit", why: "first use", editId: nil, kind: "seed")], by: "seed", createdAt: t - 86_400_000 * 2), v1),
             (PipelineVersion(version: 2, changelog: [PipelineChangelogLine(what: "House style: “Avoid: “too fast” (the intro cuts)”", why: "owner reaction", editId: "es_demo1", kind: "small")], by: "claude", createdAt: t - 86_400_000), v2),
             (PipelineVersion(version: 3, changelog: [PipelineChangelogLine(what: "New trial technique “Whip pan between moving shots” (whip-pan)", why: "worked in this edit", editId: "es_demo2", kind: "small")], by: "claude", createdAt: t - 3_600_000), v3),
         ]
-        pending = [PipelineProposal(id: "pp_demo1", op: "core_remove", why: "the owner cut that shot instead of hiding it twice", reason: "changes a core rule", editId: "es_demo2",
-                                    status: "pending", target: "core", before: rules[2], after: "", version: nil)]
+        locked {
+            history = h
+            pending = [PipelineProposal(id: "pp_demo1", op: "core_remove", why: "the owner cut that shot instead of hiding it twice", reason: "changes a core rule", editId: "es_demo2",
+                                        status: "pending", target: "core", before: rules[2], after: "", version: nil)]
+        }
     }
     private func locked<T>(_ f: () throws -> T) rethrows -> T { lock.lock(); defer { lock.unlock() }; return try f() }
     private func add(_ snap: Snap, _ line: PipelineChangelogLine, by: String) -> Int {
@@ -239,6 +246,8 @@ final class FakePipelineSkill: @unchecked Sendable {
 }
 
 extension FakeClaudeAPI: PipelineSkillAPI {
+    /// Review mode: the demo skill back to version 3 with one change waiting.
+    public func pipelineDemoReset() { FakePipelineSkill.shared.reset() }
     public func pipelineSkill() async throws -> PipelineSkillState { FakePipelineSkill.shared.state() }
     public func pipelineVersions() async throws -> [PipelineVersion] { FakePipelineSkill.shared.versions() }
     public func pipelineDiff(_ version: Int) async throws -> PipelineDiff { try FakePipelineSkill.shared.diff(version) }
