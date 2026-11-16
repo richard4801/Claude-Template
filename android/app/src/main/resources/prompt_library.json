@@ -618,6 +618,26 @@
    "updatedBy": null
   },
   {
+   "key": "outfit.figure",
+   "group": "outfits",
+   "title": "Figure lock",
+   "description": "Every outfit picture (front and each angle, new shots and edits): her body shape stays as in her body photos.",
+   "kind": "text",
+   "default": "Figure: her body shape and proportions (bust, waist, hips and buttocks) exactly as in {body}, from this angle too. The clothes fit her figure; never slim, flatten or reshape her body.",
+   "current": "Figure: her body shape and proportions (bust, waist, hips and buttocks) exactly as in {body}, from this angle too. The clothes fit her figure; never slim, flatten or reshape her body.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "body",
+     "description": "which image shows her figure: \"her body photo (image 3)\", \"the last image\" …",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "outfit.seed",
    "group": "outfits",
    "title": "Outfit seed line",

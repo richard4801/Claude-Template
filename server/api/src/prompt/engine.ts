@@ -4,7 +4,7 @@
 import { DEFAULT_TEXTS, fill, listOf, type PromptTexts } from './library.js';
 export type { PromptTexts };
 
-export type LayerKey = 'identity' | 'outfit' | 'task' | 'scene' | 'camera' | 'light' | 'direction' | 'reference' | 'style' | 'negative' | 'seed';
+export type LayerKey = 'identity' | 'outfit' | 'task' | 'figure' | 'scene' | 'camera' | 'light' | 'direction' | 'reference' | 'style' | 'negative' | 'seed';
 export type ShootGuide = 'pose' | 'look' | 'scene';
 export const SHOOT_GUIDES: { id: ShootGuide; label: string }[] = [{ id: 'pose', label: 'Pose & framing' }, { id: 'look', label: 'Look & colour' }, { id: 'scene', label: 'Scene' }];
 /** A reference image of a shoot, as sent: its 1-based number among the images sent and what it guides. */
@@ -12,7 +12,9 @@ export type SentRef = { index: number; guides: ShootGuide[] };
 
 export type Identity = { name: string; look: string; referenceCount?: number; neverAdd?: string[]; lora?: string | null };
 export type OutfitSource = 'reference-set' | 'described' | 'product-photo';
-export type OutfitSpec = { name: string; description?: string | null; source?: OutfitSource };
+export type OutfitSpec = { name: string; description?: string | null; source?: OutfitSource;
+  /** An outfit made from a reference photo, worn in a shoot or template: its own words (a new hairstyle, piercing, make-up). */
+  extra?: string | null };
 export type CameraSpec = { shot: string; lensMm: number; aperture: string };
 export type ShootSpec = {
   identity: Identity; outfit: OutfitSpec; scene?: string | null; camera?: CameraSpec; light?: string;
@@ -200,8 +202,10 @@ export function outfitKeepParts(k: OutfitKeep | null | undefined) {
 }
 export const outfitKeepFront = (k: OutfitKeep, outfit: string, t: PromptTexts = DEFAULT_TEXTS) => {
   const p = outfitKeepParts(k);
-  return fill(t['outfit.keep.front']!, { keep: p.keep, replace: p.replace, outfit: trimEndChars(outfit.trim(), '.') });
+  // Her figure is the one in the base photo it edits (the first image).
+  return `${fill(t['outfit.keep.front']!, { keep: p.keep, replace: p.replace, outfit: trimEndChars(outfit.trim(), '.') })}\n${outfitFigure('the first image', t)}`;
 };
+/** Added to an angle's edit when pieces are kept (the edit prompt already ends with her figure). */
 export const outfitKeepAngle = (k: OutfitKeep, t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.keep.angle']!, { keep: outfitKeepParts(k).keep });
 
 /** The outfit's face close-ups, in the order stored on the outfit (`outfit.faces`): front, ¾, side. */
@@ -209,7 +213,9 @@ export const OUTFIT_FACES = [{ key: 'face', label: 'Face · front', words: 'face
   { key: 'profile', label: 'Face · side', words: 'face close-up in profile (side view)' }] as const;
 export const outfitFacePrompt = (i: number, t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.face']!, { angle: OUTFIT_FACES[i]!.words });
 
-export const outfitSet = (id: Identity, outfit: OutfitSpec, seed = seedFor(outfit.name), t: PromptTexts = DEFAULT_TEXTS) => OUTFIT_ANGLES.map(a => outfitAngle(id, outfit, a, seed, t));
+/** The four angles. `bodies[i]`: which image shows her figure for angle i ("her body photo (image 3)"); default her body photos. */
+export const outfitSet = (id: Identity, outfit: OutfitSpec, seed = seedFor(outfit.name), t: PromptTexts = DEFAULT_TEXTS, bodies: (string | null | undefined)[] = []) =>
+  OUTFIT_ANGLES.map((a, i) => outfitAngle(id, outfit, a, seed, t, bodies[i] ?? undefined));
 
 
 // ---- Replicate (hosted MiniMax H3): a SHORT prompt (plans/backend.md "Replicate").
@@ -241,5 +247,5 @@ export function imageRange(ns: number[]): string {
 
 // ---- Prompt scripts (plans/prompt-scripts.md): every builder runs its script. Same signatures and, at default
 // settings, the same prompts as before (test/prompt-scripts.test.ts checks them against test/legacy/).
-import { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine, houseStyle } from './scripts/builders.js';
-export { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, videoSwap, replicateSwap, collageLine, houseStyle };
+import { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, outfitFigure, videoSwap, replicateSwap, collageLine, houseStyle } from './scripts/builders.js';
+export { photoshoot, characterSheetShot, outfitAngle, outfitEditPrompt, outfitFigure, videoSwap, replicateSwap, collageLine, houseStyle };

@@ -17,7 +17,7 @@ import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
 import { cameraValues, characterSheetShot, collageLine, outfitEditPrompt, outfitKeepAngle, outfitKeepFront, outfitKeepParts, outfitSet, outfitFacePrompt, OUTFIT_FACES, photoshoot, sheetAngle, shootChoices, loraToken, OUTFIT_ANGLES } from '../prompt/engine.js';
 import { BODY_SLOTS, bodySlotOf, identityRefs, IDENTITY_REFS_MAX, IDENTITY_REFS_MIN, type IdentityRef } from '../images/identity.js';
-import { applySent, sentImagesOf, sentOfBody, whyOf, type SentView } from '../images/sent.js';
+import { applySent, sameImage, sentImagesOf, sentOfBody, whyOf, type Resolved, type SentView } from '../images/sent.js';
 import { createInvite, revokeSession, signin, signup } from '../auth/auth.js';
 import { accountView, PLATFORMS, platformOf } from '../services/posts.js';
 import { linkChat, takeView, takeViewCols } from '../services/jobs.js';
@@ -336,6 +336,32 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     };
     return { which, perImage: per, cost: per * which.length, run };
   };
+  // Her figure in every outfit picture (owner 2026-11-16: "always keep her shape, from every angle").
+  const ANGLE_WORDS: Record<string, string> = { front: 'front', tq: 'three-quarter', side: 'side', back: 'back' };
+  /** The edit's note when her body photo of this angle is sent last: her figure from it, never its clothes. */
+  const BODY_LAST = 'The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.';
+  /**
+   * Which sent image shows her figure for one angle, as the prompt names it: her body photo of that angle ("her side body
+   * photo (image 3)"), else whichever body photo the plan sends; undefined (the prompt says "her body photos") when none.
+   */
+  const figureOf = (plan: { images: ImageRef[]; panels?: { label: string; role: string }[]; sheet?: boolean }, body: ImageRef | null | undefined, slot: string) => {
+    const at = (i: number) => `${plan.sheet ? 'panel' : 'image'} ${i + 1}`;
+    const exact = body ? plan.images.findIndex(x => sameImage(x, body)) : -1;
+    if (exact >= 0) return `her ${ANGLE_WORDS[slot] ?? ''} body photo (${at(exact)})`.replace('  ', ' ');
+    const any = (plan.panels ?? []).findIndex(p => p.role === 'person' && p.label.startsWith('body'));
+    return any >= 0 ? `her body photo (${at(any)})` : undefined;
+  };
+  /**
+   * A chosen image list (images/sent.ts) is the same for all four angles: in each angle's copy, her body photo in it is
+   * swapped for her body photo of THAT angle (front→front, ¾→tq, side→side, back→back), so her figure matches from every
+   * side (plans/outfit-head-looks.md §1). A list without a body photo, or that already has this angle's, stays as chosen.
+   */
+  const sentForAngle = (r: Resolved | null, bodies: (ImageRef | null | undefined)[], body: ImageRef | null | undefined): Resolved | null => {
+    if (!r?.list || r.reset || !body || r.list.some(x => sameImage(x.image, body))) return r;
+    const k = r.list.findIndex(x => x.role === 'person' && bodies.some(b => b && sameImage(x.image, b)));
+    if (k < 0) return r;
+    return { ...r, list: r.list.map((x, i) => (i === k ? { ...x, image: body } : x)) };
+  };
   const createOutfit = async (req: { user: AuthUser; body: unknown }) => {
     const b = parse(z.object({ modelId: z.string(), name: z.string().max(80).optional(), mode: z.enum(['describe', 'photo', 'own']).optional(),
       description: z.string().max(1000).optional(), /* "My own set": one per angle, in order front, ¾, side, back (null = skipped, made later from the front) */
@@ -365,7 +391,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     // her base, it replaces the references of the front edit (the base photo itself is chosen with the base picker).
     const sent = mode === 'own' ? null : await sentFor(req.user, req.body, `outfit:${m.id}`);
     const keepingAsked = mode !== 'own' && !!b.base && outfitKeepParts({ keep: b.base.keep, note: b.base.note }).keeping;
-    const anglePlans = mode === 'own' ? null : await Promise.all(angleIds.map(ids => ctx.images.shotPlan(req.user.studioId, ids, [], 1, b.imageEngine, stepModels, keepingAsked ? null : sent)));
+    const bodySlots = BODY_SLOTS.map(k => slotOf(k) ?? null);
+    const anglePlans = mode === 'own' ? null : await Promise.all(angleIds.map((ids, i) => ctx.images.shotPlan(req.user.studioId, ids, [], 1, b.imageEngine, stepModels,
+      keepingAsked ? null : sentForAngle(sent, bodySlots, bodySlots[i]))));
     const outfitPlan = anglePlans?.[0] ?? null;
     const outfitRefs = outfitPlan?.images ?? [], outfitPanels = outfitPlan?.panels ?? [];
     // A custom model makes all four angles as new shots (no edits); else a front shot and three edits of it.
@@ -398,7 +426,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const identity = await identityOf(m, outfitPlan ? sentOf(outfitIds, outfitPlan) : personCount(outfitIds));
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
     const texts = await ctx.prompts.texts(req.user.studioId);
-    const set = outfitSet(identity, spec, undefined, texts);
+    // Each angle's prompt names the image that shows her figure from that angle.
+    const set = outfitSet(identity, spec, undefined, texts, BODY_SLOTS.map((k, i) => anglePlans?.[i] ? figureOf(anglePlans[i]!, bodySlots[i], k) : undefined));
     const [o] = await db.insert(outfits).values({ id, studioId: req.user.studioId, modelId: m.id, name: spec.name, mode, description: b.description ?? '',
       angles: [null, null, null, null], state: 'generating', prompt: keeping ? outfitKeepFront(keep!, b.description?.trim() || (productIds.length ? 'the clothes in the product photo' : spec.name), texts) : set[0]!.text, seed: set[0]!.seed ?? null, createdBy: req.user.id, createdAt: Date.now() }).returning();
     emitOutfit(o!);
@@ -428,7 +457,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
             angles = [front];
             for (const [i, a] of OUTFIT_ANGLES.slice(1).entries()) {
               const body = baseSet[i + 1] ?? null; // a missing angle uses the front (the edit starts from it)
-              const prompt = outfitEditPrompt(a, texts) + (body ? ' ' + outfitKeepAngle(k, texts) : '');
+              const prompt = outfitEditPrompt(a, texts, body ? 'the last image' : 'the first image', body ? outfitKeepAngle(k, texts) : '');
               // One angle that fails stays empty (the set keeps what was made; Redo makes it later).
               angles.push(await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
                 editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })
@@ -452,7 +481,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
             for (const [i, a] of OUTFIT_ANGLES.slice(1).entries()) {
               // Her face, then her own body photo from this angle: the edit takes her figure from it, never its clothes.
               const body = angleBody(BODY_SLOTS[i + 1]!);
-              const prompt = outfitEditPrompt(a, texts) + (body ? ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.' : '');
+              const prompt = outfitEditPrompt(a, texts, body ? 'the last image' : 'the first image', body ? BODY_LAST : '');
               angles.push(await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: id, override: b.imageEngine, models: stepModels, bill,
                 editOf: front, refs: [slot('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: set[0]!.seed ?? undefined } })
                 .then(r => r.images[0] ?? null, angleFailed(i + 1)));
@@ -543,7 +572,8 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!newShot(i)) return null;
       const frontRef = o.angles[0] ? [{ image: o.angles[0], label: 'outfit photo', role: 'product' as const }] : [];
       const ids = await idRefs(user.studioId, { ...m, identityBodySlot: BODY_SLOTS[i]! }, null, { extra: frontRef });
-      return { ids, plan: await ctx.images.shotPlan(user.studioId, ids, [], 1, b.imageEngine, stepModels, fillSent) };
+      const bodies = BODY_SLOTS.map(k => slotOf(k) ?? null);
+      return { ids, plan: await ctx.images.shotPlan(user.studioId, ids, [], 1, b.imageEngine, stepModels, sentForAngle(fillSent, bodies, bodies[i])) };
     }));
     const editCost = await ctx.images.editCost(user.studioId, stepModels);
     const faceJob = await outfitFaces(user, m, { imageEngine: b.imageEngine, stepModels, only: wantFaces });
@@ -566,14 +596,15 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           const a = OUTFIT_ANGLES[i]!, body = angleBody(BODY_SLOTS[i]!);
           if (plans[k]) {
             const { ids, plan } = plans[k]!;
-            const spec = { name: o.name, description: o.description || undefined, source: 'reference-set' as const };
-            const p = outfitSet(await identityOf(m, sentOf(ids, plan)), spec, undefined, texts)[i]!;
+            const spec = { name: o.name, description: o.description || undefined, source: 'reference-set' as const, extra: o.mode === 'photo' ? o.description : undefined };
+            const figure = BODY_SLOTS.map((k, j) => (j === i ? figureOf(plan, slotOf(k), k) : undefined));
+            const p = outfitSet(await identityOf(m, sentOf(ids, plan)), spec, undefined, texts, figure)[i]!;
             made.set(i, await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
               req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0] ?? null, remakeFailed(i)));
             if (i === 0 && made.get(0)) front = made.get(0)!;
           } else {
             if (!front) continue; // no front to edit from: this angle stays empty
-            const prompt = outfitEditPrompt(a, texts) + (body ? ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.' : '');
+            const prompt = outfitEditPrompt(a, texts, body ? 'the last image' : 'the first image', body ? BODY_LAST : '');
             made.set(i, await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, bill,
               editOf: front, refs: [slotOf('face'), body].filter((r): r is ImageRef => !!r), req: { prompt, width: 768, height: 1024, count: 1, seed: o.seed ?? undefined } }).then(r => r.images[0] ?? null, remakeFailed(i)));
           }
@@ -885,7 +916,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const [o] = await db.select().from(outfits).where(and(eq(outfits.id, id), eq(outfits.studioId, u.studioId)));
     return o;
   };
-  const outfitSpec = (o?: typeof outfits.$inferSelect) => o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' as const : 'reference-set' as const } : null;
+  // An outfit made from a reference photo keeps its own words (a new hairstyle, piercing, make-up) in every shot with it.
+  const outfitSpec = (o?: typeof outfits.$inferSelect) => o ? { name: o.name, description: o.description, source: o.mode === 'describe' && !o.angles.some(Boolean) ? 'described' as const : 'reference-set' as const,
+    extra: o.mode === 'photo' ? o.description : undefined } : null;
   /** Her images for a shot (plans/api.md "Identity images"): face, face ¾, one body image, the outfit's front, a product photo. */
   const shootRefs = (u: AuthUser, m: typeof models.$inferSelect, o?: typeof outfits.$inferSelect, product?: ImageRef | null) =>
     idRefs(u.studioId, m, o, { outfit: !!o, extra: product ? [{ image: product, label: 'product', role: 'product' }] : [] });

@@ -552,6 +552,13 @@
      "sample": false
     },
     {
+     "name": "outfitWords",
+     "label": "Outfit has its own words",
+     "description": "An outfit made from a reference photo has its own words (a new hairstyle, piercing, make-up): they follow the outfit line.",
+     "type": "bool",
+     "sample": false
+    },
+    {
      "name": "noGrade",
      "label": "No grade",
      "description": "No grade was picked and the shot has its own camera, lens or look: the default grade is left out.",
@@ -569,6 +576,12 @@
     {
      "id": "outfit",
      "label": "Outfit",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "outfitExtra",
+     "label": "Outfit · its own words",
      "kind": "system",
      "pick": "first"
     },
@@ -637,6 +650,10 @@
     {
      "id": "outfit",
      "label": "Outfit"
+    },
+    {
+     "id": "outfitExtra",
+     "label": "Outfit · its own words"
     },
     {
      "id": "scene",
@@ -742,6 +759,7 @@
     "shoot.outfit.described",
     "shoot.outfit.product",
     "shoot.outfit.set",
+    "shoot.outfit.product.extra",
     "shoot.scene",
     "shoot.camera",
     "shoot.camera.wide",
@@ -805,6 +823,19 @@
      "target": "outfit",
      "when": [],
      "block": "shoot.outfit.set"
+    },
+    {
+     "id": "outfit.extra",
+     "label": "The outfit’s own words (made from a photo)",
+     "target": "outfitExtra",
+     "when": [
+      {
+       "input": "outfitWords",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "shoot.outfit.product.extra"
     },
     {
      "id": "scene",
@@ -1004,6 +1035,19 @@
      "target": "outfit",
      "when": [],
      "block": "shoot.outfit.set"
+    },
+    {
+     "id": "outfit.extra",
+     "label": "The outfit’s own words (made from a photo)",
+     "target": "outfitExtra",
+     "when": [
+      {
+       "input": "outfitWords",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "shoot.outfit.product.extra"
     },
     {
      "id": "scene",
@@ -1338,6 +1382,13 @@
      "description": "The template’s camera words name a camera that is not a phone, or its style is cinematic: the camera feel is left out of the house style.",
      "type": "bool",
      "sample": false
+    },
+    {
+     "name": "outfitWords",
+     "label": "Outfit has its own words",
+     "description": "An outfit made from a reference photo has its own words (a new hairstyle, piercing, make-up): they follow the outfit line.",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -1350,6 +1401,12 @@
     {
      "id": "outfit",
      "label": "Outfit",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "outfitExtra",
+     "label": "Outfit · its own words",
      "kind": "system",
      "pick": "first"
     },
@@ -1431,6 +1488,10 @@
     {
      "id": "outfit",
      "label": "Outfit"
+    },
+    {
+     "id": "outfitExtra",
+     "label": "Outfit · its own words"
     },
     {
      "id": "scene",
@@ -1543,6 +1604,7 @@
     "shoot.identity",
     "shoot.outfit.described",
     "shoot.outfit.set",
+    "shoot.outfit.product.extra",
     "template.scene",
     "template.camera",
     "template.light",
@@ -1601,6 +1663,19 @@
       }
      ],
      "block": "shoot.outfit.set"
+    },
+    {
+     "id": "outfit.extra",
+     "label": "The outfit’s own words (made from a photo)",
+     "target": "outfitExtra",
+     "when": [
+      {
+       "input": "outfitWords",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "shoot.outfit.product.extra"
     },
     {
      "id": "scene",
@@ -1868,6 +1943,19 @@
       }
      ],
      "block": "shoot.outfit.set"
+    },
+    {
+     "id": "outfit.extra",
+     "label": "The outfit’s own words (made from a photo)",
+     "target": "outfitExtra",
+     "when": [
+      {
+       "input": "outfitWords",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "shoot.outfit.product.extra"
     },
     {
      "id": "scene",
@@ -2371,6 +2459,13 @@
       }
      ],
      "sample": "front"
+    },
+    {
+     "name": "outfitWords",
+     "label": "Outfit has its own words",
+     "description": "An outfit made from a reference photo has its own words (a new hairstyle, piercing, make-up): they follow the outfit line.",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -2387,8 +2482,20 @@
      "pick": "first"
     },
     {
+     "id": "outfitExtra",
+     "label": "Outfit · its own words",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
      "id": "task",
      "label": "Task",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "figure",
+     "label": "Figure",
      "kind": "system",
      "pick": "first"
     },
@@ -2422,8 +2529,16 @@
      "label": "Outfit"
     },
     {
+     "id": "outfitExtra",
+     "label": "Outfit · its own words"
+    },
+    {
      "id": "task",
      "label": "Task"
+    },
+    {
+     "id": "figure",
+     "label": "Figure"
     },
     {
      "id": "style",
@@ -2483,6 +2598,16 @@
      "name": "seed",
      "description": "the seed",
      "sample": "421337"
+    },
+    {
+     "name": "extra",
+     "description": "the outfit’s own words (made from a photo)",
+     "sample": "platinum blonde high ponytail, small silver nose stud"
+    },
+    {
+     "name": "body",
+     "description": "which image shows her figure for this angle",
+     "sample": "her body photo (image 3)"
     }
    ],
    "blocks": [
@@ -2490,7 +2615,9 @@
     "shoot.outfit.described",
     "shoot.outfit.product",
     "shoot.outfit.set",
+    "shoot.outfit.product.extra",
     "outfit.task",
+    "outfit.figure",
     "shoot.style",
     "shoot.never",
     "outfit.seed"
@@ -2539,11 +2666,32 @@
      "block": "shoot.outfit.set"
     },
     {
+     "id": "outfit.extra",
+     "label": "The outfit’s own words (made from a photo)",
+     "target": "outfitExtra",
+     "when": [
+      {
+       "input": "outfitWords",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "shoot.outfit.product.extra"
+    },
+    {
      "id": "task",
      "label": "Angle task",
      "target": "task",
      "when": [],
      "block": "outfit.task"
+    },
+    {
+     "id": "figure",
+     "label": "Her figure (body shape) as in her body photos",
+     "target": "figure",
+     "when": [],
+     "block": "outfit.figure",
+     "locked": true
     },
     {
      "id": "style",
@@ -2611,11 +2759,32 @@
      "block": "shoot.outfit.set"
     },
     {
+     "id": "outfit.extra",
+     "label": "The outfit’s own words (made from a photo)",
+     "target": "outfitExtra",
+     "when": [
+      {
+       "input": "outfitWords",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "shoot.outfit.product.extra"
+    },
+    {
      "id": "task",
      "label": "Angle task",
      "target": "task",
      "when": [],
      "block": "outfit.task"
+    },
+    {
+     "id": "figure",
+     "label": "Her figure (body shape) as in her body photos",
+     "target": "figure",
+     "when": [],
+     "block": "outfit.figure",
+     "locked": true
     },
     {
      "id": "style",
@@ -2649,13 +2818,19 @@
    "id": "outfit.edit",
    "group": "outfits",
    "title": "Outfit set · other angles",
-   "description": "The ¾, side and back of an outfit set, as edits of the front.",
+   "description": "The ¾, side and back of an outfit set, as edits of the front, then her figure.",
    "format": "lines",
    "inputs": [],
    "sections": [
     {
      "id": "prompt",
      "label": "Prompt",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "figure",
+     "label": "Figure",
      "kind": "system",
      "pick": "first"
     }
@@ -2665,11 +2840,27 @@
     {
      "id": "prompt",
      "label": "Prompt"
+    },
+    {
+     "id": "figure",
+     "label": "Figure"
     }
    ],
-   "vars": [],
+   "vars": [
+    {
+     "name": "angle",
+     "description": "full body three-quarter view …",
+     "sample": "full body three-quarter view"
+    },
+    {
+     "name": "body",
+     "description": "which image shows her figure from this angle",
+     "sample": "the last image"
+    }
+   ],
    "blocks": [
-    "outfit.edit"
+    "outfit.edit",
+    "outfit.figure"
    ],
    "variants": [],
    "rules": [
@@ -2679,6 +2870,14 @@
      "target": "prompt",
      "when": [],
      "block": "outfit.edit"
+    },
+    {
+     "id": "figure",
+     "label": "Her figure (body shape) as in her body photos",
+     "target": "figure",
+     "when": [],
+     "block": "outfit.figure",
+     "locked": true
     }
    ],
    "defaultRules": [
@@ -2688,6 +2887,14 @@
      "target": "prompt",
      "when": [],
      "block": "outfit.edit"
+    },
+    {
+     "id": "figure",
+     "label": "Her figure (body shape) as in her body photos",
+     "target": "figure",
+     "when": [],
+     "block": "outfit.figure",
+     "locked": true
     }
    ],
    "overridden": false,

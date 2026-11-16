@@ -63,6 +63,8 @@ export type Section = {
   layer?: string;
   /** Repeat the section once per item of this list input (one slot each); "item.<field>" in conditions, item fields as placeholders. */
   each?: string;
+  /** Joined onto this section's part (same line, same slot, with a space) when it has one; else a part of its own. */
+  attach?: string;
   /** Placeholder → value name for this section's blocks, when two blocks use the same placeholder name for different values. */
   alias?: Record<string, string>;
 };

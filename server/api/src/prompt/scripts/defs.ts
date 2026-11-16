@@ -44,6 +44,12 @@ const outfitRules = (): Rule[] => [
   R('outfit.product', 'Outfit from a product photo', 'outfit', 'shoot.outfit.product', [is('outfitSource', 'product')]),
   R('outfit.set', 'Outfit reference set', 'outfit', 'shoot.outfit.set'),
 ];
+/** A photo-made outfit's own words (a new hairstyle, piercing, make-up): one more sentence on the outfit line. */
+const OUTFIT_WORDS = bool('outfitWords', 'Outfit has its own words', 'An outfit made from a reference photo has its own words (a new hairstyle, piercing, make-up): they follow the outfit line.', false);
+const outfitExtraSection = (): Section => sec('outfitExtra', 'Outfit · its own words', { attach: 'outfit' });
+const outfitExtraRule = () => R('outfit.extra', 'The outfit’s own words (made from a photo)', 'outfitExtra', 'shoot.outfit.product.extra', [is('outfitWords', true)]);
+/** Her figure in every outfit picture (owner 2026-11-16): locked, so Presets off or a rule edit never drops it. */
+const figureRule = () => R('figure', 'Her figure (body shape) as in her body photos', 'figure', 'outfit.figure', [], { locked: true });
 const refSection = () => sec('reference', 'Reference images', { each: 'refs', pick: 'all', join: ' ' });
 const refRules = (): Rule[] => [
   R('refs.pose', 'Guides pose & framing', 'reference', 'refs.pose', [{ input: 'item.guides', op: 'has', value: 'pose' }]),
@@ -77,13 +83,13 @@ const houseStyle: Script = {
 const photoshoot: Script = {
   id: 'photoshoot', group: 'photoshoot', title: 'Photo', description: 'Every still of the Photo tool (no template).', format: 'lines',
   inputs: [PRESETS, bool('lockSeed', 'Lock look', 'Lock look is on (a fixed seed for her).', false), OUTFIT_SOURCE,
-    num('lens', 'Lens (mm)', 'The lens in mm.', 35), REFS, OWN_CAMERA,
+    num('lens', 'Lens (mm)', 'The lens in mm.', 35), REFS, OWN_CAMERA, OUTFIT_WORDS,
     bool('noGrade', 'No grade', 'No grade was picked and the shot has its own camera, lens or look: the default grade is left out.', false)],
-  sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), sec('scene', 'Scene'), sec('camera', 'Camera'), sec('light', 'Light'),
+  sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), outfitExtraSection(), sec('scene', 'Scene'), sec('camera', 'Camera'), sec('light', 'Light'),
     { id: 'direction', label: 'Direction from the user', kind: 'user', pick: 'first' }, refSection(), sec('style', 'Style'), sec('negative', 'Never add'), sec('seed', 'Seed')],
   values: [{ name: 'lensNote', label: 'Lens note' }],
   rules: [
-    identity(), ...outfitRules(),
+    identity(), ...outfitRules(), outfitExtraRule(),
     R('scene', 'The place', 'scene', 'shoot.scene', [], { optional: true }),
     R('camera', 'Shot size, lens and aperture', 'camera', 'shoot.camera', [], { optional: true }),
     R('lens.wide', 'Wide lens note (24 mm and wider)', '@lensNote', 'shoot.camera.wide', [{ input: 'lens', op: 'atMost', value: 24 }]),
@@ -110,14 +116,15 @@ const template: Script = {
     bool('hasLight', 'Has light', 'The template gives light words.'), bool('hasPose', 'Has a pose', 'The draw gives a pose, body angle, expression or hands.'),
     en('product', 'Product', 'The template’s product layer.', [['none', 'No product'], ['photo', 'With a product photo'], ['noPhoto', 'No product photo']]),
     en('seed', 'Seed', 'How the seed is chosen.', [['locked', 'Lock look'], ['known', 'A new seed, known'], ['none', 'No seed yet']]), REFS,
-    { ...OWN_CAMERA, description: 'The template’s camera words name a camera that is not a phone, or its style is cinematic: the camera feel is left out of the house style.' }],
-  sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), sec('scene', 'Scene'), sec('camera', 'Camera'), sec('light', 'Light'), sec('pose', 'Pose'),
+    { ...OWN_CAMERA, description: 'The template’s camera words name a camera that is not a phone, or its style is cinematic: the camera feel is left out of the house style.' }, OUTFIT_WORDS],
+  sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), outfitExtraSection(), sec('scene', 'Scene'), sec('camera', 'Camera'), sec('light', 'Light'), sec('pose', 'Pose'),
     sec('template', 'Locked template line'), { id: 'direction', label: 'Direction from the user', kind: 'user', pick: 'first' }, refSection(),
     sec('product', 'Product'), sec('style', 'Style'), sec('negative', 'Never add'), sec('seed', 'Seed')],
   rules: [
     identity(),
     R('outfit.described', 'Outfit described in words', 'outfit', 'shoot.outfit.described', [is('outfitSource', 'described')]),
     R('outfit.set', 'Outfit reference set', 'outfit', 'shoot.outfit.set', [is('outfitSource', 'set')]),
+    outfitExtraRule(),
     R('scene', 'Scene', 'scene', 'template.scene', [is('view', 'full'), is('hasScene', true)]),
     R('camera', 'Camera', 'camera', 'template.camera', [is('view', 'full'), is('hasCamera', true)]),
     R('light', 'Light', 'light', 'template.light', [is('view', 'full'), is('hasLight', true)]),
@@ -153,15 +160,26 @@ const loraCandidate: Script = {
 };
 const outfitAngle: Script = {
   id: 'outfit.angle', group: 'outfits', title: 'Outfit set angle', description: 'One angle of an outfit set (made from scratch).', format: 'lines',
-  inputs: [OUTFIT_SOURCE, en('angle', 'Angle', 'Which angle.', [['front', 'Front'], ['tq', '¾'], ['side', 'Side'], ['back', 'Back']])],
-  sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), sec('task', 'Task'), sec('style', 'Style'), sec('negative', 'Never add'), sec('seed', 'Seed')],
-  rules: [identity(), ...outfitRules(), R('task', 'Angle task', 'task', 'outfit.task'), R('style', 'House style', 'style', 'shoot.style'),
+  inputs: [OUTFIT_SOURCE, en('angle', 'Angle', 'Which angle.', [['front', 'Front'], ['tq', '¾'], ['side', 'Side'], ['back', 'Back']]), OUTFIT_WORDS],
+  sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), outfitExtraSection(), sec('task', 'Task'), sec('figure', 'Figure'), sec('style', 'Style'), sec('negative', 'Never add'), sec('seed', 'Seed')],
+  rules: [identity(), ...outfitRules(), outfitExtraRule(), R('task', 'Angle task', 'task', 'outfit.task'), figureRule(), R('style', 'House style', 'style', 'shoot.style'),
     R('never', 'Never add', 'negative', 'shoot.never', [], { locked: true }), R('seed', 'Shared seed', 'seed', 'outfit.seed')],
-  vars: [...SHOOT_VARS, { name: 'angle', description: 'full body front view …', sample: 'full body front view' }, { name: 'seed', description: 'the seed', sample: '421337' }],
+  vars: [...SHOOT_VARS, { name: 'angle', description: 'full body front view …', sample: 'full body front view' }, { name: 'seed', description: 'the seed', sample: '421337' },
+    { name: 'extra', description: 'the outfit’s own words (made from a photo)', sample: 'platinum blonde high ponytail, small silver nose stud' },
+    { name: 'body', description: 'which image shows her figure for this angle', sample: 'her body photo (image 3)' }],
 };
 const single = (id: string, group: string, title: string, description: string, block: string, inputs: InputDef[] = []): Script =>
   ({ id, group, title, description, format: 'lines', inputs, sections: [sec('prompt', 'Prompt')], rules: [R('prompt', title, 'prompt', block)] });
-const outfitEdit = single('outfit.edit', 'outfits', 'Outfit set · other angles', 'The ¾, side and back of an outfit set, as edits of the front.', 'outfit.edit');
+/** The ¾, side and back as edits of the front: the edit, then her figure (locked). */
+const outfitEdit: Script = {
+  id: 'outfit.edit', group: 'outfits', title: 'Outfit set · other angles', description: 'The ¾, side and back of an outfit set, as edits of the front, then her figure.',
+  format: 'lines', inputs: [],
+  sections: [sec('prompt', 'Prompt'), sec('figure', 'Figure')],
+  rules: [R('prompt', 'Outfit set · other angles', 'prompt', 'outfit.edit'), figureRule()],
+  blocks: ['outfit.edit', 'outfit.figure'],
+  vars: [{ name: 'angle', description: 'full body three-quarter view …', sample: 'full body three-quarter view' },
+    { name: 'body', description: 'which image shows her figure from this angle', sample: 'the last image' }],
+};
 const enhance = single('enhance', 'enhance', 'Enhance', 'Enhance step 1, for every image of the sheet.', 'enhance.prompt');
 
 // ---------------------------------------------------------------- video: character swap (motion from a source clip)

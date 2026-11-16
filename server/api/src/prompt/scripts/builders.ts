@@ -44,6 +44,10 @@ const idVars = (id: Identity, t: PromptTexts, ownCamera = false) => ({
 });
 const outfitSource = (o: OutfitSpec | null | undefined) => (o?.source === 'described' ? 'described' : o?.source === 'product-photo' ? 'product' : 'set');
 const outfitVar = (o: OutfitSpec) => (o.source === 'described' ? trimEndChars((o.description ?? o.name).trim(), '.') : o.name.toLowerCase());
+/** A photo-made outfit's own words (a new hairstyle, piercing, make-up), or ''. Shoots and templates pass them as `extra`
+ *  (the outfit is a reference set by then); while the outfit is being made they are its description. */
+const outfitExtra = (o: OutfitSpec | null | undefined) =>
+  trimEndChars(((o?.source === 'product-photo' ? o.description : o?.extra) ?? '').replace(/\s+/g, ' ').trim(), '.');
 const refItems = (refs: SentRef[] | undefined) => (refs ?? []).map(r => ({ refIndex: r.index, guides: r.guides }));
 const slots = (r: ScriptResult): PromptSlot[] => r.parts.map(p => ({ layer: p.layer as LayerKey, text: p.text }));
 const built = (r: ScriptResult, seed: number | null, removed: string[]): BuiltPrompt => ({ slots: slots(r), seed, removed, text: r.text });
@@ -55,8 +59,8 @@ export function photoshoot(s: ShootSpec, t: PromptTexts = DEFAULT_TEXTS): BuiltP
   const cam = cameraValues(c.camera, t);
   const r = run('photoshoot', t, {
     inputs: { presets: s.presets !== false, lockSeed: !!s.lockSeed, outfitSource: outfitSource(s.outfit), lens: c.camera.lensMm, refs: refItems(s.refs),
-      ownCamera: c.ownCamera, noGrade: !c.grade },
-    vars: { ...idVars(s.identity, t, c.ownCamera), outfit: outfitVar(s.outfit), scene: c.scene.toLowerCase(), shot: cam.shot, lens: cam.lens, aperture: cam.aperture,
+      ownCamera: c.ownCamera, noGrade: !c.grade, outfitWords: !!outfitExtra(s.outfit) },
+    vars: { ...idVars(s.identity, t, c.ownCamera), outfit: outfitVar(s.outfit), extra: outfitExtra(s.outfit), scene: c.scene.toLowerCase(), shot: cam.shot, lens: cam.lens, aperture: cam.aperture,
       light: c.light.toLowerCase(), grade: c.grade.toLowerCase() },
     direction: dir,
   });
@@ -74,14 +78,28 @@ export function loraCandidate(id: Identity, angle: SheetAngle, n: number, t: Pro
   return built(r, null, []);
 }
 
-export function outfitAngle(id: Identity, outfit: OutfitSpec, angle: { label: string; words: string }, seed: number, t: PromptTexts = DEFAULT_TEXTS): BuiltPrompt {
+/** Which image shows her figure, when the caller doesn't know its number. */
+export const FIGURE_DEFAULT = 'her body photos';
+/** `body`: which image shows her figure for this angle ("her body photo (image 3)"); default her body photos. */
+export function outfitAngle(id: Identity, outfit: OutfitSpec, angle: { label: string; words: string }, seed: number, t: PromptTexts = DEFAULT_TEXTS, body = FIGURE_DEFAULT): BuiltPrompt {
   const never = { ...id, neverAdd: [...(id.neverAdd ?? []), ...listOf(t['outfit.never.extra'] ?? '')] };
   const key = ({ Front: 'front', '¾': 'tq', Side: 'side', Back: 'back' } as Record<string, string>)[angle.label] ?? 'front';
-  const r = run('outfit.angle', t, { inputs: { outfitSource: outfitSource(outfit), angle: key },
-    vars: { ...idVars(never, t), outfit: outfitVar(outfit), angle: angle.words, seed } });
+  const extra = outfitExtra(outfit);
+  const r = run('outfit.angle', t, { inputs: { outfitSource: outfitSource(outfit), angle: key, outfitWords: !!extra },
+    vars: { ...idVars(never, t), outfit: outfitVar(outfit), extra, angle: angle.words, seed, body } });
   return built(r, seed, []);
 }
-export const outfitEditPrompt = (angle: { words: string }, t: PromptTexts = DEFAULT_TEXTS) => run('outfit.edit', t, { inputs: {}, vars: { angle: angle.words } }).text;
+/**
+ * An edit of the outfit's front into another angle, then her figure on its own line. `body`: which image shows her figure
+ * (default: the first, the front it edits). `note`: a sentence the caller adds to the edit line (her body photo of this
+ * angle sent last, the pieces kept from her base).
+ */
+export function outfitEditPrompt(angle: { words: string }, t: PromptTexts = DEFAULT_TEXTS, body = 'the first image', note = '') {
+  const r = run('outfit.edit', t, { inputs: {}, vars: { angle: angle.words, body } });
+  return r.parts.map(p => (p.section === 'prompt' && note.trim() ? `${p.text} ${note.trim()}` : p.text)).join('\n');
+}
+/** Her figure line alone (the edits that keep pieces from her base). */
+export const outfitFigure = (body: string, t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.figure'] ?? DEFAULT_TEXTS['outfit.figure']!, { body }).trim();
 export const enhancePrompt = (t: PromptTexts = DEFAULT_TEXTS) => run('enhance', t, { inputs: {} }).text;
 
 // ---------------------------------------------------------------- template shoots
@@ -99,9 +117,10 @@ export function templateViews(p: TemplateParts, t: PromptTexts = DEFAULT_TEXTS) 
     outfitSource: !p.outfit ? 'none' : p.outfit.source === 'described' ? 'described' : 'set',
     hasScene: !!p.scene, hasCamera: !!p.camera, hasLight: !!p.light, hasPose: !!p.pose,
     product: !p.product ? 'none' : p.product.photo ? 'photo' : 'noPhoto', seed: p.seed.mode, refs: refItems(p.refs), ownCamera: !!p.ownCamera,
+    outfitWords: !!outfitExtra(p.outfit),
   };
   const vars = { ...idVars(p.identity, t), outfit: p.outfit ? (p.outfit.source === 'described' ? trimEndChars((p.outfit.description ?? p.outfit.name).trim(), '.') : p.outfit.name.toLowerCase()) : '',
-    scene: p.scene, camera: p.camera, light: p.light, pose: p.pose, product: p.product?.words ?? '', style: p.style, seed: p.seed.value, name: p.identity.name };
+    extra: outfitExtra(p.outfit), scene: p.scene, camera: p.camera, light: p.light, pose: p.pose, product: p.product?.words ?? '', style: p.style, seed: p.seed.value, name: p.identity.name };
   const view = (v: 'full' | 'visible', never: string[]) => {
     const r = run('template', t, { inputs: { ...common, view: v }, vars: { ...vars, never: never.join(', ') }, direction: p.direction });
     // {name} is her name in the identity line and the template's name in the locked line.

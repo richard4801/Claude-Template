@@ -88,6 +88,8 @@ export function runScript(script: Script, o: RunOptions): ScriptResult {
       const texts = matched.map(r => ({ id: r.id, text: render(r.block, v) })).filter(x => x.text);
       if (!texts.length) continue;
       fired.push(...texts.map(x => x.id));
+      const host = s.attach ? parts.findLast(p => p.section === s.attach) : undefined;
+      if (host) { host.text = `${host.text} ${texts.map(x => x.text).join(s.join ?? ' ')}`; host.rules.push(...texts.map(x => x.id)); continue; }
       parts.push({ section: s.id, layer: s.layer ?? s.id, kind: s.kind, text: texts.map(x => x.text).join(s.join ?? ' '), rules: texts.map(x => x.id) });
     }
   }
@@ -182,18 +184,20 @@ export const cleanRules = (rules: Rule[]): Rule[] => rules.map(r => ({
 export type SavedRules = { rules: Rule[]; knownDefaults: string[] };
 /**
  * The studio's rules: its saved list, plus any default rule added to the script after it was saved (placed after the
- * default rule before it). A saved list that no longer validates (the script changed) falls back to the defaults.
+ * default rule before it). A list that then still doesn't validate (the script changed) falls back to the defaults.
  */
 export function resolveRules(s: Script, saved: SavedRules | null | undefined): { rules: Rule[]; overridden: boolean; stale: boolean } {
   if (!saved) return { rules: s.rules, overridden: false, stale: false };
-  if (validateRules(s, saved.rules) != null) return { rules: s.rules, overridden: false, stale: true };
+  if (!Array.isArray(saved.rules)) return { rules: s.rules, overridden: false, stale: true };
   const out = [...saved.rules];
   const known = new Set(saved.knownDefaults);
   s.rules.forEach((d, i) => {
-    if (known.has(d.id) || out.some(r => r.id === d.id)) return;
-    const prev = s.rules.slice(0, i).reverse().find(p => out.some(r => r.id === p.id));
-    const at = prev ? out.findIndex(r => r.id === prev.id) + 1 : 0;
+    if (known.has(d.id) || out.some(r => r?.id === d.id)) return;
+    const prev = s.rules.slice(0, i).reverse().find(p => out.some(r => r?.id === p.id));
+    const at = prev ? out.findIndex(r => r?.id === prev.id) + 1 : 0;
     out.splice(at, 0, d);
   });
+  // Checked with the new defaults in: a locked rule added to the script later (the outfit figure) doesn't void the owner's list.
+  if (validateRules(s, out) != null) return { rules: s.rules, overridden: false, stale: true };
   return { rules: out, overridden: true, stale: false };
 }

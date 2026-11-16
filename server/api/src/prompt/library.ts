@@ -77,6 +77,11 @@ export const PROMPT_DEFS: PromptDef[] = [
   // ---------------------------------------------------------------- outfits
   d('outfit.task', 'outfits', 'Outfit angle task', 'One angle of an outfit set.', 'Task: {angle}, plain studio background.', [['angle', 'full body front view …', true]]),
   d('outfit.never.extra', 'outfits', 'Never add (outfit sets)', 'Comma-separated. Added to never-add for outfit sets.', 'visible brand logos', [], { kind: 'list' }),
+  // Her figure in every outfit picture (owner 2026-11-16: "always keep her shape, from every angle"). Sent with every angle,
+  // every way of making an outfit (new shots, edits, keeping pieces from her base); Presets off never drops it.
+  d('outfit.figure', 'outfits', 'Figure lock', 'Every outfit picture (front and each angle, new shots and edits): her body shape stays as in her body photos.',
+    'Figure: her body shape and proportions (bust, waist, hips and buttocks) exactly as in {body}, from this angle too. The clothes fit her figure; never slim, flatten or reshape her body.',
+    [['body', 'which image shows her figure: "her body photo (image 3)", "the last image" …']], { allowEmpty: false }),
   d('outfit.seed', 'outfits', 'Outfit seed line', 'The shared seed of the four angles.', 'Seed: {seed} (shared by all four angles).', [['seed', 'the seed']]),
   d('outfit.edit', 'outfits', 'Other angles (edit)', 'The ¾, side and back are made as edits of the front with this prompt.',
     'Show the same person in exactly the same outfit, on the same plain studio background, as a {angle}. Keep the face, hair, body and every detail of the clothes exactly the same. Realistic smartphone photo, natural skin texture.',

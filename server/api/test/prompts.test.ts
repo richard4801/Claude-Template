@@ -19,7 +19,7 @@ const R = (asset: string) => ({ asset });
 
 describe('prompt library (unit)', () => {
   it('every default validates, keys are unique, and every group has entries', () => {
-    expect(PROMPT_DEFS.length).toBe(82 + SUITE_PROMPT_DEFS.length); // + product-photo own words (2026-11-16) + 53 + 20 blocks + 2 outfit keep (§6) + 6 swap background "Describe it" + 1 outfit face − 3 Dress up (removed 2026-11-11) + house style split in two + light without grade (2026-11-11) added with prompt scripts (workstream 4) + AI suite (workstream 1)
+    expect(PROMPT_DEFS.length).toBe(83 + SUITE_PROMPT_DEFS.length); // + outfit figure lock + product-photo own words (2026-11-16) + 53 + 20 blocks + 2 outfit keep (§6) + 6 swap background "Describe it" + 1 outfit face − 3 Dress up (removed 2026-11-11) + house style split in two + light without grade (2026-11-11) added with prompt scripts (workstream 4) + AI suite (workstream 1)
     expect(new Set(PROMPT_DEFS.map(p => p.key)).size).toBe(PROMPT_DEFS.length);
     for (const p of PROMPT_DEFS) expect(validatePrompt(p.key, p.default), p.key).toBeNull();
     for (const g of ['photoshoot', 'references', 'sheet', 'outfits', 'enhance', 'templates', 'video', 'lora']) expect(PROMPT_DEFS.some(p => p.group === g), g).toBe(true);
@@ -85,7 +85,7 @@ describe('prompt library (unit)', () => {
       'outfit.face': 'FACE {angle}', 'video.replicate.summary': 'RSUM', 'video.edit.detailed': 'EDET {outfit}', 'lora.variation': 'VAR {variation}', 'lora.variations': 'one\ntwo',
       'template.locked': 'LOCKED {name}' };
     expect(E.characterSheetShot(id, E.SHEET_ANGLES[0], t).text).toContain('SHEET face · front\nStyle: CAM, HOUSE.\nNever add: rings, aliens, hats.');
-    expect(E.outfitEditPrompt(E.OUTFIT_ANGLES[3], t)).toBe('EDIT full body back view');
+    expect(E.outfitEditPrompt(E.OUTFIT_ANGLES[3], t)).toBe(`EDIT full body back view\n${E.outfitFigure('the first image')}`);
     expect(E.outfitFacePrompt(1, t)).toBe('FACE face close-up from three-quarter view');
     expect(E.replicateSwap({ identity: id, referenceLabels: ['face, front'] }, t).text).toContain('summary:\nRSUM\n');
     expect(E.videoSwap({ identity: id, outfit: { name: 'Knit' } }, t).detailedDescription).toBe("EDET knit <Subject 2>'s mouth follows <Video 1> and is in sync with <Audio 1>'s speech.");
@@ -122,7 +122,7 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     }
     const l = (await owner.req('GET', '/v1/prompts')).body;
     expect(l.groups.map((g: any) => g.label)).toEqual(['Photo', 'References', 'Character sheet', 'Outfits', 'Enhance', 'Templates', 'Video', 'LoRA', 'AI suite']); // + AI suite (workstream 1)
-    expect(l.prompts).toHaveLength(82 + SUITE_PROMPT_DEFS.length);
+    expect(l.prompts).toHaveLength(83 + SUITE_PROMPT_DEFS.length);
     const refPose = l.prompts.find((p: any) => p.key === 'refs.pose');
     expect(refPose).toMatchObject({ group: 'references', current: refPose.default, overridden: false, allowEmpty: false, updatedAt: null,
       placeholders: [{ name: 'refIndex', required: true }] });
@@ -270,7 +270,9 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     expect(set[0]!.input.prompt).toContain('Style: HOUSE, STYLE X.');
     // The owner's text, then the body-angle line (her own body photo of that angle goes with each edit).
     const body = ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.';
-    expect(set.slice(1, 4).map(p => p.input.prompt)).toEqual(['OUTFIT EDIT full body three-quarter view.', 'OUTFIT EDIT full body side view.', 'OUTFIT EDIT full body back view.'].map(t => t + body));
+    // Then her figure (owner 2026-11-16), from that last image.
+    const figure = `\n${DEFAULT_TEXTS['outfit.figure']!.replace('{body}', 'the last image')}`;
+    expect(set.slice(1, 4).map(p => p.input.prompt)).toEqual(['OUTFIT EDIT full body three-quarter view.', 'OUTFIT EDIT full body side view.', 'OUTFIT EDIT full body back view.'].map(t => t + body + figure));
     // Then its three face close-ups (owner 2026-11-11), each an edit of her base face photo of that angle.
     expect(set.slice(4).map(p => p.input.prompt)).toEqual(['OUTFIT FACE face close-up from the front.', 'OUTFIT FACE face close-up from three-quarter view.', 'OUTFIT FACE face close-up in profile (side view).']);
     // Enhance.

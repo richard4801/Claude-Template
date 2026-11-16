@@ -30,8 +30,14 @@ describe('defaults reproduce the pre-script prompts exactly', () => {
   it('sheet, outfit angles and edits, LoRA candidates', () => {
     for (const a of E.SHEET_ANGLES) expect(B.characterSheetShot(demo, a)).toEqual(E.characterSheetShot(demo, a));
     for (const outfit of [{ name: 'Green set' }, { name: 'Knit', description: 'a sweater', source: 'described' as const }])
-      for (const a of E.OUTFIT_ANGLES) expect(B.outfitAngle(demo, outfit, a, 421337)).toEqual(E.outfitAngle(demo, outfit, a, 421337));
-    for (const a of E.OUTFIT_ANGLES) expect(B.outfitEditPrompt(a)).toBe(E.outfitEditPrompt(a));
+      for (const a of E.OUTFIT_ANGLES) {
+        // The same lines, plus her figure after the task (owner 2026-11-16).
+        const was = E.outfitAngle(demo, outfit, a, 421337), now = B.outfitAngle(demo, outfit, a, 421337);
+        const figure = B.outfitFigure(B.FIGURE_DEFAULT);
+        expect(now.text).toBe(was.text.replace(/^(Task: .*)$/m, `$1\n${figure}`));
+        expect(now.slots.filter(x => x.layer !== 'figure')).toEqual(was.slots);
+      }
+    for (const a of E.OUTFIT_ANGLES) expect(B.outfitEditPrompt(a)).toBe(`${E.outfitEditPrompt(a)}\n${B.outfitFigure('the first image')}`);
     expect(B.loraCandidate(demo, E.SHEET_ANGLES[0], 13).text).toBe(`${E.characterSheetShot(demo, E.SHEET_ANGLES[0]).text}\nVariation: studio softbox, looking over shoulder.`);
     expect(B.enhancePrompt()).toBe(DEFAULT_TEXTS['enhance.prompt']);
   });
