@@ -1,0 +1,6 @@
+# Signature, end card, sound [trials 94, 95, 122–124]
+- **Background glitch:** mask the effect with his matte pushed through the same displacement so only sky and city break. Painting him out first failed twice — don't invent a clean plate for a few frames. Template `background-glitch`.
+- **Sound effects:** a second music-kind track added by patch plays in the mix. ffmpeg alone made the glitch sound (crushed noise + 46 Hz thump + falling tone).
+- **Signature:** bottom-right "Muse", hidden on whole shots where it would sit on lettering, gone before the last lines. Template `corner-signature`.
+- **End card:** storm sky from SVG turbulence with light inside the cloud; mark uncovered along a pen path over the glyphs, then the line, then the TM; lightning glitches the mark. Template `storm-end-card`. Open issue: the lightning bursts fell after the sound was gone — check effects against the audio end.
+- **Contained ending:** three cross-faded low-pass steps (1500 → 600 → 240 Hz) and the whole sound sinking on a squared curve over 3.6 s. Owner: "The fix was perfect." v1 was rough because the song had its own quiet break and the beat slammed back at −3 dB → when a sound change feels rough, measure the song around it first. Template `contained-sound-ending`.
