@@ -164,10 +164,78 @@ extension SnapshotRunner {
             if !synced { try? await Task.sleep(for: .seconds(0.2)) }
         }
         line(synced, "shape round trip on Claude's session", "the session holds the 16:9 project as it was: \(synced)")
+
+        // 7. Coordinator, build 704 ("mostly when Claude is working or during edits"): Claude applies a series of patches to
+        // the open big edit, two a second for 10 s (a text change, then a main shot's framing, alternately), as
+        // apply_edit_ops does. Each must show within 2 s; the CPU meanwhile (median of 2 s windows), the preview rebuilds it
+        // caused, and the CPU once it settles are logged, with the main thread's heaviest frames.
+        await claudePatchSeries(s, fake: fake, sessionId: es.id, dir: dir, line: line)
         store.go(.home)
         store.closeRecreate()
         store.oneClaude.open = false
         try? await Task.sleep(for: .seconds(1))
+    }
+
+    /// Claude's patches landing in an open edit (step 7 of the big edit check).
+    static func claudePatchSeries(_ s: EditSuiteSession, fake: FakeMuseAPI, sessionId: String, dir: URL,
+                                  line: (Bool?, String, String) -> Void) async {
+        guard let txt = s.project.tracks.firstIndex(where: { $0.id == "txtA" }), let main = s.project.tracks.firstIndex(where: { $0.kind == .main }) else {
+            line(false, "Claude patches into the big edit", "no txtA or main track"); return
+        }
+        let texts = s.project.tracks[txt].items.count, shots = s.project.tracks[main].items.count
+        guard texts > 0, shots > 0 else { line(false, "Claude patches into the big edit", "empty rows"); return }
+        let rebuilds0 = s.rebuildCount
+        let sampleFile = dir.appendingPathComponent("edit-big-patches-sample.txt")
+        async let sampled: Void = sampleApp(to: sampleFile, seconds: 6)
+        var cpu: [Double] = []
+        var late: [String] = []
+        var worst = 0.0
+        let n = 20
+        let measuring = Task { @MainActor in
+            var xs: [Double] = []
+            for _ in 0..<5 { xs.append(await cpuPercent(over: 2)) }
+            return xs
+        }
+        for k in 0..<n {
+            let started = Date()
+            let label = "Claude · patch \(k + 1)"
+            let landed: () -> Bool
+            if k % 2 == 0 {
+                let i = (k / 2) % texts
+                let want = "Beat \(k + 1)"
+                _ = try? await fake.fakeClaudePatch(sessionId: sessionId, [.replace("/tracks/\(txt)/items/\(i)/text", .string(want))], label: label)
+                landed = {
+                    if case .text(let t)? = s.project.tracks[txt].items.indices.contains(i) ? s.project.tracks[txt].items[i] : nil { return t.text == want }
+                    return false
+                }
+            } else {
+                let i = (k * 5) % shots
+                let x = [0.45, 0.55][(k / 2) % 2]
+                _ = try? await fake.fakeClaudePatch(sessionId: sessionId, [.replace("/tracks/\(main)/items/\(i)/transform/x", .number(x))], label: label)
+                landed = {
+                    guard s.project.tracks[main].items.indices.contains(i), case .video(let c) = s.project.tracks[main].items[i] else { return false }
+                    return c.transform?.x == x
+                }
+            }
+            var ok = landed()
+            while !ok && Date().timeIntervalSince(started) < 2 { try? await Task.sleep(for: .seconds(0.05)); ok = landed() }
+            let took = Date().timeIntervalSince(started)
+            worst = max(worst, took)
+            if !ok { late.append("\(k + 1)") }
+            try? await Task.sleep(for: .seconds(max(0, 0.5 - took)))
+        }
+        cpu = await measuring.value
+        _ = await sampled
+        let med = median(cpu)
+        let rebuilds = s.rebuildCount - rebuilds0
+        line(late.isEmpty && med <= 80, "Claude patches into the big edit",
+             String(format: "%d patches at 2 a second: CPU median %.0f %% of one core (fails above 80 %%; windows %@), slowest to show %.2f s, ",
+                    n, med, cpu.map { String(format: "%.0f", $0) }.joined(separator: " "), worst)
+             + "\(rebuilds) preview rebuilds" + (late.isEmpty ? "" : ", not shown within 2 s: \(late.joined(separator: ", "))"))
+        for f in mainThreadTop(sampleFile, count: 25) { line(nil, "main (patches)", f) }
+        try? await Task.sleep(for: .seconds(3))
+        let after = await cpuMedian(over: 8)
+        line(after <= 25, "idle CPU after Claude's patches", String(format: "%.0f %% of one core, median of 2 s windows over 8 s (fails above 25 %%)", after))
     }
 
     /// The owner's shape of edit: 66 short main shots, two picture-in-picture rows, two text rows, captions; 1920×1080.
