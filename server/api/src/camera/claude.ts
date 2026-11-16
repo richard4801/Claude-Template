@@ -93,7 +93,7 @@ export class ClaudeService {
   private threadView = (t: ThreadRow) => compact({ id: t.id, contextKind: t.contextKind, contextId: t.contextId, claudeSessionId: t.claudeSessionId ?? undefined,
     contextKey: t.contextKey ?? undefined, title: t.title ?? undefined, // WS18: the chat's list and name
     createdAt: t.createdAt, updatedAt: t.updatedAt, model: t.model ?? undefined, effort: t.effort ?? undefined,
-    brief: (b => (b ? { ...b, ...(t.model ? { model: t.model } : {}), ...(t.effort ? { effort: t.effort } : {}) } : b))(threadBrief(t.contextKind, t.contextKind === 'chat' ? t.id : t.contextId)) });
+    brief: (b => (b ? { ...b, ...(t.model ? { model: t.model } : {}), ...(t.effort ? { effort: t.effort } : {}) } : b))(threadBrief(t.contextKind, t.contextKind === 'chat' ? t.id : t.contextId, t.id)) });
   private async messageView(m: MessageRow) {
     return compact({ id: m.id, threadId: m.threadId, role: m.role, source: m.source, text: m.text, turnId: m.turnId ?? undefined, tool: m.tool ? appTool(m.tool) : undefined,
       image: m.imageKey ? { url: await this.ctx.storage.presignGet(m.imageKey, 3600) } : undefined, attachments: await attachmentViews(this.ctx, m.attachments), createdAt: m.createdAt });
@@ -410,11 +410,13 @@ export function autoTitle(text: string): string | null {
  * workstream 1: what Claude on the owner's Mac starts a Recreate or Edit thread with: the role, the MUSE tools for it
  * (all on the MUSE MCP server) and the id they act on. Camera threads keep the Mac's own director prompt.
  */
-export function threadBrief(kind: string, contextId: string) {
+export function threadBrief(kind: string, contextId: string, threadId?: string) {
   // One Claude (plans/one-claude.md): a chat that follows the person; the Mac passes its chatId to the chat tools.
   if (kind === 'chat') return { prompt: onePrompt(), tools: CHAT_REGISTRY.map(t => t.name), chatId: contextId };
   if (kind === 'recreate') return { prompt: RECREATE_PROMPT, tools: ['get_recipe', 'set_slot_briefs', 'match_slots', 'fill_slot', 'open_edit', 'apply_recipe', 'apply_edit_ops', 'playbook_read', 'playbook_add', 'report_gap'], referenceId: contextId };
-  if (kind === 'edit') return { prompt: EDIT_PROMPT, tools: ['get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame', 'auto_captions', 'remove_background', 'playbook_read', 'pipeline_skill_read', 'pipeline_log', 'pipeline_taste', 'pipeline_propose'], sessionId: contextId };
+  if (kind === 'edit') return { prompt: EDIT_PROMPT, tools: ['get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame', 'auto_captions', 'remove_background', 'playbook_read', 'pipeline_skill_read', 'pipeline_log', 'pipeline_taste', 'pipeline_propose'], sessionId: contextId,
+    // The thread itself, so pipeline_propose can leave its "Updated the edit pipeline" line in this chat.
+    ...(threadId ? { chatId: threadId } : {}) };
   if (kind === 'suite') return { prompt: SUITE_PROMPT, tools: ['suite_options', 'suite_get_draft', 'suite_set_draft', 'suite_add_reference', 'suite_estimate', 'suite_request_shot', 'suite_feed', 'suite_cast', 'suite_see'], assistId: contextId };
   return undefined;
 }

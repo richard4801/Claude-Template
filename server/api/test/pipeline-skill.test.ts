@@ -95,6 +95,7 @@ describe('pipeline skill (unit)', () => {
     expect(EDIT_PROMPT).toContain('pipeline_propose');
     const line = EDIT_PROMPT.split('\n').find(l => l.startsWith('Edit pipeline skill'))!;
     expect(line.length).toBeLessThan(400);
+    expect(threadBrief('edit', 'es_x', 'ct_1')).toMatchObject({ sessionId: 'es_x', chatId: 'ct_1' });
     expect(threadBrief('edit', 'es_x')!.tools).toEqual(expect.arrayContaining(['pipeline_skill_read', 'pipeline_log', 'pipeline_taste', 'pipeline_propose']));
     for (const n of ['pipeline_skill_read', 'pipeline_log', 'pipeline_taste', 'pipeline_propose']) expect(registryByName.get(n)?.members, n).toBe(false);
   });
