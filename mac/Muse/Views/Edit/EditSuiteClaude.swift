@@ -196,6 +196,8 @@ struct EditSuiteClaudePanel: View {
     var openPlaybook: () -> Void = {}
     var close: () -> Void
     @State private var tab = 0
+    /// The chat's model, for a request the editor prepared (Edit templates: "Ask Claude to make it for this cut").
+    @State private var chat: ClaudeChatModel?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -222,6 +224,7 @@ struct EditSuiteClaudePanel: View {
                     // No second header: this panel already has one (badge, sharing state, close).
                     ClaudeEditNoticeLine()
                     ClaudeChatView(contextKind: "edit", contextId: id, title: session.title, showsHeader: false)
+                        .sessions(nil, onModel: { m in chat = m; fillAsk() })
                 } else {
                     noSession
                 }
@@ -234,6 +237,14 @@ struct EditSuiteClaudePanel: View {
         .background(t.chrome)
         .background { if SnapshotRunner.probing { ComposerBarFrame(key: "edit claude panel") } }
         .onAppear { if let x = SnapshotRunner.state.claudeTab { tab = x } } // review mode: the Playbook tab's shot
+        .onChange(of: session.claudeAsk) { _, _ in tab = 0; fillAsk() }
+    }
+
+    /// The prepared request goes in the composer; the owner reads it and sends it.
+    private func fillAsk() {
+        guard let ask = session.claudeAsk, let m = chat else { return }
+        m.composer = ask
+        session.claudeAsk = nil
     }
 
     /// No edit session yet (still opening, or it couldn't be shared): no chat to attach to.
