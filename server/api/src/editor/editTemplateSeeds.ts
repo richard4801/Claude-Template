@@ -1,0 +1,181 @@
+// The 27 templates MUSE Claude made (pack "icon-storyboard", tp_42b9a9bc8571; plans/edit-templates.md §4) as library
+// specs. 11 are live and free, 7 live with a paid subject matte (Remove background, priced on Apply), and 9 are not
+// ready yet: they need a primitive the apps don't draw (N1–N8) or are made per video by Claude on the Mac (reference).
+// Previews and reference clips come from the pack's media (role preview / final); the scripts stay text in the pack.
+//
+// Where the pack has frame data this spec doesn't (bespoke .rects, a song's exact notes), the values here are generic
+// defaults; Claude can save a new version with edit_template_save after reading the pack (template_pack_read).
+import type { EditTemplateSpec, Param } from './editTemplates.js';
+
+export const SEED_PACK = 'icon-storyboard';
+/** Bumped when a seed's spec changes, so studios get the new one (rows the owner changed keep theirs). */
+export const SEED_VERSION = 1;
+
+const lead = (d = 0.3): Param => ({ key: 'lead', label: 'Opens before the cut', type: 'number', unit: 's', min: 0.1, max: 1, default: d });
+const wash = (d: 'white' | 'blue' | 'off' = 'white'): Param => ({ key: 'wash', label: 'Entrance wash', type: 'enum', options: ['white', 'blue', 'off'], default: d });
+const step = (d = 0.25): Param => ({ key: 'step', label: 'Gap between notes (no beats found)', type: 'number', unit: 's', min: 0.08, max: 1, default: d });
+const src = (templateId: string, native?: string): EditTemplateSpec['source'] => ({ pack: SEED_PACK, templateId, by: 'claude', ...(native ? { native } : {}) });
+const SHAPES = {
+  box: [[{ t: 0, rect: [0.3, 0.24, 0.4, 0.3] as [number, number, number, number] }, { t: 0.5, rect: [0.18, 0.14, 0.64, 0.5] as [number, number, number, number] }]],
+  band: [[{ t: 0, rect: [0, 0.4, 1, 0.2] as [number, number, number, number] }, { t: 0.5, rect: [0, 0.3, 1, 0.4] as [number, number, number, number] }]],
+  column: [[{ t: 0, rect: [0.38, 0, 0.24, 1] as [number, number, number, number] }, { t: 0.5, rect: [0.3, 0, 0.4, 1] as [number, number, number, number] }]],
+  slats: [[{ t: 0, rect: [0.06, 0, 0.2, 1] as [number, number, number, number] }], [{ t: 0.33, rect: [0.4, 0, 0.2, 1] as [number, number, number, number] }], [{ t: 0.66, rect: [0.74, 0, 0.2, 1] as [number, number, number, number] }]],
+};
+/** A window of the next shot, in place and unscaled, playing the `$lead` before its in-point (the pack's rule). */
+const windowOf = (shape: string, as = 'window') => ({ do: 'add' as const, as, for: 'shape' as const, track: 'video' as const, source: '$next', in: '$next.in - $lead * $next.speed', start: '$cut - $lead', length: '$lead', mask: '$shape' as const, wash: '$wash', ...(shape ? {} : {}) });
+/** The current shot's subject, cut out (paid matte), drawn over what the template adds. */
+const subjectOfPrev = { do: 'add' as const, as: 'subject', track: 'video' as const, source: '$prev', in: '$prev.out - $lead * $prev.speed', start: '$cut - $lead', length: '$lead', matte: true };
+const hiddenShape = (d: string) => ({ key: 'shape', label: 'Shape', type: 'enum' as const, options: [d], default: d });
+
+export const SEED_TEMPLATES: EditTemplateSpec[] = [
+  // ---------------------------------------------------------------- live, free (11)
+  { v: 1, id: 'flash-white', name: 'White flash', kind: 'effect', target: 'cut', level: 'live', each: 'note-cut',
+    description: 'A 3-frame white flash on a hit: the picture lifts to white and falls back over three frames.',
+    timing: 'On the cut, 3 frames', source: src('flash-white'),
+    params: [{ key: 'frames', label: 'Frames', type: 'number', min: 2, max: 6, default: 3 }, { key: 'strength', label: 'Strength', type: 'number', min: 0.2, max: 1, default: 1 }],
+    steps: [{ do: 'add', track: 'adjust', start: '$cut', length: '$frames * $frame', fields: { adjust: { exposure: 0 } }, unit: 'frames',
+      keys: { exposure: [{ t: 0, v: '1 * $strength', ease: 'hold' }, { t: 1, v: '0.6 * $strength', ease: 'hold' }, { t: 2, v: '0.3 * $strength', ease: 'hold' }, { t: '$frames', v: 0 }] } }] },
+  { v: 1, id: 'hit-rgb-split', name: 'RGB split hit', kind: 'transition', target: 'cut', level: 'live', each: 'selected',
+    description: 'Red and blue pull apart on the cut for a few frames (28, 16, 8 px in the pack). A close match today: the exact frame-by-frame split comes with the colour-split effect.',
+    timing: 'On the cut, 0.1 s', source: src('hit-rgb-split', 'Exact with N1 (rgbSplit with amount keys)'),
+    params: [{ key: 'sec', label: 'Length', type: 'number', unit: 's', min: 0.1, max: 0.4, default: 0.1 }],
+    steps: [{ do: 'transition', on: 'next', kind: 'glitch', sec: '$sec' }] },
+  { v: 1, id: 'multi-hit-split', name: 'Multi-hit split', kind: 'transition', target: 'cut', level: 'live', each: 'selected',
+    description: 'The colour split plus a white lift on every cut of a burst.',
+    timing: 'Each selected cut', source: src('multi-hit-split'),
+    params: [{ key: 'sec', label: 'Length', type: 'number', unit: 's', min: 0.1, max: 0.4, default: 0.1 }],
+    steps: [{ do: 'transition', on: 'next', kind: 'glitch', sec: '$sec' },
+      { do: 'set', on: 'next', unit: 'frames', keys: { exposure: [{ t: 0, v: 0.6, ease: 'hold' }, { t: 1, v: 0.3, ease: 'hold' }, { t: 2, v: 0.1, ease: 'hold' }, { t: 3, v: '$base.exposure' }] } }] },
+  { v: 1, id: 'punch-in', name: 'Punch-in', kind: 'effect', target: 'clip', level: 'live', each: 'selected',
+    description: 'The shot starts punched in (1.35×) and settles back to its own size over its length.',
+    timing: 'Over the whole clip', source: src('punch-in', 'Scale keyframes (the pack\'s patch)'),
+    params: [{ key: 'from', label: 'Starts at', type: 'number', unit: '×', min: 1.05, max: 2, default: 1.35 }, { key: 'ease', label: 'Ease', type: 'enum', options: ['easeOut', 'linear', 'easeInOut'], default: 'easeOut' }],
+    steps: [{ do: 'set', on: 'target', unit: 'norm', keys: { scale: [{ t: 0, v: '$from * $base.scale', ease: '$ease' }, { t: 1, v: '$base.scale' }] } }] },
+  { v: 1, id: 'punch-split', name: 'Punch split', kind: 'effect', target: 'clip', level: 'live',
+    description: 'A hit inside one shot: the shot splits on the hit, the second half punches in, and the cut gets the colour split.',
+    timing: 'At the hit', source: src('punch-split'),
+    params: [{ key: 'hit', label: 'Hit (part of the clip)', type: 'number', min: 0.1, max: 0.9, default: 0.5 }, { key: 'from', label: 'Punch', type: 'number', unit: '×', min: 1.05, max: 2, default: 1.35 },
+      { key: 'sec', label: 'Split length', type: 'number', unit: 's', min: 0.1, max: 0.3, default: 0.1 }],
+    steps: [{ do: 'split', on: 'target', at: '$start + $hit * $len', names: ['before', 'after'] },
+      { do: 'set', on: 'after', unit: 'norm', keys: { scale: [{ t: 0, v: '$from * $base.scale', ease: 'easeOut' }, { t: 1, v: '$base.scale' }] } },
+      { do: 'transition', on: 'after', kind: 'glitch', sec: '$sec' }] },
+  { v: 1, id: 'window-open-next', name: 'Window opens the next shot', kind: 'transition', target: 'cut', level: 'live',
+    description: 'The next shot opens early in a band, a column, slats or a box, in place and unscaled, then the cut lands.',
+    timing: '0.3 s before the cut', source: src('window-open-next', 'Shape list; the white line needs mask stroke (N2)'),
+    params: [{ key: 'shape', label: 'Shape', type: 'enum', options: ['box', 'band', 'column', 'slats'], default: 'box' }, lead(), { key: 'line', label: 'White line', type: 'bool', default: false, needs: 'N2' }, wash()],
+    shapes: SHAPES, steps: [windowOf('')] },
+  { v: 1, id: 'panel-pile', name: 'Panel pile', kind: 'transition', target: 'cut', level: 'live',
+    description: 'Tilted panels land one per note, each settling in 3 frames; the last panel is the next shot, which grows to fill the frame on the cut.',
+    timing: 'One panel per note before the cut', source: src('panel-pile'),
+    params: [{ key: 'count', label: 'Panels', type: 'number', min: 2, max: 6, default: 3 }, step(), { key: 'tilt', label: 'Tilt', type: 'number', unit: '°', min: 0, max: 20, default: 8 }],
+    steps: [
+      { do: 'add', for: 'notes', notes: { count: '$count', step: '$step', only: 'notLast' }, track: 'video', source: '$prev', hold: true, in: '$prev.out - 0.1', start: '$note', length: '$end - $note', unit: 'sec',
+        fields: { transform: { x: '0.5 + ($i - ($n - 1) / 2) * 0.07', y: '0.5 + ($i - ($n - 1) / 2) * 0.04', scale: 0.62, rotation: '$tilt * (2 * ($i % 2) - 1)' } },
+        keys: { scale: [{ t: 0, v: 0.87, ease: 'easeOut' }, { t: '3 * $frame', v: 0.62 }], rotation: [{ t: 0, v: '2 * $tilt * (2 * ($i % 2) - 1)', ease: 'easeOut' }, { t: '3 * $frame', v: '$tilt * (2 * ($i % 2) - 1)' }] } },
+      { do: 'add', for: 'notes', notes: { count: '$count', step: '$step', only: 'last' }, track: 'video', source: '$next', in: '$next.in - ($end - $note) * $next.speed', start: '$note', length: '$end - $note', unit: 'sec',
+        keys: { scale: [{ t: 0, v: 0.87, ease: 'easeOut' }, { t: '3 * $frame', v: 0.62, ease: 'easeInOut' }, { t: '$len', v: 1 }],
+          rotation: [{ t: 0, v: '-2 * $tilt', ease: 'easeOut' }, { t: '3 * $frame', v: '-$tilt', ease: 'easeInOut' }, { t: '$len', v: 0 }] } }] },
+  { v: 1, id: 'comic-page-fly-in', name: 'Comic page fly-in', kind: 'transition', target: 'cut', level: 'live',
+    description: 'A page of live panels (the shots around the cut); the camera flies into one, which is the next shot, landing at its own size on the cut.',
+    timing: 'The second before the cut', source: src('comic-page-fly-in'),
+    params: [{ key: 'grid', label: 'Panels across', type: 'number', min: 2, max: 3, default: 2 }, { key: 'lead', label: 'Fly-in length', type: 'number', unit: 's', min: 0.4, max: 2, default: 1 }],
+    steps: [{ do: 'add', for: 'cells', track: 'video', source: 'main:$k', in: 'if($isTarget, $next.in - $lead * $next.speed, $srcIn)', start: '$cut - $lead', length: '$lead', unit: 'norm',
+      fields: { transform: { x: '$cx', y: '$cy', scale: '1 / $g' } },
+      keys: {
+        x: [{ t: 0, v: '$cx', ease: 'hold' }, { t: 0.35, v: '$cx', ease: 'easeIn' }, { t: 0.7, v: '0.5 + ($cx - lerp(0.5, $tx, 0.5)) * lerp(1, $g, 0.5)', ease: 'easeOut' }, { t: 1, v: '0.5 + ($cx - $tx) * $g' }],
+        y: [{ t: 0, v: '$cy', ease: 'hold' }, { t: 0.35, v: '$cy', ease: 'easeIn' }, { t: 0.7, v: '0.5 + ($cy - lerp(0.5, $ty, 0.5)) * lerp(1, $g, 0.5)', ease: 'easeOut' }, { t: 1, v: '0.5 + ($cy - $ty) * $g' }],
+        scale: [{ t: 0, v: '0.96 / $g', ease: 'hold' }, { t: 0.35, v: '0.96 / $g', ease: 'easeIn' }, { t: 0.7, v: 'lerp(1, $g, 0.5) / $g', ease: 'easeOut' }, { t: 1, v: 1 }] } }] },
+  { v: 1, id: 'diagonal-stripe', name: 'Diagonal stripes', kind: 'transition', target: 'cut', level: 'live',
+    description: 'Tilted stripes open one per note with the next scene playing in them, then the cut lands.',
+    timing: 'One stripe per note before the cut', source: src('diagonal-stripe'),
+    params: [{ key: 'count', label: 'Stripes', type: 'number', min: 1, max: 6, default: 3 }, step(), { key: 'angle', label: 'Angle', type: 'number', unit: '°', min: -45, max: 45, default: 25 },
+      { key: 'width', label: 'Stripe width', type: 'number', min: 0.08, max: 0.5, default: 0.22 }, wash()],
+    steps: [{ do: 'add', for: 'notes', notes: { count: '$count', step: '$step' }, track: 'video', source: '$next', in: '$next.in - ($end - $note) * $next.speed', start: '$note', length: '$end - $note',
+      mask: { shape: 'rect', x: '0.5 + ($i - ($n - 1) / 2) * $width * 1.1', y: 0.5, width: '$width', height: 2.4, rotation: '$angle', feather: 0.004 }, wash: '$wash' }] },
+  { v: 1, id: 'white-out', name: 'White-out', kind: 'transition', target: 'cut', level: 'live',
+    description: 'The picture lifts to white and the next shot comes out of it.',
+    timing: 'Across the cut', source: src('white-out'),
+    params: [{ key: 'sec', label: 'Length', type: 'number', unit: 's', min: 0.1, max: 1.5, default: 0.4 }],
+    steps: [{ do: 'transition', on: 'next', kind: 'white', sec: '$sec' }] },
+  { v: 1, id: 'corner-signature', name: 'Corner signature', kind: 'effect', target: 'edit', level: 'live',
+    description: 'A small signature mark in the bottom-right corner across the edit, hidden where it would sit over lettering.',
+    timing: 'The whole edit', source: src('corner-signature'),
+    params: [{ key: 'image', label: 'Mark', type: 'upload' }, { key: 'size', label: 'Size', type: 'number', min: 0.06, max: 0.3, default: 0.14 },
+      { key: 'hideOn', label: 'Hide during', type: 'times', default: [] }],
+    steps: [{ do: 'add', for: 'ranges', track: 'image', source: 'param:image', start: '$rs', length: '$re - $rs',
+      fields: { fit: 'contain', transform: { x: '1 - 0.05 - $size / 2', y: 0.93, scale: '$size' } } }] },
+
+  // ---------------------------------------------------------------- live with a paid subject matte (7)
+  { v: 1, id: 'cutout-carry-over', name: 'Cut-out carry-over', kind: 'transition', target: 'cut', level: 'matte',
+    description: 'The subject keeps moving as a cut-out over the next shot for 9–15 frames.',
+    timing: 'After the cut', source: src('cutout-carry-over', 'Free with N3 (on-device subject matte)'),
+    params: [{ key: 'frames', label: 'Frames', type: 'number', min: 6, max: 18, default: 12 }, wash('blue')],
+    steps: [{ do: 'add', as: 'subject', track: 'video', source: '$prev', in: '$prev.out', start: '$cut', length: '$frames * $frame', matte: true, wash: '$wash' }] },
+  { v: 1, id: 'cover-freeze', name: 'Cover freeze', kind: 'transition', target: 'cut', level: 'matte',
+    description: 'The shot freezes, comic pages flick behind, and the cut-out subject sits over them before the next shot. Partial: no light wrap yet.',
+    timing: 'A hold before the cut', source: src('cover-freeze', 'Light wrap is missing'),
+    params: [{ key: 'hold', label: 'Hold', type: 'number', unit: 's', min: 0.4, max: 3, default: 1.2 }, { key: 'title', label: 'Title', type: 'text', default: '' }],
+    steps: [{ do: 'freeze', on: 'prev', sec: '$hold', as: 'still' },
+      { do: 'add', for: 'media', track: 'image', source: 'pack:overlay', start: '$still.start + $i * 3 * $frame', length: 'if($i == $n - 1, $still.end - $still.start - $i * 3 * $frame, 3 * $frame)', fields: { fit: 'cover' } },
+      { do: 'add', as: 'subject', track: 'video', source: 'still', hold: true, in: '$still.in', start: '$still.start', length: '$still.len', matte: true,
+        fields: { adjust: { contrast: 0.15 } }, keys: { scale: [{ t: 0, v: 1 }, { t: 1, v: 1.06 }] } },
+      { do: 'add', track: 'text', text: '$title', start: '$still.start', length: '$still.len', when: { param: 'title', not: '' } }] },
+  { v: 1, id: 'burst-out-card', name: 'Burst-out card', kind: 'transition', target: 'cut', level: 'matte',
+    description: 'A card of the next shot arrives, the subject breaks out over it, and the card opens into the cut.',
+    timing: 'Before the cut', source: src('burst-out-card'),
+    params: [hiddenShape('box'), lead(0.5), wash()], shapes: { box: SHAPES.box },
+    steps: [windowOf('box'), subjectOfPrev] },
+  { v: 1, id: 'band-behind-subject', name: 'Band behind the subject', kind: 'transition', target: 'cut', level: 'matte',
+    description: 'A band of the next shot opens behind the current subject, then the cut lands.',
+    timing: 'Before the cut', source: src('band-behind-subject'),
+    params: [hiddenShape('band'), lead(0.4), wash()], shapes: { band: SHAPES.band },
+    steps: [windowOf('band'), subjectOfPrev] },
+  { v: 1, id: 'subject-first-drop', name: 'Subject drops first', kind: 'transition', target: 'cut', level: 'matte',
+    description: 'The next shot\'s subject arrives first on the hit, then its background opens as a band on the next note.',
+    timing: 'Two notes before the cut', source: src('subject-first-drop'),
+    params: [hiddenShape('band'), step(0.3), wash()], shapes: { band: SHAPES.band },
+    steps: [
+      { do: 'add', as: 'band', for: 'shape', track: 'video', source: '$next', in: '$next.in - $step * $next.speed', start: '$cut - $step', length: '$step', mask: '$shape', wash: '$wash' },
+      { do: 'add', as: 'subject', track: 'video', source: '$next', in: '$next.in - 2 * $step * $next.speed', start: '$cut - 2 * $step', length: '2 * $step', matte: true }] },
+  { v: 1, id: 'background-glitch', name: 'Background glitch', kind: 'effect', target: 'clip', level: 'matte',
+    description: 'On the hit only the background glitches for a few frames; the subject stays clean on top. Uses the pack\'s sound when it has one.',
+    timing: 'At the hit, 4–6 frames', source: src('background-glitch'),
+    params: [{ key: 'hit', label: 'Hit (part of the clip)', type: 'number', min: 0.1, max: 0.9, default: 0.5 }, { key: 'frames', label: 'Frames', type: 'number', min: 4, max: 8, default: 5 },
+      { key: 'amount', label: 'Glitch', type: 'number', min: 0.2, max: 1, default: 0.8 }, { key: 'sound', label: 'Sound', type: 'bool', default: true }],
+    steps: [{ do: 'split', on: 'target', at: '$start + $hit * $len', names: ['pre', 'hitPiece'] },
+      { do: 'split', on: 'hitPiece', at: '$hitPiece.start + $frames * $frame', names: ['glitched', 'post'] },
+      { do: 'set', on: 'glitched', fields: { effect: { id: 'glitch', amount: '$amount', speed: 2 } } },
+      { do: 'add', as: 'subject', track: 'video', source: 'glitched', copyLook: false, in: '$glitched.in', start: '$glitched.start', length: '$glitched.len', matte: true },
+      { do: 'add', track: 'sfx', source: 'pack:source', start: '$glitched.start', length: '$glitched.len + 0.4', when: { param: 'sound', is: true } }] },
+  { v: 1, id: 'title-behind-subject', name: 'Title behind the subject', kind: 'effect', target: 'clip', level: 'matte',
+    description: 'A big title behind the subject that jumps on each hit. The subject is cut out once (paid) and drawn in front of the words.',
+    timing: 'Over the clip, a jump per note', source: src('title-behind-subject', 'Free with N3'),
+    params: [{ key: 'title', label: 'Title', type: 'text', default: 'TITLE' }, step(0.25)],
+    steps: [{ do: 'add', as: 'title', track: 'text', text: '$title', start: '$start', length: '$len' },
+      { do: 'jitter', on: 'title', prop: 'x', amount: 0.015, step: '$step' },
+      { do: 'jitter', on: 'title', prop: 'opacity', amount: 0.5, step: '$step' },
+      { do: 'matte', on: 'target', name: 'Subject', aboveText: true }] },
+
+  // ---------------------------------------------------------------- not ready: needs a primitive, or Claude per video (9)
+  { v: 1, id: 'hit-negative', name: 'Negative hit', kind: 'effect', target: 'clip', level: 'primitive', requires: ['N1'],
+    description: 'The first 3 frames of a shot as a negative with a colour split.', timing: 'First 3 frames', source: src('hit-negative', 'invert + rgbSplit (N1)') },
+  { v: 1, id: 'eye-window-zoom', name: 'Eye window zoom', kind: 'transition', target: 'cut', level: 'reference', requires: ['N9'],
+    description: 'Pictures inside the mask\'s eye lens, then a zoom through it.', why: 'Needs a mask that follows the eye (tracking): ask Claude on the Mac to make it for this cut',
+    timing: 'Per video', source: src('eye-window-zoom', 'Tracked lens matte (N9)') },
+  { v: 1, id: 'glass-shatter', name: 'Glass shatter', kind: 'transition', target: 'cut', level: 'reference', requires: ['N8'],
+    description: 'The frame breaks like glass and falls away.', why: 'The shatter isn\'t built into Edit yet: ask Claude on the Mac to make it for this cut',
+    timing: 'On the cut', source: src('glass-shatter', 'Native shatter transition (N8)') },
+  { v: 1, id: 'one-frame-art', name: 'One-frame art', kind: 'effect', target: 'cut', level: 'primitive', requires: ['N7'],
+    description: 'One frame of art on each fast cut.', timing: 'One frame per hit', source: src('one-frame-art', 'Image items down to 1 frame (N7)') },
+  { v: 1, id: 'lyric-negative-window', name: 'Lyric negative window', kind: 'effect', target: 'clip', level: 'primitive', requires: ['N4', 'N1'],
+    description: 'Letters are windows showing the picture as a negative.', timing: 'Per word', source: src('lyric-negative-window', 'Text as a mask (N4) + invert (N1); word times need voice onsets') },
+  { v: 1, id: 'lyric-placed-art', name: 'Lyrics placed in the shot', kind: 'effect', target: 'clip', level: 'reference', requires: ['N9'],
+    description: 'Lyrics placed by the shot: behind the head, on the road, down a tower.', why: 'Placed per song, by Claude: ask Claude on the Mac to make it for this clip',
+    timing: 'Per word', source: src('lyric-placed-art', 'Perspective and tracked anchors (N9)') },
+  { v: 1, id: 'lyric-frosted-glass-glitch', name: 'Frosted glass lyrics', kind: 'effect', target: 'clip', level: 'primitive', requires: ['N4', 'N1'],
+    description: 'Frosted-glass letters that break into a colour split on each syllable.', timing: 'Per syllable', source: src('lyric-frosted-glass-glitch', 'Text as a mask (N4); split amount keys (N1). The pack\'s first text style to build') },
+  { v: 1, id: 'storm-end-card', name: 'Storm end card', kind: 'effect', target: 'edit', level: 'primitive', requires: ['N5'],
+    description: 'A storm cloud, the mark signed on with a pen, a line, TM pops, and a lightning glitch.', timing: 'The last seconds', source: src('storm-end-card', 'Write-on (N5)') },
+  { v: 1, id: 'contained-sound-ending', name: 'Contained sound ending', kind: 'effect', target: 'edit', level: 'primitive', requires: ['N6'],
+    description: 'The song closes like a door: low-pass 1500 → 600 → 240 Hz, then a 3.6 s sink.', timing: 'The ending', source: src('contained-sound-ending', 'Audio low-pass keyframes (N6)') },
+];

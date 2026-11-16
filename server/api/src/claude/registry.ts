@@ -14,6 +14,7 @@ import { SYNC_MAP_TOOLS } from './syncMap.js';
 import { SYNC_TOOLS } from '../editor/syncHits.js';
 import { ISSUE_TOOLS } from './issues.js';
 import { TEMPLATE_PACK_TOOLS } from '../editor/templatePacks.js';
+import { EDIT_TEMPLATE_TOOLS } from '../editor/editTemplateLibrary.js';
 import { CARD_TOOLS } from './cards.js';
 import { APP_TOOLS } from './appTools.js';
 import { ACTION_TOOLS, SETTINGS_TOOLS } from './actions.js';
@@ -29,6 +30,7 @@ export type ChatTool = EditTool & { pages: (PageName | 'any')[]; gate: Gate; mem
 /** Every tool that spends money (the price is shown on the person's button). Delete/post/settings: none yet. */
 export const GATES: Record<string, Gate> = {
   suite_request_shot: 'spend', fill_slot: 'spend', auto_captions: 'spend', cut_fillers: 'spend', remove_background: 'spend', denoise: 'spend', find_layers: 'spend',
+  edit_template_apply: 'spend', // a template with a subject cut-out: priced, then the owner's Approve in the app
 };
 /** Recreate tools a member can't use: they act on edit sessions or the editing playbook, which are the owner's. */
 const OWNER_ONLY = new Set(['apply_recipe', 'replace_slot', 'playbook_read', 'playbook_add', 'report_gap',
@@ -66,6 +68,8 @@ export const CHAT_REGISTRY: ChatTool[] = [
   // Editing with Claude is the owner's (editor/sessions.ts owner()).
   ...tag(EDIT_TOOLS, ['edit', 'recreate'], () => false),
   ...tag(SYNC_TOOLS, ['edit', 'recreate'], () => false),
+  // Edit's template library (editor/editTemplateLibrary.ts, plans/edit-templates.md §3): the owner's, like editing with Claude.
+  ...tag(EDIT_TEMPLATE_TOOLS, ['edit', 'recreate'], () => false),
   ...tag(RECREATE_TOOLS, ['recreate'], t => !OWNER_ONLY.has(t.name)),
 ];
 export const registryByName = new Map(CHAT_REGISTRY.map(t => [t.name, t]));

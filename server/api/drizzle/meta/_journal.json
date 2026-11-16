@@ -267,6 +267,13 @@
       "when": 1794688043566,
       "tag": "0037_template_packs",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794844273220,
+      "tag": "0038_edit_templates",
+      "breakpoints": true
     }
   ]
 }

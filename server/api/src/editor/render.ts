@@ -23,6 +23,7 @@ import * as M from './model.js';
 import { hash01, parseCube, writeCube, type Look, type Lut } from './look.js';
 import { voiceChain } from './audio.js';
 import * as L from './layer.js';
+import { effectFilters } from './renderEffects.js';
 import * as TD from './textdraw.js';
 import { decThreads, encThreads, x264Lean } from '../lib/resources.js';
 import { LOOK_DIR, PALETTE_DIR, paletteFiles } from './photo.js';
@@ -459,6 +460,23 @@ export function planRender(p: M.EditProject, files: Record<string, string>, size
         }
       }
       if (o.blurPx && o.blurPx * f >= 0.3) { toRgb(); g.push(`[${s}]gblur=sigma=${n4(o.blurPx * f)}[${tag}lb]`); s = `${tag}lb`; }
+      // The effect (effects.ts effectPixel): after the look, before the matte, mask and placement, as the apps draw it
+      // (plans/edit-templates.md §7: the render used to drop it silently). Moving effects write a small map per frame.
+      if (it.effect && it.effect.amount > 0) {
+        toRgb();
+        const fx = effectFilters(it.effect, { src: s, tag: `${tag}fx`, iw, ih, n, fps: FPS, t0: skip / FPS }, (name, fmt, w, h, frames) => {
+          const raw = tmpName(name, fmt === 'gray' ? 'gray' : 'rgb');
+          const fd = fs.openSync(raw, 'w');
+          try { for (const b of frames) fs.writeSync(fd, b); } finally { fs.closeSync(fd); }
+          temp.push(raw);
+          const k = inputs.length;
+          inputs.push(raw);
+          inputArgs.set(k, ['-f', 'rawvideo', '-pix_fmt', fmt, '-s', `${w}x${h}`, '-framerate', String(FPS)]);
+          return `${k}:v`;
+        });
+        g.push(...fx.graph);
+        s = fx.out;
+      }
       // Background removal: the matte's luma (cut and timed like the clip) is the alpha.
       if (vc?.alphaMatte) {
         const ms = o.matte?.();

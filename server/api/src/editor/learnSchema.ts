@@ -99,3 +99,36 @@ export const editTemplatePacks = pgTable('edit_template_packs', {
   createdAt: ms('created_at').notNull(),
   updatedAt: ms('updated_at').notNull(),
 }, t => [uniqueIndex('edit_template_packs_name_idx').on(t.studioId, t.name)]);
+
+/**
+ * Edit's template library (migration 0038, plans/edit-templates.md §2): effects and transitions as one JSON spec each
+ * (editTemplates.ts), expanded on the server into ordinary edit items. Not the photo presets (templates_*). One row per
+ * (studio, template id); saving the same id again makes a new version. Seeds (the 27 of the icon-storyboard pack) are
+ * rows with by = 'seed'; a deleted template keeps its row (deletedAt) so a seed never comes back after a delete.
+ */
+export const editTemplates = pgTable('edit_templates', {
+  id: text('id').primaryKey(),
+  studioId: text('studio_id').notNull(),
+  /** The spec's slug ("window-open-next"). */
+  templateId: text('template_id').notNull(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(),
+  target: text('target').notNull(),
+  level: text('level').notNull(),
+  spec: jsonb('spec').$type<Record<string, unknown>>().notNull(),
+  /** A short clip or still of it (an upload); null: the apps draw a live render. */
+  previewUpload: text('preview_upload'),
+  /** The pack's finished clip (reference only: it holds that video's footage). */
+  referenceUpload: text('reference_upload'),
+  /** {pack, templateId, by, scripts?, native?} */
+  source: jsonb('source').$type<Record<string, unknown> | null>(),
+  /** seed | claude | owner */
+  by: text('by').notNull(),
+  version: integer('version').notNull().default(1),
+  /** The seed version it came from (seeds only). */
+  seedVersion: integer('seed_version'),
+  deletedAt: ms('deleted_at'),
+  createdBy: text('created_by'),
+  createdAt: ms('created_at').notNull(),
+  updatedAt: ms('updated_at').notNull(),
+}, t => [uniqueIndex('edit_templates_studio_template_idx').on(t.studioId, t.templateId)]);
