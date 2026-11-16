@@ -207,7 +207,7 @@ public enum ClaudeFilePolicy {
     public static let offRefusal = "Files on this Mac are off for Claude (Settings → Claude)."
 
     /// The tools a file-enabled run lets Claude ask for (Web stays off).
-    public static let fileTools: Set<String> = ["Read", "Glob", "Grep", "LS", "Write", "Edit", "MultiEdit", "Bash", "Upload"]
+    public static let fileTools: Set<String> = ["Read", "Glob", "Grep", "LS", "Write", "Edit", "MultiEdit", "Bash", "Upload", "Save"]
     /// upload_local_file: what can go up (the chat's own limits; sound as an editor audio upload, ci_de89873ab1de).
     public static let uploadImageTypes = SuiteClaudeAttachments.extensions
     public static let uploadVideoTypes: [String: String] = ["mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime"]
@@ -310,6 +310,7 @@ public enum ClaudeFilePolicy {
         // A folder too wide to always allow (the disk, home, ~/Library) never counts, however it got on the list.
         let folders = folders.filter { ClaudeAlwaysRules.tooWide($0, home: home) == nil }
         let tool = ask.toolName
+        if tool == "Save" { return saveVerdict(ask, folders: folders, cwd: cwd, home: home, askAll: askAll) }
         if tool == "Bash" {
             let cmd = str(ask.input, "command") ?? ""
             if cmd.isEmpty { return .deny("Empty command") }
@@ -370,6 +371,76 @@ public enum ClaudeFilePolicy {
         return .ask(ClaudeFileCard(action: action, detail: detail, folder: ClaudeAlwaysRules.tooWide(project, home: home) == nil ? project : folder, alwaysAsksBecause: nil))
     }
 
+    // MARK: save_to_mac (ci_741e03646382, ci_c62906bcd1c1)
+
+    /// Where save_to_mac may save without the person having allowed the folder first (a card still asks): the usual
+    /// places for files under the home folder. Anything else must be one of their "Always allowed" folders.
+    public static let saveRoots = ["Downloads", "Desktop", "Documents", "Movies", "Pictures", "Music", "MUSE"]
+    public static let defaultSaveFolder = "~/Downloads/MUSE"
+    public static let saveFolderRefusal = "MUSE saves files for Claude only into Downloads, Desktop, Documents, Movies, Pictures, Music, ~/MUSE or a folder you always allowed (Settings → Claude). Nothing was saved."
+    public static let saveLinkRefusal = "That isn't a MUSE file link. Nothing was saved."
+
+    /// What save_to_mac asks the Mac to save (the server's `Save` question).
+    public struct SaveTarget: Equatable, Sendable {
+        /// The folder, resolved (no ~).
+        public var folder: String
+        /// The file name the server suggested, made safe (SaveFileName.sanitized); the Mac adds " (2)" when it exists.
+        public var fileName: String
+        /// The link to download: absolute, or a server path ("/uploads/…") against the server's address.
+        public var url: String
+        public var bytes: Int?
+        public var what: String
+    }
+
+    /// The question's target, or nil when it names no file to fetch.
+    public static func saveTarget(_ ask: ClaudePermissionAsk, cwd: String, home: String) -> SaveTarget? {
+        guard let url = str(ask.input, "url"), let raw = str(ask.input, "fileName") else { return nil }
+        let folder = resolve(str(ask.input, "folder") ?? defaultSaveFolder, cwd: cwd, home: home)
+        var bytes: Int?
+        if case .object(let o)? = ask.input, case .number(let n)? = o["bytes"], n > 0 { bytes = Int(n) }
+        let name = SaveFileName.sanitized((raw as NSString).lastPathComponent)
+        return SaveTarget(folder: folder, fileName: name, url: url, bytes: bytes, what: str(ask.input, "what") ?? name)
+    }
+
+    /// Whether the folder may receive a save: inside one of the home's usual places, or inside an "Always allowed" folder;
+    /// never ~/Library, the home itself or a key folder.
+    public static func saveFolderAllowed(_ folder: String, folders: [String], home: String) -> Bool {
+        if isSecret(folder) || inside(folder, home + "/Library") || folder == home { return false }
+        if saveRoots.contains(where: { inside(folder, home + "/" + $0) }) { return true }
+        return folders.contains { inside(folder, $0) }
+    }
+
+    /// A MUSE file link: https (or http on a local server), or a path on the MUSE server.
+    public static func saveLinkOK(_ url: String) -> Bool {
+        if url.hasPrefix("/") { return !url.hasPrefix("//") && !url.contains("..") }
+        guard let u = URL(string: url), let scheme = u.scheme?.lowercased(), u.host != nil else { return false }
+        return scheme == "https" || scheme == "http"
+    }
+
+    static func saveVerdict(_ ask: ClaudePermissionAsk, folders: [String], cwd: String, home: String, askAll: Bool) -> ClaudeFileVerdict {
+        guard let t = saveTarget(ask, cwd: cwd, home: home) else { return .deny("Nothing to save") }
+        let path = t.folder + "/" + t.fileName
+        if isSecret(t.folder) || isSecret(path) { return .deny(credentialRefusal) }
+        guard saveLinkOK(t.url) else { return .deny(saveLinkRefusal) }
+        guard saveFolderAllowed(t.folder, folders: folders, home: home) else { return .deny(saveFolderRefusal) }
+        // A folder the person always allowed (reading, writing and uploading) takes saves without a card.
+        if !askAll, folders.contains(where: { inside(t.folder, $0) }) { return .allow }
+        let shown = inside(t.folder, home) ? "~" + t.folder.dropFirst(home.count) : t.folder
+        let action = "Save \(t.fileName) to \(shown)"
+        let detail = "\(t.what) · original quality" + (t.bytes.map { " · \(Self.megabytes($0))" } ?? "")
+        if askAll { return .ask(ClaudeFileCard(action: action, detail: detail, folder: nil, alwaysAsksBecause: askAllReason)) }
+        if let wide = ClaudeAlwaysRules.tooWide(t.folder, home: home) {
+            return .ask(ClaudeFileCard(action: action, detail: detail, folder: nil, alwaysAsksBecause: "Always asks: \(wide)"))
+        }
+        // "Allow always" covers the save folder itself (~/Downloads/MUSE), not all of Downloads.
+        return .ask(ClaudeFileCard(action: action, detail: detail, folder: t.folder, alwaysAsksBecause: nil))
+    }
+
+    static func megabytes(_ n: Int) -> String {
+        let mb = Double(n) / 1024 / 1024
+        return mb >= 10 ? "\(Int(mb.rounded())) MB" : String(format: "%.1f MB", mb)
+    }
+
     static func inputSummary(_ v: JSONValue?) -> String {
         guard let v, let d = try? JSONEncoder().encode(v) else { return "" }
         return String(String(decoding: d, as: UTF8.self).prefix(300))
@@ -405,6 +476,18 @@ public struct ClaudeLocalUpload: Codable, Hashable, Sendable {
         self.url = url
         self.name = name
         self.durationSec = durationSec
+    }
+}
+
+/// What save_to_mac's Mac side sends back once the file is saved: where (Claude's shell tools use the path).
+public struct ClaudeLocalSave: Codable, Hashable, Sendable {
+    public var path: String
+    public var bytes: Int?
+    public var name: String?
+    public init(path: String, bytes: Int? = nil, name: String? = nil) {
+        self.path = path
+        self.bytes = bytes
+        self.name = name
     }
 }
 

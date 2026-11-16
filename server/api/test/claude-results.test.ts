@@ -69,8 +69,19 @@ describe('results to the chat', () => {
     expect(r.mcpContent[0]).toEqual({ type: 'text', text: 's_p1 · Photo · Beach · Beach · 1' });
     expect(r.mcpContent[1].mimeType).toBe('image/jpeg');
     expect((await sharp(Buffer.from(r.mcpContent[1].data, 'base64')).metadata()).width).toBe(1024);
-    await expect(seePhotos(a.ctx, { studioId }, ['t_v1'])).rejects.toThrow(/watch it instead/);
-    await expect(seePhotos(a.ctx, { studioId }, ['s_other'])).rejects.toThrow(/not found/i);
+    await expect(seePhotos(a.ctx, { studioId }, ['t_v1'])).rejects.toThrow(/watch it instead/); // a video with no poster
+    await expect(seePhotos(a.ctx, { studioId }, ['s_other'])).rejects.toThrow(/s_other is a take id, but it is not found in this studio now: that take was deleted/);
+    await expect(seePhotos(a.ctx, { studioId }, ['up_nothing'])).rejects.toThrow(/Photo up_nothing not found/);
+    // ci_1730e4814e8f: a shot take whose still is only its thumb (no media key) is shown; a video take shows its poster, marked.
+    await a.ctx.storage.put('s/poster.png', png, 'image/png');
+    await a.ctx.db.insert(takes).values({ id: 's_9381c89cde04', studioId, userId: null, kind: 'shot', jobId: null, modelId: null, index: 2, of: 2,
+      title: 'Photo · Beach', label: 'Beach · 2', engineLabel: '', cost: 0, seed: 0, status: 'test', thumb: { url: 'https://muse.test/uploads/s/poster.png' }, prompt: '', mediaKey: null, createdAt: Date.now() });
+    await a.ctx.db.insert(takes).values({ id: 't_v2', studioId, userId: null, kind: 'take', jobId: null, modelId: null, index: 1, of: 1,
+      title: 'Shot · Walk', label: 'Draft', engineLabel: '', cost: 0, seed: 0, status: 'test', thumb: { url: 'https://muse.test/uploads/s/poster.png' }, prompt: '', mediaKey: 'v/x.mp4', createdAt: Date.now() });
+    const both = await seePhotos(a.ctx, { studioId }, ['s_9381c89cde04', 't_v2']) as any;
+    expect(both.mcpContent.map((b: any) => b.type)).toEqual(['text', 'image', 'text', 'image']);
+    expect(both.mcpContent[2].text).toMatch(/^t_v2 · Shot · Walk · Draft · VIDEO: this is its poster frame only; watch it/);
+    expect(both.structuredContent.photos).toEqual([{ id: 's_9381c89cde04', title: 'Photo · Beach' }, { id: 't_v2', title: 'Shot · Walk', video: true }]);
     expect(registryByName.get('see_photos')?.members).toBe(true);
   });
 

@@ -15,7 +15,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { cameraAssets } from '../camera/schema.js';
 import sharp from 'sharp';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { clips, jobs, takes, uploads } from '../db/schema.js';
+import { clips, jobs, takes, uploads, type ImageRef } from '../db/schema.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { readyIfStored } from '../storage/objects.js';
 import { assetIn } from '../editor/assetMedia.js';
@@ -480,11 +480,21 @@ export const WATCH_TOOLS: EditTool[] = [
   },
   {
     name: 'see_photos', title: 'See photos (free)', scope: 'edit:read', readOnly: true, idempotent: true,
-    description: `Look at photos yourself: the stills a Photo run made and Library photos (their take ids), images attached to the chat or uploaded (upload ids) and any studio picture link (/uploads/…), up to ${PHOTOS_MAX} at once, each sized to about 1024 px with its id and title. Free. Videos: use watch.`,
+    description: `Look at photos yourself: the stills a Photo run made and Library photos (their take ids, s_…; a video take shows its poster, marked as a video), images attached to the chat or uploaded (upload ids) and any studio picture link (/uploads/…), up to ${PHOTOS_MAX} at once, each sized to about 1024 px with its id and title. Free. Videos: use watch.`,
     inputSchema: obj({ ids: { type: 'array', minItems: 1, maxItems: PHOTOS_MAX, items: { type: 'string', maxLength: 300 }, description: 'Photo take ids, image upload ids or /uploads/ links' } }, ['ids']),
     run: async (env, a) => seePhotos(env.ctx, env.user, a.ids),
   },
 ];
+
+/** Why an id names nothing in the studio, by what it looks like (ci_1730e4814e8f: a deleted take read as "not found"). */
+export function missingWhy(id: string, what = 'Photo'): string {
+  const take = /^(s|take|t)_[A-Za-z0-9]+$/.test(id);
+  return take
+    ? `${id} is a take id, but it is not found in this studio now: that take was deleted (or made in another studio). suite_feed or library lists the current ids.`
+    : `${what} ${id} not found in this studio (deleted, or not a take or upload id) · suite_feed or library lists the ids`;
+}
+
+const toJpeg = (b: Buffer) => sharp(b).rotate().resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
 
 /** An uploaded image or a /uploads/ link of the studio, as a JPEG ≤ 1024 px. */
 async function otherPhoto(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: string): Promise<Buffer> {
@@ -492,22 +502,37 @@ async function otherPhoto(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, id: string): 
   const [up] = key
     ? await ctx.db.select().from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, u.studioId)))
     : await ctx.db.select().from(uploads).where(and(eq(uploads.id, id), eq(uploads.studioId, u.studioId)));
-  if (!up) throw new ApiError(404, 'not_found', `Photo ${id} not found in this studio (deleted, or not a take or upload id) · suite_feed or library lists the ids`);
+  if (!up) throw new ApiError(404, 'not_found', missingWhy(id));
   if (!/^image\//i.test(up.contentType)) throw badRequest(`${id} is not a picture (${up.contentType})${/^video\//i.test(up.contentType) ? ': watch it instead' : ''}`);
   const obj = await ctx.storage.get(up.storageKey);
   if (!obj) throw new ApiError(409, 'not_ready', `${id}: the image hasn't arrived yet`);
   const parts: Buffer[] = [];
   for await (const ch of obj.body) parts.push(ch as Buffer);
-  return sharp(Buffer.concat(parts)).rotate().resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+  return toJpeg(Buffer.concat(parts));
 }
 
-/** Photo takes (kind "shot") of the person's studio as image blocks, small enough for Claude to read. */
+/** A take's stored file (a photo's still), or null when it isn't there. */
+async function storedBytes(ctx: Ctx, key: string | null): Promise<Buffer | null> {
+  if (!key) return null;
+  const obj = await ctx.storage.get(key);
+  if (!obj) return null;
+  const parts: Buffer[] = [];
+  for await (const ch of obj.body) parts.push(ch as Buffer);
+  return Buffer.concat(parts);
+}
+
+/**
+ * Takes of the person's studio (any kind with a picture) and uploaded images, as image blocks small enough for Claude to
+ * read. A photo take (kind "shot", s_…) shows its still; a video take shows its poster, marked as a video (watch it to
+ * see it move), ci_1730e4814e8f.
+ */
 export async function seePhotos(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, ids: unknown) {
   if (!Array.isArray(ids) || !ids.length || ids.length > PHOTOS_MAX || !ids.every(x => typeof x === 'string' && (/^[A-Za-z0-9_-]{1,80}$/.test(x) || /\/uploads\/[A-Za-z0-9][A-Za-z0-9._/-]{0,299}$/.test(x)))) {
-    throw badRequest(`ids: 1 to ${PHOTOS_MAX} photo take ids, image upload ids or /uploads/ links`);
+    throw badRequest(`ids: 1 to ${PHOTOS_MAX} take ids, image upload ids or /uploads/ links`);
   }
+  const { refBytes } = await import('../suite/vision.js');
   const blocks: Block[] = [];
-  const seen: { id: string; title?: string }[] = [];
+  const seen: { id: string; title?: string; video?: true }[] = [];
   for (const id of ids as string[]) {
     const [t] = await ctx.db.select().from(takes).where(and(eq(takes.id, id), eq(takes.studioId, u.studioId)));
     if (!t) {
@@ -517,14 +542,19 @@ export async function seePhotos(ctx: Ctx, u: Pick<AuthUser, 'studioId'>, ids: un
       seen.push({ id });
       continue;
     }
-    if (t.kind !== 'shot') throw badRequest(`${id} is a video: watch it instead`);
-    if (!t.mediaKey) throw new ApiError(409, 'not_ready', `${id} has no image yet`);
-    const obj = await ctx.storage.get(t.mediaKey);
-    if (!obj) throw new ApiError(409, 'not_ready', `${id}: the image hasn't arrived yet`);
-    const parts: Buffer[] = [];
-    for await (const ch of obj.body) parts.push(ch as Buffer);
-    const jpg = await sharp(Buffer.concat(parts)).rotate().resize(1024, 1024, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
-    blocks.push({ type: 'text', text: `${id}${t.title ? ` · ${t.title}` : ''}${t.label ? ` · ${t.label}` : ''}` }, { type: 'image', data: jpg.toString('base64'), mimeType: 'image/jpeg' });
+    const name = `${id}${t.title ? ` · ${t.title}` : ''}${t.label ? ` · ${t.label}` : ''}`;
+    if (t.kind !== 'shot') {
+      // A video take: its poster, said plainly to be a video.
+      const poster = t.thumb ? await refBytes(ctx, t.thumb as ImageRef).catch(() => null) : null;
+      if (!poster) throw badRequest(`${id} is a video with no poster picture: watch it instead`);
+      blocks.push({ type: 'text', text: `${name} · VIDEO: this is its poster frame only; watch it instead to see the video` },
+        { type: 'image', data: (await toJpeg(poster)).toString('base64'), mimeType: 'image/jpeg' });
+      seen.push({ id, title: t.title ?? undefined, video: true });
+      continue;
+    }
+    const still = await storedBytes(ctx, t.mediaKey) ?? (t.thumb ? await refBytes(ctx, t.thumb as ImageRef).catch(() => null) : null);
+    if (!still) throw new ApiError(409, 'not_ready', t.mediaKey ? `${id}: the image hasn't arrived yet` : `${id} has no image yet`);
+    blocks.push({ type: 'text', text: name }, { type: 'image', data: (await toJpeg(still)).toString('base64'), mimeType: 'image/jpeg' });
     seen.push({ id, title: t.title ?? undefined });
   }
   return { mcpContent: blocks, structuredContent: { photos: seen } };

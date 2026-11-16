@@ -4,8 +4,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import sharp from 'sharp';
-import { outfits, uploads, users } from '../src/db/schema.js';
-import { applySent, type SentImage } from '../src/images/sent.js';
+import { outfits, takes, uploads, users } from '../src/db/schema.js';
+import { applySent, sentImagesOf, type SentImage } from '../src/images/sent.js';
 import { registryByName } from '../src/claude/registry.js';
 import { putObject } from '../src/storage/objects.js';
 import type { AuthUser } from '../src/ctx.js';
@@ -136,5 +136,18 @@ describe('images sent (routes, fake engines)', () => {
     await expect(tool('set_sent_images').run(env, { page: 'outfit', modelId: model.id, add: [{ image: { url: 'https://example.com/x.jpg' }, role: 'outfit' }] })).rejects.toThrow(/studio/);
     await tool('set_sent_images').run(env, { page: 'outfit', modelId: model.id, reset: true });
     expect((await owner.req('POST', '/v1/outfits', { modelId: model.id, description: 'x', dryRun: true })).body.sentImages.changed).toBe(false);
+  });
+
+  it('a photo take id works however Claude names it (plain, {takeId}, {asset}, {url}); a deleted take says so (ci_666286d167a5)', async () => {
+    const svc = sentImagesOf(a.ctx);
+    await a.ctx.db.insert(takes).values({ id: 's_41821c709880', studioId, userId: owner.id, kind: 'shot', jobId: null, modelId: model.id, index: 1, of: 1,
+      title: 'Photo · Beach', label: 'Beach · 1', engineLabel: '', cost: 0, seed: 0, status: 'test', thumb: { url: 'https://muse.test/uploads/u/sent-test.jpg' }, prompt: '', mediaKey: 'u/sent-test.jpg', createdAt: Date.now() });
+    for (const named of ['s_41821c709880', { takeId: 's_41821c709880' }, { asset: 's_41821c709880' }, { url: 's_41821c709880' }] as const) {
+      expect(await svc.image(studioId, named as any)).toEqual({ url: 'https://muse.test/uploads/u/sent-test.jpg' });
+    }
+    expect(await svc.image(studioId, { asset: 'face' })).toEqual({ asset: 'face' }); // bundled pictures as before
+    await expect(svc.image(studioId, { asset: 's_gone12345678' })).rejects.toThrow(/take id, but it is not found in this studio now: that take was deleted/);
+    await expect(svc.image(studioId, { asset: 'no such picture!' })).rejects.toThrow(/Unknown image/);
+    await expect(svc.image('st_other', { asset: 's_41821c709880' })).rejects.toThrow(/not found in this studio/); // another studio's take
   });
 });

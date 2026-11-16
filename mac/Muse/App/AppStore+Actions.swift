@@ -320,7 +320,7 @@ extension AppStore {
     func export(_ t: Take) {
         if let v = t.videoUrl, let src = URL(string: v) {
             perform { [self] in
-                let file = try await downloadVideo(src, name: t.caption)
+                let file = try await downloadVideo(src, fileName: SaveFileName.forTake(t, ext: src.pathExtension.isEmpty ? "mp4" : src.pathExtension.lowercased()))
                 showToast("Exported \(t.mediaLine ?? "video")", action: "Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
             }
             return
@@ -723,23 +723,21 @@ extension AppStore {
         return try await work(report)
     }
 
-    func downloadVideo(_ src: URL, name: String) async throws -> URL {
+    /// Downloads `src` into `folder` (default ~/Downloads/MUSE) as `fileName`, or "name (2).ext" when that exists: never
+    /// over another file (ci_7972a1d67e72).
+    func downloadVideo(_ src: URL, fileName: String, folder: URL? = nil) async throws -> URL {
         let fm = FileManager.default
-        guard let dir = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE", isDirectory: true) else {
+        guard let dir = folder ?? fm.urls(for: .downloadsDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE", isDirectory: true) else {
             throw ApiError("export_failed", "Can't find the Downloads folder")
         }
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let safe = name.components(separatedBy: CharacterSet(charactersIn: "/:\\?%*|\"<>")).joined(separator: "-").trimmingCharacters(in: .whitespaces)
-        let dst = dir.appendingPathComponent(String((safe.isEmpty ? "MUSE take" : safe).prefix(80))).appendingPathExtension("mp4")
         let tmp: URL
         do {
             tmp = try await URLSession.shared.download(from: src).0
         } catch {
             throw ApiError("download_failed", "Couldn't download the video")
         }
-        try? fm.removeItem(at: dst)
-        try fm.moveItem(at: tmp, to: dst)
-        return dst
+        return try SaveFileName.moveUnique(tmp, named: fileName, into: dir)
     }
 
     /// Not enough money for something: members are told to ask the owner; owners get a link to their balance.

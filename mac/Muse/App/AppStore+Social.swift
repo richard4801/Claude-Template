@@ -312,24 +312,22 @@ extension AppStore {
     // MARK: Export and share
 
     /// Writes the take to ~/Downloads/MUSE. The mock renders no video, so the still (or its placeholder art) is saved at 1080×1920.
+    /// Each take gets its own name (title, id, number) and an existing file is never replaced (ci_7972a1d67e72).
     func exportFile(_ t: Take) -> URL? {
         let fm = FileManager.default
         guard let dir = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE", isDirectory: true) else { return nil }
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let safe = t.caption.components(separatedBy: CharacterSet(charactersIn: "/:\\?%*|\"<>")).joined(separator: "-").trimmingCharacters(in: .whitespaces)
-        let base = String((safe.isEmpty ? "MUSE take" : safe).prefix(80))
         if let u = t.thumb.url, u.hasPrefix("file:"), let src = URL(string: u) {
-            let dst = dir.appendingPathComponent(base).appendingPathExtension(src.pathExtension.isEmpty ? "jpg" : src.pathExtension)
-            try? fm.removeItem(at: dst)
+            let dst = SaveFileName.unique(SaveFileName.forTake(t, ext: src.pathExtension.isEmpty ? "jpg" : src.pathExtension.lowercased()), in: dir)
             if (try? fm.copyItem(at: src, to: dst)) != nil { return dst }
         }
-        let dst = dir.appendingPathComponent(base).appendingPathExtension("png")
+        let dst = SaveFileName.unique(SaveFileName.forTake(t, ext: "png"), in: dir)
         let size = CGSize(width: 1080, height: 1920)
         let view = MuseImage(ref: t.thumb).frame(width: size.width, height: size.height)
         let r = ImageRenderer(content: view)
         r.proposedSize = ProposedViewSize(size)
         guard let cg = r.cgImage, let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else { return nil }
-        do { try png.write(to: dst) } catch { return nil }
+        do { try png.write(to: dst, options: .withoutOverwriting) } catch { return nil }
         return dst
     }
 

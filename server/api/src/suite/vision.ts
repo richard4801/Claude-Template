@@ -15,7 +15,7 @@ export type SeeBlock = { type: 'image'; data: string; mimeType: 'image/jpeg' } |
 
 const cache = new Map<string, string>(); // `${studio}|${edge}|${ref}` → base64 JPEG (oldest first)
 
-async function refBytes(ctx: Ctx, ref: ImageRef): Promise<Buffer | null> {
+export async function refBytes(ctx: Ctx, ref: ImageRef): Promise<Buffer | null> {
   if (ref.asset && ASSET_KEYS.includes(ref.asset)) return fs.readFileSync(path.join(ASSET_DIR, `${ref.asset}.jpg`));
   const key = ctx.images.keyOf(ref);
   if (key) {

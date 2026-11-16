@@ -149,6 +149,29 @@ extension SnapshotRunner {
         check("five_more_across_a_new_chat_ask_nothing", prompts.isEmpty, "\(prompts.count) prompts: \(prompts)")
         for a in service.fileAsks(threadId: newChat) { service.answerFile(a.id, .deny) }
 
+        note("START save_to_mac")
+        // save_to_mac (ci_741e03646382, ci_c62906bcd1c1): the card names the file and the folder; ~/Library is never a save folder.
+        let saveAsk = ask("perm_review_save", "Save", ["folder": .string("~/Downloads/MUSE"), "fileName": .string("mia-living-room-dance-takev1-1.mp4"),
+                                                        "url": .string("/uploads/s/v1.mp4"), "what": .string("the video take_v1 (Mia · Living-room dance)"),
+                                                        "bytes": .number(48 * 1024 * 1024)])
+        _ = service.reviewShowAsk(saveAsk, threadId: tid)
+        let saveCard = card(saveAsk.id)
+        check("save_card", saveCard?.action == "Save mia-living-room-dance-takev1-1.mp4 to ~/Downloads/MUSE" && saveCard?.alwaysLabel == "Allow always",
+              "\(saveCard?.action ?? "none") · \(saveCard?.alwaysLabel ?? "none")")
+        if let saveCard {
+            let r = ImageRenderer(content: ClaudeFileCardView(card: saveCard, id: "shot", answer: { _ in })
+                .frame(width: 300).padding(8).background(Color(nsColor: .windowBackgroundColor)))
+            r.scale = 2
+            if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: dir.appendingPathComponent("mac_a_claude_save_card.png"))
+            } else { note("FAIL card_shot_save: couldn't draw the card") }
+        }
+        let libSave = service.reviewShowAsk(ask("perm_review_save_lib", "Save", ["folder": .string("~/Library/Caches"), "fileName": .string("a.mp4"),
+                                                                                  "url": .string("/uploads/s/v1.mp4")]), threadId: tid)
+        check("save_library_refused", libSave == .deny(ClaudeFilePolicy.saveFolderRefusal), "\(libSave)")
+        for a in service.fileAsks(threadId: tid) where a.id == saveAsk.id { service.answerFile(a.id, .deny) }
+
         note("START run_code")
         // Bundle-24 (owner): the card for code Claude wrote says so (not "controls other apps" for Python's open(p)), and
         // "Let Claude run code it writes" lets it run; the shell's own `open` still flags. The owner's command, verbatim.

@@ -9,8 +9,12 @@ import { ApiError, badRequest } from '../errors.js';
 import { uid } from '../lib/util.js';
 
 export type PermissionAsk = { id: string; toolName: string; input: Record<string, unknown>; toolUseId?: string; createdAt: number; expiresAt: number };
-type Pending = { ask: PermissionAsk; userId: string; resolve: (text: string) => void; timer: NodeJS.Timeout; upload?: boolean; acked?: boolean };
+type Pending = { ask: PermissionAsk; userId: string; resolve: (text: string) => void; timer: NodeJS.Timeout; upload?: boolean; save?: boolean; acked?: boolean };
 export type UploadResult = { uploadId: string; kind: 'image' | 'clip' | 'audio'; url?: string; name?: string; durationSec?: number };
+/** save_to_mac: where the Mac saved the file (the path Claude's shell tools can use). */
+export type SavedFile = { path: string; bytes?: number; name?: string };
+/** What save_to_mac asks the Mac to fetch (claude/saveToMac.ts resolves it from a take, upload or outfit picture). */
+export type SaveRequest = { url: string; fileName: string; folder: string; what: string; contentType?: string; bytes?: number };
 
 /** An unanswered card ends the call after this long (Claude Code's own wait is raised past it on the Mac). */
 export const PERMISSION_WAIT_MS = 60 * 60 * 1000;
@@ -56,15 +60,18 @@ export const ACK_WAIT_MS = 20_000;
 export const UPLOAD_KEEP_MS = 60 * 60 * 1000;
 
 /** Where an upload_local_file stands, as Claude reads it. */
-export type UploadPhase = 'sent' | 'asking' | 'uploading' | 'confirming' | 'done' | 'failed';
+export type UploadPhase = 'sent' | 'asking' | 'uploading' | 'confirming' | 'downloading' | 'done' | 'failed';
 export type UploadState = {
   ticket: string; userId: string; path: string; purpose: string; phase: UploadPhase; createdAt: number; updatedAt: number;
   sentBytes?: number; totalBytes?: number; attempt?: number; result?: UploadResult; error?: string;
+  /** save_to_mac (the other direction): the file it saves, and where it went. */
+  save?: SaveRequest; saved?: SavedFile;
 };
 const MB = (n: number) => Math.round(n / 1024 / 1024 * 10) / 10;
 
 /** The tool's answer: the upload (status done, its uploadId at the top as before), a failure with why, or where it stands. */
 export function uploadView(st: UploadState, macReportsProgress: boolean): Record<string, unknown> {
+  if (st.save) return saveView(st);
   const name = st.path.split('/').pop() || st.path;
   if (st.phase === 'done' && st.result) return { status: 'done', ...st.result };
   if (st.phase === 'failed') return { status: 'failed', error: st.error ?? 'The upload failed.' };
@@ -85,10 +92,28 @@ export function uploadView(st: UploadState, macReportsProgress: boolean): Record
   }
 }
 
+/** save_to_mac's answer: saved (the local path), failed, or where it stands (follow with saveTicket). */
+export function saveView(st: UploadState): Record<string, unknown> {
+  const sv = st.save!;
+  if (st.phase === 'done' && st.saved) return { status: 'done', path: st.saved.path, ...(st.saved.bytes !== undefined ? { bytes: st.saved.bytes, sizeMB: MB(st.saved.bytes) } : {}), what: sv.what,
+    message: `Saved ${sv.what} to ${st.saved.path} on the Mac (original quality). Use that path with your file and shell tools.` };
+  if (st.phase === 'failed') return { status: 'failed', error: st.error ?? 'The file was not saved.' };
+  const base = { status: st.phase === 'sent' || st.phase === 'asking' ? 'waiting_for_approval' : 'downloading', saveTicket: st.ticket,
+    next: `Call save_to_mac {"saveTicket":"${st.ticket}"} (or upload_status {"uploadTicket":"${st.ticket}"}) to wait for it; each call waits up to ${UPLOAD_ANSWER_MS / 1000} s.` };
+  if (st.phase === 'sent' || st.phase === 'asking') return { ...base, message: `Waiting for the person to approve "Save ${sv.fileName} to ${sv.folder}?" on their Mac (or for the Mac to start, when that folder is always allowed).` };
+  const pct = st.totalBytes ? Math.min(99, Math.floor((st.sentBytes ?? 0) / st.totalBytes * 100)) : undefined;
+  return { ...base, ...(pct !== undefined ? { percent: pct, savedMB: MB(st.sentBytes ?? 0), totalMB: MB(st.totalBytes!) } : {}),
+    message: `Downloading ${sv.what} to the Mac${pct !== undefined ? `: ${pct}% (${MB(st.sentBytes ?? 0)} of ${MB(st.totalBytes!)} MB)` : ''}.` };
+}
+
+/** Said when the person's Mac app can show file cards but not save files for Claude yet. */
+export const NEEDS_NEW_APP_SAVE = 'Saving files to your Mac needs the newer MUSE app (update MUSE on the Mac, then ask again). Nothing was saved.';
+
 export class PermissionHub {
   private calls = new Map<string, Pending>();
   private caps = new Map<string, number>();
   private acks = new Map<string, number>();
+  private saves = new Map<string, number>();
   private oldMac = new Map<string, number>();
   private appWaiters = new Map<string, Set<() => void>>();
   private uploads = new Map<string, UploadState>();
@@ -100,9 +125,10 @@ export class PermissionHub {
   constructor(private ctx: Ctx) {}
 
   /** A request from the person's Mac app that can show file cards (it sends X-Muse-Caps: files; `acks`: it confirms each card). */
-  sawApp(userId: string, acks = false) {
+  sawApp(userId: string, acks = false, save = false) {
     this.caps.set(userId, Date.now());
     if (acks) this.acks.set(userId, Date.now());
+    if (save) this.saves.set(userId, Date.now());
     const w = this.appWaiters.get(userId);
     if (w) { this.appWaiters.delete(userId); for (const f of w) f(); }
   }
@@ -110,6 +136,8 @@ export class PermissionHub {
   sawOldMac(userId: string) { this.oldMac.set(userId, Date.now()); }
   canAsk(userId: string) { const at = this.caps.get(userId); return at !== undefined && Date.now() - at < CAPS_TTL_MS; }
   private acking(userId: string) { const at = this.acks.get(userId); return at !== undefined && Date.now() - at < CAPS_TTL_MS; }
+  /** A Mac that can save files for Claude (X-Muse-Caps: save) has been in touch lately. */
+  canSave(userId: string) { const at = this.saves.get(userId); return at !== undefined && Date.now() - at < CAPS_TTL_MS; }
 
   /** Waits (up to appWaitMs) for a Mac that can answer; null when one is there, else the honest reason. */
   private async macReady(userId: string): Promise<string | null> {
@@ -172,11 +200,37 @@ export class PermissionHub {
     return this.uploadStatus(u, st.ticket);
   }
 
+  /**
+   * save_to_mac: the person's Mac downloads a studio file (original quality) into a folder there and answers with the
+   * local path. The Mac applies ClaudeFilePolicy: only its allowed save folders, never keys; a card ("Save … to …?")
+   * unless the folder is always allowed. Answers within uploadAnswerMs, like upload_local_file (follow with saveTicket).
+   */
+  async save(u: AuthUser, req: SaveRequest): Promise<Record<string, unknown>> {
+    const path = `${req.folder.replace(/\/+$/, '')}/${req.fileName}`;
+    if (isSecretPath(path) || isSecretPath(req.folder)) return { status: 'failed', error: CREDENTIAL_REFUSAL };
+    // Asked again while the same file is on its way to the same folder: follow that one, no second card.
+    const inFlight = [...this.uploads.values()].find(x => x.userId === u.id && x.save && x.save.url === req.url && x.save.folder === req.folder && x.phase !== 'done' && x.phase !== 'failed');
+    if (inFlight) return this.uploadStatus(u, inFlight.ticket);
+    const notReady = await this.macReady(u.id);
+    if (notReady) return { status: 'failed', error: notReady === MAC_NOT_CONNECTED ? notReady : NEEDS_NEW_APP_SAVE };
+    if (!this.canSave(u.id)) return { status: 'failed', error: NEEDS_NEW_APP_SAVE };
+    const now = Date.now();
+    const ask: PermissionAsk = { id: uid('perm'), toolName: 'Save', input: { file_path: path, folder: req.folder, fileName: req.fileName, url: req.url, what: req.what,
+      ...(req.contentType ? { contentType: req.contentType } : {}), ...(req.bytes ? { bytes: req.bytes } : {}) }, createdAt: now, expiresAt: now + PERMISSION_WAIT_MS };
+    const st: UploadState = { ticket: ask.id, userId: u.id, path, purpose: 'save', phase: 'sent', createdAt: now, updatedAt: now, save: req };
+    this.uploads.set(st.ticket, st);
+    const timer = setTimeout(() => this.end(ask.id, JSON.stringify({ error: 'No answer from the person, so nothing was saved.' })), PERMISSION_WAIT_MS);
+    this.calls.set(ask.id, { ask, userId: u.id, resolve: () => undefined, timer, save: true });
+    this.watchAck(ask.id, u.id, JSON.stringify({ error: 'MUSE on your Mac got the request but didn\'t start it (no Claude turn of yours is running on that Mac). Nothing was saved; ask again from MUSE on the Mac.' }));
+    void this.ctx.hub.emitTo(u.id, { type: 'claude', op: 'permission', ask });
+    return this.uploadStatus(u, st.ticket);
+  }
+
   /** upload_status: waits until the upload is done or failed, or uploadAnswerMs, and says where it stands. */
   async uploadStatus(u: AuthUser, ticket: string, waitMs = this.uploadAnswerMs): Promise<Record<string, unknown>> {
     const st = this.uploads.get(ticket);
     if (!st || st.userId !== u.id) {
-      return { status: 'unknown', error: 'MUSE doesn\'t know that upload: the server restarted since, or it ended over an hour ago. Check whether the file is in the Library; if not, call upload_local_file again.' };
+      return { status: 'unknown', error: 'MUSE doesn\'t know that upload or save: the server restarted since, or it ended over an hour ago. Check whether the file is there (the Library, or the folder on the Mac); if not, ask again (upload_local_file or save_to_mac).' };
     }
     if (st.phase !== 'done' && st.phase !== 'failed') {
       await new Promise<void>(resolve => {
@@ -202,19 +256,25 @@ export class PermissionHub {
   }
 
   /** The Mac says what it is doing with a question: showing its card, uploading (bytes so far), checking the file. */
-  progress(u: AuthUser, id: string, b: { phase: 'asking' | 'uploading' | 'confirming'; sentBytes?: number; totalBytes?: number; attempt?: number }) {
+  progress(u: AuthUser, id: string, b: { phase: 'asking' | 'uploading' | 'confirming' | 'downloading'; sentBytes?: number; totalBytes?: number; attempt?: number }) {
     const p = this.calls.get(id);
     if (!p || p.userId !== u.id) throw new ApiError(410, 'permission_expired', 'That question has ended');
     p.acked = true;
-    if (p.upload) this.touchUpload(id, { phase: b.phase, ...(b.sentBytes !== undefined ? { sentBytes: b.sentBytes } : {}), ...(b.totalBytes !== undefined ? { totalBytes: b.totalBytes } : {}), ...(b.attempt !== undefined ? { attempt: b.attempt } : {}) });
+    if (p.upload || p.save) this.touchUpload(id, { phase: b.phase, ...(b.sentBytes !== undefined ? { sentBytes: b.sentBytes } : {}), ...(b.totalBytes !== undefined ? { totalBytes: b.totalBytes } : {}), ...(b.attempt !== undefined ? { attempt: b.attempt } : {}) });
   }
 
   pending(u: AuthUser) { return [...this.calls.values()].filter(p => p.userId === u.id).map(p => p.ask); }
 
-  answer(u: AuthUser, id: string, b: { allow: boolean; message?: string; result?: UploadResult }) {
+  answer(u: AuthUser, id: string, b: { allow: boolean; message?: string; result?: UploadResult; saved?: SavedFile }) {
     const p = this.calls.get(id);
     if (!p || p.userId !== u.id) throw new ApiError(410, 'permission_expired', 'That question has ended');
     if (b.allow && secretIn(p.ask.toolName, p.ask.input)) throw badRequest(CREDENTIAL_REFUSAL);
+    if (p.save) {
+      if (b.allow && !b.saved) throw badRequest('saved: where the file was saved ({path})');
+      if (b.allow && isSecretPath(b.saved!.path)) throw badRequest(CREDENTIAL_REFUSAL);
+      this.end(id, JSON.stringify(b.allow ? { saved: b.saved } : { error: b.message?.trim() || 'The person said no, so nothing was saved.' }));
+      return;
+    }
     if (p.upload) {
       if (b.allow && !b.result) throw badRequest('result: the upload (uploadId, kind)');
       this.end(id, JSON.stringify(b.allow ? b.result : { error: b.message?.trim() || 'The person said no, so nothing was uploaded.' }));
@@ -229,7 +289,10 @@ export class PermissionHub {
     clearTimeout(p.timer);
     this.calls.delete(id);
     void this.ctx.hub.emitTo(p.userId, { type: 'claude', op: 'permission_end', id });
-    if (p.upload) {
+    if (p.save) {
+      const r = JSON.parse(text) as { saved?: SavedFile; error?: string };
+      this.touchUpload(id, r.saved ? { phase: 'done', saved: r.saved } : { phase: 'failed', error: r.error ?? 'The file was not saved.' });
+    } else if (p.upload) {
       const r = JSON.parse(text) as UploadResult & { error?: string };
       this.touchUpload(id, r.error ? { phase: 'failed', error: r.error } : { phase: 'done', result: r });
     }

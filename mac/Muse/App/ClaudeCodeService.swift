@@ -506,6 +506,9 @@ final class ClaudeCodeService: ObservableObject {
             // Off the event loop: a big file takes minutes, and every other question (Bash, Read…) waits behind this
             // loop meanwhile until Claude Code gives up on it (ci_1d271380f0de).
             Task { await uploadLocal(a, cwd: cwd) }
+        case .allow where a.toolName == "Save":
+            // save_to_mac into an always-allowed folder: no card; off the event loop like an upload.
+            Task { await saveLocal(a, cwd: cwd) }
         case .allow:
             try? await api.answerPermission(a.id, allow: true, message: nil)
         case .deny(let why):
@@ -543,6 +546,11 @@ final class ClaudeCodeService: ObservableObject {
         if allow, a.ask.toolName == "Upload" {
             let cwd = Self.cwd(a.threadId)
             Task { await uploadLocal(a.ask, cwd: cwd) }
+            return
+        }
+        if allow, a.ask.toolName == "Save" {
+            let cwd = Self.cwd(a.threadId)
+            Task { await saveLocal(a.ask, cwd: cwd) }
             return
         }
         Task { try? await api.answerPermission(id, allow: allow, message: allow ? nil : "The person said no.") }
@@ -599,6 +607,39 @@ final class ClaudeCodeService: ObservableObject {
             try await api.finishUpload(a.id, result)
         } catch {
             await fail("Couldn't upload \(name): \((error as? ApiError)?.message ?? error.localizedDescription)")
+        }
+    }
+
+    /// save_to_mac, after the yes (or into an always-allowed folder): downloads the studio file in original quality into
+    /// the folder, under the first free name (never over another file, ci_7972a1d67e72), and tells Claude the local path.
+    /// The policy is checked again here (the folder, keys, the link) before anything is written.
+    private func saveLocal(_ a: ClaudePermissionAsk, cwd: String) async {
+        guard let api else { return }
+        func fail(_ why: String) async { try? await api.answerPermission(a.id, allow: false, message: why) }
+        let home = NSHomeDirectory()
+        guard let t = ClaudeFilePolicy.saveTarget(a, cwd: cwd, home: home) else { return await fail("Nothing to save.") }
+        guard !ClaudeFilePolicy.isSecret(t.folder), !ClaudeFilePolicy.isSecret(t.folder + "/" + t.fileName) else { return await fail(ClaudeFilePolicy.credentialRefusal) }
+        guard ClaudeFilePolicy.saveFolderAllowed(t.folder, folders: fileSettings.activeFolders, home: home) else { return await fail(ClaudeFilePolicy.saveFolderRefusal) }
+        guard ClaudeFilePolicy.saveLinkOK(t.url) else { return await fail(ClaudeFilePolicy.saveLinkRefusal) }
+        let base = (api as? HTTPClaudeAPI)?.baseURL
+        let link: URL? = t.url.hasPrefix("/") ? base.flatMap { URL(string: t.url, relativeTo: $0)?.absoluteURL } : URL(string: t.url)
+        guard let link else { return await fail(ClaudeFilePolicy.saveLinkRefusal) }
+        // Claude sees "downloading" (with the size when the server knew it) while the file comes down.
+        Task { try? await api.permissionProgress(a.id, ClaudePermissionProgress(phase: "downloading", sentBytes: 0, totalBytes: t.bytes)) }
+        let fm = FileManager.default
+        let dir = URL(fileURLWithPath: t.folder, isDirectory: true)
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let (tmp, resp) = try await URLSession.shared.download(from: link)
+            if let h = resp as? HTTPURLResponse, !(200..<300).contains(h.statusCode) {
+                try? fm.removeItem(at: tmp)
+                return await fail("Couldn't download \(t.what) (the server said \(h.statusCode)). Nothing was saved.")
+            }
+            let dst = try SaveFileName.moveUnique(tmp, named: t.fileName, into: dir)
+            let bytes = (try? fm.attributesOfItem(atPath: dst.path)[.size] as? NSNumber)?.intValue
+            try await api.finishSave(a.id, ClaudeLocalSave(path: dst.path, bytes: bytes, name: dst.lastPathComponent))
+        } catch {
+            await fail("Couldn't save \(t.fileName): \((error as? ApiError)?.message ?? error.localizedDescription)")
         }
     }
 

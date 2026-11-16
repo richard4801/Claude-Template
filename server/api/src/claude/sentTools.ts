@@ -15,7 +15,7 @@ import type { Draft } from '../suite/drafts.js';
 
 const PAGES_ = ['suite', 'outfit', 'fill_angles'] as const;
 const SCOPE: Record<Exclude<SentPage, 'photo'>, string> = { outfit: 'outfit', fill_angles: 'sheet' };
-const IMG = { description: 'An image of this studio: {url} or {asset} as MUSE gives it, an upload id (an attached image), or a take\'s frame {takeId, at (seconds)}' };
+const IMG = { description: 'An image of this studio: a take id as a plain string (a photo take s_… is its still; a video take gives its first frame), an upload id (an attached image), a take\'s frame {takeId, at (seconds)}, or {url} / {asset} as MUSE gives them' };
 const ITEM = { type: 'object', properties: { image: IMG, role: { type: 'string', enum: ['person', 'outfit', 'product', 'location', 'style', 'pose', 'other'] }, label: { type: 'string', maxLength: 60 } }, required: ['image', 'role'] };
 const TARGET = {
   chatId: { type: 'string', description: 'This chat (filled in for you in the app; Claude Code passes it): its page gives the draft or the character' },

@@ -523,9 +523,14 @@ export class SuiteAssist {
       if (!this.photoEstimate) throw new ApiError(503, 'not_ready', 'Photo pricing is starting up · try again');
       return { assistId: id, tool: 'photo', estimate: await this.photoEstimate(u, v.request as Record<string, unknown>), warnings: v.warnings };
     }
-    if (v.request.mode === 'remix') { if (!v.request.clipId) throw badRequest('New Swap: add the video first (suite_set_draft clipId, or the person adds it)'); }
-    else if (!v.request.modelId) throw badRequest('Pick the model first (suite_set_draft modelId)');
-    return { assistId: id, estimate: await this.ctx.suite.estimate(u, v.request), warnings: v.warnings };
+    if (v.request.mode === 'remix' && !v.request.clipId) throw badRequest('New Swap: add the video first (suite_set_draft clipId, or the person adds it)');
+    // ci_5bb0ab964dd8: no character (modelId) is a shot without her, priced as Generate would send it (the app's own
+    // estimate does the same), never "Pick the model first". Auto (no engineModel) is priced on the model Auto picks now.
+    const estimate = await this.ctx.suite.estimate(u, v.request) as { engine?: { label?: string } };
+    const lone = !v.request.modelId && v.request.mode !== 'remix' && !['swap', 'recast', 'extend'].includes(String(v.draft.tool ?? 'shot'));
+    const auto = typeof (v.request as { engineModel?: unknown }).engineModel !== 'string';
+    return { assistId: id, estimate, warnings: v.warnings, ...(lone ? { note: 'No character picked: priced as a shot without her (suite_set_draft modelId adds her).' } : {}),
+      ...(auto ? { engineChoice: 'auto', ...(estimate.engine?.label ? { autoPicks: estimate.engine.label } : {}) } : {}) };
   }
   /** suite_request_shot with confirm: the owner is asked in the app; their yes runs the shot at this price at most. */
   async ask(u: AuthUser, id: string) {
