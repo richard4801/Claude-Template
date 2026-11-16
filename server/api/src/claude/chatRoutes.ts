@@ -41,7 +41,7 @@ export const chatView = (t: Row, messageCount?: number) => {
   const page = pageOf(t);
   return compact({ id: t.id, title: t.title ?? undefined, kind: t.contextKind, page, lastOn: pageLine(page), model: t.model ?? undefined, effort: t.effort ?? undefined,
     archived: t.archivedAt ? true : undefined, claudeSessionId: t.claudeSessionId ?? undefined, createdAt: t.createdAt, updatedAt: t.updatedAt, messageCount,
-    brief: withModel(t.contextKind === 'chat' ? threadBrief('chat', t.id) : threadBrief(t.contextKind, t.contextId), t.model, t.effort) });
+    brief: withModel(t.contextKind === 'chat' ? threadBrief('chat', t.id) : threadBrief(t.contextKind, t.contextId, t.id), t.model, t.effort) });
 };
 
 export async function listChats(ctx: Ctx, u: AuthUser, query: unknown) {
