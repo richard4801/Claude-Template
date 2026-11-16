@@ -356,8 +356,14 @@ struct EditSuiteEditor: View {
                                     .frame(minWidth: 320, maxWidth: .infinity)
                                 if showInspector {
                                     SuiteRule(vertical: true)
-                                    EditSuiteInspector(session: session) { setInspector(false) }
-                                        .frame(width: Self.inspectorWidth)
+                                    // A template picked in the media panel takes the inspector (mockup 1) until it's closed.
+                                    if session.binTab == .templates, let tpl = session.templates.pickedTemplate {
+                                        EditTemplateInspector(session: session, template: tpl)
+                                            .frame(width: Self.inspectorWidth)
+                                    } else {
+                                        EditSuiteInspector(session: session) { setInspector(false) }
+                                            .frame(width: Self.inspectorWidth)
+                                    }
                                 }
                             }
                             .frame(maxHeight: .infinity)
@@ -431,6 +437,11 @@ struct EditSuiteEditor: View {
             }
         }
         .sheet(item: $session.askPending) { p in EditSuiteClaudeAsk(session: session, pending: p) }
+        .sheet(isPresented: $session.templates.saving) { EditSaveTemplateSheet(session: session) }
+        // "Ask Claude to make it for this cut": the Claude panel opens with the request in its composer.
+        .onChange(of: session.claudeAsk) { _, ask in if ask != nil { showClaude = true } }
+        // Leaving the Templates tab ends a template preview.
+        .onChange(of: session.binTab) { _, tab in if tab != .templates, session.templates.picked != nil { session.closeTemplate() } }
         // A paid AI helper asks first, with its price (2026-11-08: real AI editing). Free ones run at once.
         .alert(session.paidAsk.map { "\($0.title) · \($0.price)" } ?? "",
                isPresented: Binding(get: { session.paidAsk != nil }, set: { if !$0 { session.cancelPaid() } }),

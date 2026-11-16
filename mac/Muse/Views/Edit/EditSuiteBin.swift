@@ -167,7 +167,7 @@ struct EditSuiteBin: View {
         case .music: music
         case .text: textList
         case .stickers: stickers
-        case .templates: templates
+        case .templates: EditTemplatesPanel(session: session)
         }
     }
 
@@ -306,41 +306,12 @@ struct EditSuiteBin: View {
         }
     }
 
-    // MARK: Text and templates
+    // MARK: Text (templates and caption styles: EditSuiteTemplates.swift)
 
     private var textList: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
             SuiteLabel("Hooks")
             ForEach(EditV2.hooks) { h in hookRow(h) }
-        }
-    }
-
-    /// Caption styles (the hooks live in Text: they were listed twice).
-    private var templates: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
-            SuiteLabel("Caption styles")
-            if session.project.captionTrack == nil {
-                HStack(spacing: Space.s2) {
-                    SuiteToolButton(title: session.isRunning(.captions) ? "Captioning…" : "Make captions", icon: "closed-captioning",
-                                    disabled: session.isRunning(.captions) || !session.helperAvailable(.captions)) { Task { await session.autoCaptions() } }
-                        .help(session.helperNote(.captions) ?? session.estimateLabel(.captions).map { "Word-timed captions from what's said, \($0)" } ?? "Word-timed captions from what's said")
-                    if session.isRunning(.captions) { ProgressView().controlSize(.small) }
-                }
-                .padding(.bottom, Space.s1)
-            }
-            ForEach(EditV2.suiteCaptionStyles, id: \.self) { p in
-                Button { session.edit { $0.setCaptionPreset(p) } } label: {
-                    HStack {
-                        Text(EditV2.captionStyleLabel(p)).font(t.scale.label.font).foregroundStyle(t.roles.ink)
-                        Spacer()
-                        if session.state.captionStyle?.preset == p { Ph("check", 16).foregroundStyle(t.roles.accent) }
-                    }
-                    .frame(minHeight: 32)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(session.project.captionTrack == nil)
-            }
         }
     }
 
