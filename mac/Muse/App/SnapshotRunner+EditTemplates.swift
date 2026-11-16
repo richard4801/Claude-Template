@@ -8,7 +8,7 @@ import MuseCore
 //   mac_a_edit_templates_library.png   the Templates tab: search, filters, "Made by Claude", caption styles
 //   mac_a_edit_template_inspector.png  a picked template: Applies to, its settings, Apply
 //   mac_a_edit_template_save.png       Save as template (the sheet)
-//   mac_a_edit_template_not_ready.png  Glass shatter: the reason and "Ask Claude to make it for this cut"
+//   mac_a_edit_template_not_ready.png  Glass shatter: the reason and "Ask Claude to make it for this cut" (and mac_b_…, mockup 2)
 // Checks (edit-templates-check.txt; CI fails on any FAIL line or a missing ALL DONE): the library shows its sections, a
 // preview doesn't change the saved project, Apply sends exactly one apply, the Save sheet opens, Ask Claude prepares the
 // request. Fit (fit-check.txt): the inspector's buttons whole at 1000 × 700 (FITS / CUT).
@@ -130,6 +130,12 @@ extension SnapshotRunner {
             s.pickTemplate(glass)
             try? await Task.sleep(for: .seconds(1.5))
             capture(dir.appendingPathComponent("mac_a_edit_template_not_ready.png"))
+            // Mockup 2 shows this state in theme B (dark).
+            store.themeID = .b
+            try? await Task.sleep(for: .seconds(1.5))
+            capture(dir.appendingPathComponent("mac_b_edit_template_not_ready.png"))
+            store.themeID = .a
+            try? await Task.sleep(for: .seconds(1))
             s.askClaudeToMake(glass)
             check("ask_claude_prepares_the_request", s.claudeAsk?.contains(glass.id) == true && s.claudeAsk?.contains("template_pack_read") == true,
                   "claudeAsk \(String(describing: s.claudeAsk))")
