@@ -205,6 +205,18 @@ jobs:
           if grep -q '^FAIL' "$f"; then exit 1; fi
           if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
 
+      # Edit pipeline skill (owner idea 2026-11-16): Settings → Claude scrolled to "Edit pipeline skill" at 1000 × 700 with a big
+      # change waiting and a small one in the changelog; the heading, the waiting change and its buttons fit whole
+      # (SnapshotRunner+PipelineSkill.swift; shots mac_a/c_pipeline_skill_settings.png). Fails on any FAIL line or a missing ALL DONE.
+      - name: Edit pipeline skill check
+        working-directory: mac
+        run: |
+          f=snapshots/pipeline-skill-check.txt
+          if [ ! -f "$f" ]; then echo "no pipeline-skill-check.txt (review mode didn't reach it)"; tail -n 60 snapshots.log || true; exit 1; fi
+          cat "$f"
+          if grep -q '^FAIL' "$f"; then exit 1; fi
+          if [ "$(tail -n 1 "$f")" != "ALL DONE" ]; then echo "The app stopped during: $(grep '^START' "$f" | tail -n 1)"; tail -n 80 snapshots.log || true; exit 1; fi
+
       # Live chips (owner 2026-11-12): the chips over Claude's input follow the screen. Edit without captions offers "Add
       # captions"; with captions the row changes ("Restyle the captions") within the ~1 s refresh, a chip that stays keeps
       # its place (SnapshotRunner+ClaudeChips.swift; shots mac_a_edit_chips_no_captions/captions.png). Fails on any FAIL
