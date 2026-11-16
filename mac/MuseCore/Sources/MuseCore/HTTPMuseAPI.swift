@@ -605,11 +605,14 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         var urls: [Int: String] = [:], etags: [Int: String] = [:]
         for p in start.parts { urls[p.n] = p.url }
         let meter = MultipartUpload.Meter(total: size)
-        var attempt = 0
+        // Tries since the last part that went through: a long upload gets a fresh budget after each part that arrives,
+        // and a resume that fails (the network still down) spends from the same budget instead of ending the upload.
+        var attempt = 0, inFlight: Int?
         while true {
             do {
                 for n in 1...max(1, start.partCount) where etags[n] == nil {
                     try Task.checkCancellation()
+                    inFlight = n
                     guard let link = urls[n], let target = resolve(link) else { throw ApiError("upload_failed", "Couldn't upload the file: the server gave no address for part \(n).") }
                     let range = MultipartUpload.range(part: n, partSize: start.partSize, total: size)
                     let chunk = try MultipartUpload.read(file, range)
@@ -625,20 +628,30 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
                     }
                     etags[n] = etag
                     meter.finish(n, bytes: count)
+                    inFlight = nil
+                    attempt = 0
                     progress?(meter.fraction)
                 }
                 break
             } catch {
-                attempt += 1
-                guard !(error is CancellationError), attempt < MultipartUpload.maxAttempts, MultipartUpload.retryable(error) else {
-                    if error is CancellationError { _ = try? await send(request("DELETE", "v1/uploads/\(id)/multipart?multipartId=\(q)")) }
-                    throw error
+                // The failed part's bytes no longer count until it is sent again (progress never overstates).
+                if let n = inFlight { meter.drop(n); inFlight = nil; progress?(meter.fraction) }
+                var failure: Error = error
+                while true {
+                    attempt += 1
+                    guard !(failure is CancellationError), attempt < MultipartUpload.maxAttempts, MultipartUpload.retryable(failure) else {
+                        if failure is CancellationError { _ = try? await send(request("DELETE", "v1/uploads/\(id)/multipart?multipartId=\(q)")) }
+                        throw failure
+                    }
+                    try await Task.sleep(nanoseconds: UInt64(MultipartUpload.pause(attempt: attempt) * 1_000_000_000))
+                    // Resume: what the storage already has, and fresh links for the rest.
+                    do {
+                        let now: MultipartUpload.Ticket = try await call("GET", "v1/uploads/\(id)/multipart?multipartId=\(q)")
+                        for d in now.done ?? [] { etags[d.n] = d.etag; meter.finish(d.n, bytes: d.size) }
+                        for p in now.parts { urls[p.n] = p.url }
+                        break
+                    } catch { failure = error }
                 }
-                try await Task.sleep(nanoseconds: UInt64(MultipartUpload.pause(attempt: attempt) * 1_000_000_000))
-                // Resume: what the storage already has, and fresh links for the rest.
-                let now: MultipartUpload.Ticket = try await call("GET", "v1/uploads/\(id)/multipart?multipartId=\(q)")
-                for d in now.done ?? [] { etags[d.n] = d.etag; meter.finish(d.n, bytes: d.size) }
-                for p in now.parts { urls[p.n] = p.url }
             }
         }
         let parts = etags.sorted { $0.key < $1.key }.map { MultipartUpload.CompleteBody.P(n: $0.key, etag: $0.value) }
