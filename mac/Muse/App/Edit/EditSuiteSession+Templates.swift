@@ -31,7 +31,8 @@ struct EditTemplatePanel: Equatable {
 }
 
 extension EditSuiteSession {
-    private static let fakeTemplates = FakeEditTemplateAPI()
+    /// Demo mode's library (review mode reads what Apply sent: SnapshotRunner+EditTemplates.swift).
+    static let fakeTemplates = FakeEditTemplateAPI()
     /// A server: the same HTTPMuseAPI as the rest of the app. Demo mode: the fake.
     var templateAPI: any EditTemplateAPI {
         if let http = api as? HTTPMuseAPI { return http }
