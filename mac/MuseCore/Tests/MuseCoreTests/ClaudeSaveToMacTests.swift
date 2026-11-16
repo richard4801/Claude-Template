@@ -34,6 +34,19 @@ final class ClaudeSaveToMacTests: XCTestCase {
         if case .ask(let c) = verdict(save(), folders: [], askAll: true) { XCTAssertNil(c.alwaysLabel) } else { XCTFail() }
     }
 
+    /// Build 676: ~/MUSE is inside "Folders + temp", so with shell commands always allowed a save there needs no card; the
+    /// save card elsewhere offers Allow always for its folder.
+    func testMUSEFolderSavesUnderTheShellGrantAndOtherCardsOfferTheirFolder() {
+        let a = save("~/MUSE/Gamified GRWM/exports")
+        XCTAssertEqual(ClaudeFilePolicy.verdict(a, mode: .ask, folders: [], cwd: cwd, home: home, shell: .folders), .allow)
+        guard case .ask(let c) = verdict(a) else { return XCTFail("saved without the shell grant") }
+        XCTAssertEqual(c.alwaysLabel, "Allow always")
+        XCTAssertEqual(c.folder, "/Users/me/MUSE/Gamified GRWM/exports")
+        guard case .ask(let d) = ClaudeFilePolicy.verdict(save("~/Movies/Shoot"), mode: .ask, folders: [], cwd: cwd, home: home, shell: .folders) else { return XCTFail() }
+        XCTAssertEqual(d.folder, "/Users/me/Movies/Shoot")
+        if case .ask = ClaudeFilePolicy.verdict(a, mode: .ask, folders: [], cwd: cwd, home: home, askAll: true, shell: .folders) {} else { XCTFail("ran while paused") }
+    }
+
     func testOnlyTheSaveFoldersOrAllowedFolders() {
         for f in ["~/Desktop", "~/Documents/edits", "~/Movies/MUSE", "~/Pictures", "~/Music/stems", "~/MUSE/exports"] {
             if case .ask = verdict(save(f)) {} else { XCTFail(f) }

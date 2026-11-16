@@ -310,7 +310,7 @@ public enum ClaudeFilePolicy {
         // A folder too wide to always allow (the disk, home, ~/Library) never counts, however it got on the list.
         let folders = folders.filter { ClaudeAlwaysRules.tooWide($0, home: home) == nil }
         let tool = ask.toolName
-        if tool == "Save" { return saveVerdict(ask, folders: folders, cwd: cwd, home: home, askAll: askAll) }
+        if tool == "Save" { return saveVerdict(ask, folders: folders, cwd: cwd, home: home, askAll: askAll, shell: shell) }
         if tool == "Bash" {
             let cmd = str(ask.input, "command") ?? ""
             if cmd.isEmpty { return .deny("Empty command") }
@@ -417,7 +417,8 @@ public enum ClaudeFilePolicy {
         return scheme == "https" || scheme == "http"
     }
 
-    static func saveVerdict(_ ask: ClaudePermissionAsk, folders: [String], cwd: String, home: String, askAll: Bool) -> ClaudeFileVerdict {
+    static func saveVerdict(_ ask: ClaudePermissionAsk, folders: [String], cwd: String, home: String, askAll: Bool,
+                            shell: ClaudeShellScope? = nil) -> ClaudeFileVerdict {
         guard let t = saveTarget(ask, cwd: cwd, home: home) else { return .deny("Nothing to save") }
         let path = t.folder + "/" + t.fileName
         if isSecret(t.folder) || isSecret(path) { return .deny(credentialRefusal) }
@@ -425,6 +426,8 @@ public enum ClaudeFilePolicy {
         guard saveFolderAllowed(t.folder, folders: folders, home: home) else { return .deny(saveFolderRefusal) }
         // A folder the person always allowed (reading, writing and uploading) takes saves without a card.
         if !askAll, folders.contains(where: { inside(t.folder, $0) }) { return .allow }
+        // ~/MUSE is inside "Folders + temp" (build 676): with shell commands always allowed, saves there don't ask either.
+        if !askAll, shell != nil, ClaudeKindGrants.isMuseFolder(t.folder, home: home) { return .allow }
         let shown = inside(t.folder, home) ? "~" + t.folder.dropFirst(home.count) : t.folder
         let action = "Save \(t.fileName) to \(shown)"
         let detail = "\(t.what) · original quality" + (t.bytes.map { " · \(Self.megabytes($0))" } ?? "")
