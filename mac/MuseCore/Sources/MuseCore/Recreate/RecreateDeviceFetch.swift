@@ -18,19 +18,30 @@ public enum RecreateDeviceFetch {
     public static let downloadURL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/download/\(version)/yt-dlp_macos")!
     /// The file name under ~/Library/Application Support/MUSE/bin/ (versioned, so a new pin downloads a new file).
     public static let binaryName = "yt-dlp_macos-\(version)"
-    /// The whole fetch (metadata, the TikTok page and the download) stops after this.
+    /// The whole fetch (metadata, the TikTok page and the download) stops after this (a reference: up to 60 s of video).
     public static let timeoutSec: Double = 120
+    /// An import (edit footage, up to 60 minutes / 2 GB; owner 2026-11-16) may take far longer to download: 2 hours.
+    /// A stalled download still stops on yt-dlp's 20 s socket timeout.
+    public static let importTimeoutSec: Double = 7200
+    public static func timeoutSec(_ limits: Limits) -> Double { limits.forImport ? importTimeoutSec : timeoutSec }
 
     /// The caps the server sets (`GET /v1/recreate/settings` maxSec and maxMb; 60 s and 80 MB by default).
     public struct Limits: Equatable, Sendable {
         public var maxSec: Int
         public var maxBytes: Int
-        public init(maxSec: Int = 60, maxMb: Int = 80) {
+        /// The import limits (`GET /v1/links/settings`): the refusals use the imports' words and the fetch may run long.
+        public var forImport: Bool
+        public init(maxSec: Int = 60, maxMb: Int = 80, forImport: Bool = false) {
             self.maxSec = max(1, maxSec)
             self.maxBytes = max(1, maxMb) * 1_048_576
+            self.forImport = forImport
         }
-        public init(_ s: RecreateLinkSettings) { self.init(maxSec: s.maxSec, maxMb: s.maxMb) }
+        public init(_ s: RecreateLinkSettings, forImport: Bool = false) { self.init(maxSec: s.maxSec, maxMb: s.maxMb, forImport: forImport) }
         public var maxMb: Int { maxBytes / 1_048_576 }
+        /// "Up to 60 minutes and 2 GB".
+        public var text: String { ImportLimitText.limit(maxSec: maxSec, maxMb: maxMb) }
+        /// The rule inside an import refusal: "imports: up to 60 minutes and 2 GB".
+        var importRule: String { "imports: " + text.replacingOccurrences(of: "Up to", with: "up to") }
     }
 
     /// What happened when the Mac couldn't make the file.
@@ -155,7 +166,18 @@ public enum RecreateDeviceFetch {
     public static let tooBigMessage = "This video is too big to fetch"
     public static let downloadsOffMessage = "The creator turned downloads off for this video, so MUSE won’t fetch it. Use another video, or ask the creator"
     static func tooLong(_ sec: Double?, _ limits: Limits) -> String {
-        sec.map { "References can be up to \(limits.maxSec) s for now (this one is \(Int($0.rounded())) s)" } ?? "References can be up to \(limits.maxSec) s for now"
+        if limits.forImport {
+            let rule = "the limit is \(ImportLimitText.length(limits.maxSec)) (\(limits.importRule))"
+            return sec.map { "This video is \(ImportLimitText.duration($0)) long · \(rule)" } ?? "This video is too long · \(rule)"
+        }
+        return sec.map { "References can be up to \(limits.maxSec) s for now (this one is \(Int($0.rounded())) s)" } ?? "References can be up to \(limits.maxSec) s for now"
+    }
+
+    public static func tooBig(_ bytes: Double, _ limits: Limits) -> String {
+        if limits.forImport {
+            return "This video is \(ImportLimitText.size(Int(bytes))) · the limit is \(ImportLimitText.size(limits.maxBytes)) (\(limits.importRule))"
+        }
+        return "\(tooBigMessage) (\(Int((bytes / 1_048_576).rounded())) MB; the limit is \(limits.maxMb) MB)"
     }
 
     /// What the metadata alone refuses (the server's `checkInfo`, the same whatever the strict setting): lists, live
@@ -171,7 +193,7 @@ public enum RecreateDeviceFetch {
         if (info.ageLimit ?? 0) > 0 { return RecreateLinkProblem(code: "link_private", message: ageMessage) }
         if let d = info.duration, d > Double(limits.maxSec) + 0.5 { return RecreateLinkProblem(code: "too_long", message: tooLong(d, limits)) }
         if let s = info.size, s > Double(limits.maxBytes) {
-            return RecreateLinkProblem(code: "link_too_big", message: "\(tooBigMessage) (\(Int((s / 1_048_576).rounded())) MB; the limit is \(limits.maxMb) MB)")
+            return RecreateLinkProblem(code: "link_too_big", message: tooBig(s, limits))
         }
         return nil
     }

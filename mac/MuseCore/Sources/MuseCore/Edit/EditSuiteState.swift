@@ -244,6 +244,13 @@ public enum EditSuite {
         private var cur: Int32 = 0
         private var inBlock = 0
         public init(block: Int = 64) { self.block = max(1, block) }
+        /// The block for a file of `seconds` at `rate`: 64 frames, or more on a long file so at most `maxBlocks` are kept
+        /// (an hour of 48 kHz audio: 2.7 M blocks at 64; 65 536 here). Unknown length or rate: 64.
+        public static func block(seconds: Double, rate: Double, maxBlocks: Int = 65_536) -> Int {
+            guard seconds.isFinite, rate.isFinite, seconds > 0, rate > 0, maxBlocks > 0 else { return 64 }
+            let frames = seconds * rate
+            return max(64, Int((frames / Double(maxBlocks)).rounded(.up)))
+        }
 
         /// Adds interleaved samples (`channels` per frame; a trailing partial frame is ignored).
         public mutating func add(interleaved s: [Int16], channels: Int) {

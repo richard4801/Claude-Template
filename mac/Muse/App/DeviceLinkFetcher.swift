@@ -77,13 +77,13 @@ actor DeviceLinkFetcher {
 
     /// Downloads the link's video into a new temporary folder under the studio's link rules: the metadata is read and
     /// checked first (public, the duration and size caps), TikTok's page when the creator's "downloads off" is refused,
-    /// then the file is downloaded. Stops after 120 s, or when the task is cancelled. `progress` gets 0…1 while the
-    /// download reports it.
-    func fetch(_ link: String, platform: String?, settings: RecreateLinkSettings, progress: @escaping @Sendable (Double?) -> Void) async -> Result<Fetched, RecreateDeviceFetch.Failure> {
+    /// then the file is downloaded. Stops after 120 s (an import, `forImport`: edit footage up to 60 minutes, after
+    /// 2 hours), or when the task is cancelled. `progress` gets 0…1 while the download reports it.
+    func fetch(_ link: String, platform: String?, settings: RecreateLinkSettings, forImport: Bool = false, progress: @escaping @Sendable (Double?) -> Void) async -> Result<Fetched, RecreateDeviceFetch.Failure> {
         guard let bin = await binary() else { return .failure(.unavailable("no helper")) }
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("MUSE-link-\(UUID().uuidString)", isDirectory: true)
         do { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) } catch { return .failure(.unavailable("no folder")) }
-        let deadline = Date().addingTimeInterval(RecreateDeviceFetch.timeoutSec)
+        let deadline = Date().addingTimeInterval(RecreateDeviceFetch.timeoutSec(RecreateDeviceFetch.Limits(settings, forImport: forImport)))
         let ffmpeg = Self.tool(["ffmpeg"]), js = Self.tool(["deno", "node"])
         func fail(_ f: RecreateDeviceFetch.Failure) -> Result<Fetched, RecreateDeviceFetch.Failure> {
             try? FileManager.default.removeItem(at: dir)
@@ -97,7 +97,7 @@ actor DeviceLinkFetcher {
         guard info.status == 0, let meta = RecreateDeviceFetch.Info.parse(info.stdout) else {
             return fail(info.timedOut ? .unavailable("timed out") : RecreateDeviceFetch.failure(output: info.text))
         }
-        let limits = RecreateDeviceFetch.Limits(settings)
+        let limits = RecreateDeviceFetch.Limits(settings, forImport: forImport)
         if let p = RecreateDeviceFetch.check(meta, limits: limits) { return fail(.refused(p)) }
         // Strict rules honour TikTok's "downloads off" (the server can't see this download); a page that can't be read
         // refuses the link rather than risk it.
@@ -124,7 +124,7 @@ actor DeviceLinkFetcher {
             return fail(dl.timedOut ? .unavailable("timed out") : RecreateDeviceFetch.failure(output: dl.text))
         }
         let size = (try? video.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        if size > limits.maxBytes { return fail(.refused(RecreateLinkProblem(code: "link_too_big", message: RecreateDeviceFetch.tooBigMessage))) }
+        if size > limits.maxBytes { return fail(.refused(RecreateLinkProblem(code: "link_too_big", message: RecreateDeviceFetch.tooBig(Double(size), limits)))) }
         return .success(Fetched(file: video, title: meta.title))
     }
 

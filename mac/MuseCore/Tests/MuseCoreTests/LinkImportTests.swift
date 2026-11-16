@@ -13,7 +13,10 @@ final class LinkImportTests: XCTestCase {
 
     func testWords() {
         XCTAssertEqual(LinkImport.hint(strict: true, limits: .init(maxSec: 60, maxMb: 80)),
-                       "A public TikTok, Instagram or YouTube video, up to 60 s and 80 MB. It's fetched on this Mac.")
+                       "A public TikTok, Instagram or YouTube video, up to 60 seconds and 80 MB. It's fetched on this Mac.")
+        // Edit footage (owner 2026-11-16): the server's import limits.
+        XCTAssertEqual(LinkImport.hint(strict: false, limits: .init(RecreateLinkSettings(maxSec: 3600, maxMb: 2048), forImport: true)),
+                       "A public video link, up to 60 minutes and 2 GB. It's fetched on this Mac.")
         XCTAssertEqual(LinkImport.name(title: "  Morning routine  ", platform: "tiktok"), "Morning routine")
         XCTAssertEqual(LinkImport.name(title: nil, platform: "tiktok"), "Tiktok video")
         XCTAssertNil(LinkImport.name(title: "", platform: nil))

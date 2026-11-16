@@ -36,10 +36,10 @@ struct ChatPendingVideo: Equatable {
 /// What the composer does with images (and videos) pasted or dropped on it.
 enum ChatImageInput {
     static let types: [UTType] = [.jpeg, .png, .webP, .heic, .heif, .tiff, .gif]
-    /// Videos Claude can watch: MP4 and MOV, 500 MB at most.
+    /// Videos Claude can watch: MP4 and MOV, 2 GB at most (edit footage up to 60 minutes; Claude watches up to 30 min of it).
     static let videoTypes: [UTType] = [.mpeg4Movie, .quickTimeMovie]
-    static let maxVideoBytes = 500 * 1024 * 1024
-    static let videoTooLarge = "That video is too large (500 MB at most)."
+    static let maxVideoBytes = ClaudeFilePolicy.uploadVideoMaxBytes
+    static let videoTooLarge = "That video is too large (2 GB at most)."
     static let videoUnsupported = "Only MP4 or MOV videos."
 
     /// Image files and image data on a pasteboard (and, with `videos`, movie files). Empty when it holds none (then text

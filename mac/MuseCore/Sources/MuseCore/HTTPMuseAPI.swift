@@ -132,6 +132,9 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         // Shoots and outfit sets make the images before answering, which can take a few minutes.
         let long = method == "POST" && (path == "v1/shoots" || path == "v1/outfits" || (path.hasPrefix("v1/outfits/") && path.hasSuffix("/save")))
         r.timeoutInterval = long ? 360 : 30
+        // An import the server fetches itself (the fallback) or probes: a long video (up to 60 min) takes minutes. Past
+        // this the import still finishes on the server and arrives as a clip event ("still_working" says so).
+        if method == "POST" && path == "v1/imports" { r.timeoutInterval = 900 }
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         if let t = currentToken { r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         // Results arrive in the chat: a job started while a Claude chat is open reports back to it.
@@ -202,7 +205,7 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         for (k, v) in ticket.headers { put.setValue(v, forHTTPHeaderField: k) }
         if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
-        try await putBytes(put, body: body, progress: progress)
+        try await putUpload(ticket.uploadId, put, body: body, progress: progress)
         guard let f = ticket.fileUrl else { throw ApiError("upload_failed", "The upload has no address") }
         if let r = f.range(of: "/uploads/"), !f[r.upperBound...].isEmpty { return SuiteVideoRef(key: String(f[r.upperBound...])) }
         return SuiteVideoRef(url: f)
@@ -218,7 +221,7 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         for (k, v) in ticket.headers { put.setValue(v, forHTTPHeaderField: k) }
         if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
-        try await putBytes(put, body: body, progress: progress)
+        try await putUpload(ticket.uploadId, put, body: body, progress: progress)
         return ticket.uploadId
     }
     // End AI suite (workstream 1)
@@ -364,8 +367,10 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         do {
-            try await putBytes(put, body: body, progress: progress)
+            try await putUpload(ticket.uploadId, put, body: body, progress: progress)
         } catch {
+            // A large file says why (the form fallback would load it all into memory); a small one falls back as before.
+            if MultipartUpload.usesParts(size: body.size) { throw error }
             return nil
         }
         return ticket.uploadId
@@ -392,7 +397,9 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         let req = put
-        try await ClaudeUploadRetry.run(onRetry: onRetry) { try await self.putBytes(req, body: body, progress: progress) }
+        // Edit footage up to 2 GB: in resumable parts (their own retries); a smaller video: the PUT, retried as before.
+        if MultipartUpload.usesParts(size: body.size) { try await putUpload(ticket.uploadId, req, body: body, progress: progress) }
+        else { try await ClaudeUploadRetry.run(onRetry: onRetry) { try await self.putBytes(req, body: body, progress: progress) } }
         var confirm = request("POST", "v1/uploads/\(Self.pathKey(ticket.uploadId))/confirm", body: try encoder.encode(ConfirmBody(meta: meta)))
         confirm.timeoutInterval = ClaudeUploadRetry.confirmTimeout
         _ = try await send(confirm)
@@ -460,7 +467,7 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         for (k, v) in ticket.headers { put.setValue(v, forHTTPHeaderField: k) }
         if put.value(forHTTPHeaderField: "Content-Type") == nil { put.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
-        try await putBytes(put, body: body, progress: progress)
+        try await putUpload(ticket.uploadId, put, body: body, progress: progress)
         return ticket.uploadId
     }
 
@@ -545,6 +552,11 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     }
 
     private func putBytes(_ r: URLRequest, body: UploadBody, progress: UploadProgress?) async throws {
+        _ = try await putBytesResponse(r, body: body, progress: progress)
+    }
+
+    /// The PUT, with the storage's response (a multipart part's ETag is read from it).
+    private func putBytesResponse(_ r: URLRequest, body: UploadBody, progress: UploadProgress?) async throws -> HTTPURLResponse? {
         let resp: URLResponse?
         #if canImport(FoundationNetworking)
         // swift-corelibs-foundation: no per-task delegates, so no progress until the end (Linux builds only, for tests).
@@ -568,6 +580,72 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw ApiError("http_\(http.statusCode)", "Upload refused (\(http.statusCode))")
         }
+        return resp as? HTTPURLResponse
+    }
+
+    /// An upload's bytes: a file of 100 MB or more in parts (MultipartUpload: resumable, 64 MB in memory at a time),
+    /// anything smaller, or a server without the parts routes, in the single presigned PUT `put`.
+    private func putUpload(_ uploadId: String, _ put: URLRequest, body: UploadBody, progress: UploadProgress?) async throws {
+        if case .file(let file) = body, let size = body.size, MultipartUpload.usesParts(size: size) {
+            let start: MultipartUpload.Ticket
+            do {
+                start = try await call("POST", "v1/uploads/\(Self.pathKey(uploadId))/multipart", MultipartUpload.StartBody(bytes: size))
+            } catch let e as ApiError where e.code == "not_found" || e.code == "http_404" {
+                return try await putBytes(put, body: body, progress: progress) // an older server: one PUT, as before
+            }
+            try await putParts(uploadId, file: file, size: size, start: start, progress: progress)
+            return
+        }
+        try await putBytes(put, body: body, progress: progress)
+    }
+
+    private func putParts(_ uploadId: String, file: URL, size: Int, start: MultipartUpload.Ticket, progress: UploadProgress?) async throws {
+        let mp = start.multipartId, id = Self.pathKey(uploadId)
+        let q = mp.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? mp
+        var urls: [Int: String] = [:], etags: [Int: String] = [:]
+        for p in start.parts { urls[p.n] = p.url }
+        let meter = MultipartUpload.Meter(total: size)
+        var attempt = 0
+        while true {
+            do {
+                for n in 1...max(1, start.partCount) where etags[n] == nil {
+                    try Task.checkCancellation()
+                    guard let link = urls[n], let target = resolve(link) else { throw ApiError("upload_failed", "Couldn't upload the file: the server gave no address for part \(n).") }
+                    let range = MultipartUpload.range(part: n, partSize: start.partSize, total: size)
+                    let chunk = try MultipartUpload.read(file, range)
+                    var put = URLRequest(url: target)
+                    put.httpMethod = "PUT"
+                    put.timeoutInterval = 600 // idle time; a part keeps going while bytes move
+                    if target.host == baseURL.host, target.port == baseURL.port, let t = currentToken { put.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+                    let count = range.count
+                    let resp = try await putBytesResponse(put, body: .data(chunk), progress: { f in meter.sending(n, bytes: Int(Double(count) * f)); progress?(meter.fraction) })
+                    guard let etag = resp?.value(forHTTPHeaderField: "ETag"), !etag.isEmpty else {
+                        meter.drop(n)
+                        throw ApiError("upload_failed", "The storage didn't confirm part \(n) of the file.")
+                    }
+                    etags[n] = etag
+                    meter.finish(n, bytes: count)
+                    progress?(meter.fraction)
+                }
+                break
+            } catch {
+                attempt += 1
+                guard !(error is CancellationError), attempt < MultipartUpload.maxAttempts, MultipartUpload.retryable(error) else {
+                    if error is CancellationError { _ = try? await send(request("DELETE", "v1/uploads/\(id)/multipart?multipartId=\(q)")) }
+                    throw error
+                }
+                try await Task.sleep(nanoseconds: UInt64(MultipartUpload.pause(attempt: attempt) * 1_000_000_000))
+                // Resume: what the storage already has, and fresh links for the rest.
+                let now: MultipartUpload.Ticket = try await call("GET", "v1/uploads/\(id)/multipart?multipartId=\(q)")
+                for d in now.done ?? [] { etags[d.n] = d.etag; meter.finish(d.n, bytes: d.size) }
+                for p in now.parts { urls[p.n] = p.url }
+            }
+        }
+        let parts = etags.sorted { $0.key < $1.key }.map { MultipartUpload.CompleteBody.P(n: $0.key, etag: $0.value) }
+        var done = request("POST", "v1/uploads/\(id)/multipart/complete", body: try encoder.encode(MultipartUpload.CompleteBody(multipartId: mp, parts: parts)))
+        done.timeoutInterval = 300 // the storage joins the parts
+        _ = try await send(done)
+        progress?(1)
     }
 
     public func updateModel(id: String, _ req: UpdateModelRequest) async throws -> MuseModel { try await call("PATCH", "v1/models/\(id)", req) }

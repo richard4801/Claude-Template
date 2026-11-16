@@ -518,7 +518,7 @@ public struct ClaudeAttachment: Codable, Hashable, Sendable, Identifiable {
     public var url: String?
     /// The server marks a video attachment (plans/claude-video-vision.md); mimeType video/* says the same.
     public var video: Bool?
-    /// A video's own link (the whole file, up to 500 MB): not a poster.
+    /// A video's own link (the whole file, up to 2 GB): not a poster.
     public var videoURL: String?
 
     public init(id: String? = nil, uploadId: String, mimeType: String? = nil, bytes: Int? = nil, width: Int? = nil, height: Int? = nil, url: String? = nil,

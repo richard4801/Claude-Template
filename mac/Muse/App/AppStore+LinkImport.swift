@@ -115,7 +115,7 @@ extension AppStore {
         var result: LinkImportResult?
         if api is HTTPMuseAPI {
             linkImport.status = RecreateDeviceFetch.statusLine(fetched: nil)
-            let fetched = await DeviceLinkFetcher.shared.fetch(link, platform: platform, settings: settings) { v in
+            let fetched = await DeviceLinkFetcher.shared.fetch(link, platform: platform, settings: settings, forImport: true) { v in
                 Task { @MainActor [weak self] in
                     guard let self, self.linkImport.fetching, self.linkImport.task?.isCancelled == false else { return }
                     self.linkImport.progress = v

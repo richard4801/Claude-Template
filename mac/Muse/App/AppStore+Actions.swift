@@ -18,6 +18,9 @@ extension AppStore {
         }
         perform { [self] in
             let (meta, thumb) = try await MediaImport.clipInfo(url)
+            // Up to 60 minutes and 2 GB (owner 2026-11-16, edit footage); said before anything is uploaded.
+            let bytes = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+            if let why = ImportLimitText.problem(durationSec: meta.durationSec, bytes: bytes) { throw ApiError("import_limit", why) }
             let c = try await withUploadProgress("Uploading \(url.lastPathComponent)") { p in try await self.api.uploadClip(meta, file: url, progress: p) }
             clip = c
             clipFile = url

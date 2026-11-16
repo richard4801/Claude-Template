@@ -594,7 +594,7 @@ final class ClaudeCodeService: ObservableObject {
             let result: ClaudeLocalUpload
             switch type.kind {
             case .video:
-                guard size <= 500 * 1024 * 1024 else { return await fail(ClaudeFilePolicy.uploadRefusal) }
+                guard size <= ClaudeFilePolicy.uploadVideoMaxBytes else { return await fail(ClaudeFilePolicy.uploadRefusal) }
                 guard let up = api as? any ClaudeVideoUploading, let info = await ChatVideoProbe.read(file) else { return await fail(MediaSniff.unreadable) }
                 let att = try await up.uploadClaudeVideo(file, meta: info.meta(name: name), contentType: type.mime,
                                                          progress: reporter.progress, onRetry: reporter.retry)
