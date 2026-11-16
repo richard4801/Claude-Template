@@ -19,7 +19,9 @@ import studio.muse.core.edit.itemSpan
 /** The bottom tool row (EM1), in the design's order. */
 enum class EditTool(val label: String, val icon: String, val panel: Panel) {
     EDIT("Edit", "scissors", Panel.EDIT), AUDIO("Audio", "music", Panel.AUDIO), TEXT("Text", "type", Panel.TEXT),
-    CAPTIONS("Captions", "cc", Panel.CAPTIONS), EFFECTS("Effects", "fx", Panel.EFFECTS), FILTERS("Filters", "palette", Panel.FILTERS),
+    CAPTIONS("Captions", "cc", Panel.CAPTIONS), EFFECTS("Effects", "fx", Panel.EFFECTS),
+    /** Edit templates (plans/edit-templates.md §5): the owner's library of effects and transitions. */
+    TEMPLATES("Templates", "stack", Panel.TEMPLATES), FILTERS("Filters", "palette", Panel.FILTERS),
     OVERLAY("Overlay", "layers", Panel.OVERLAY), RATIO("Ratio", "ratio", Panel.RATIO),
 }
 
@@ -27,6 +29,8 @@ enum class EditTool(val label: String, val icon: String, val panel: Panel) {
 enum class Panel(val title: String) {
     EDIT("Edit"), SPEED("Speed"), TRANSFORM("Transform & keyframes"), AUDIO("Audio"), TEXT("Text & hooks"), CAPTIONS("Captions"),
     EFFECTS("Effects"), FILTERS("Filters"), OVERLAY("Overlay"), RATIO("Ratio"), EXPORT("Export"),
+    /** Edit templates: the library (filters, a 3-column grid), the picked one's settings and Apply. */
+    TEMPLATES("Templates"),
     /** Edit sessions (workstream 3): the shared history (Claude's changes badged), owner only. */
     HISTORY("History");
 
@@ -35,7 +39,7 @@ enum class Panel(val title: String) {
         get() = when (this) {
             EDIT, SPEED, TRANSFORM -> EditTool.EDIT
             AUDIO -> EditTool.AUDIO; TEXT -> EditTool.TEXT; CAPTIONS -> EditTool.CAPTIONS; EFFECTS -> EditTool.EFFECTS
-            FILTERS -> EditTool.FILTERS; OVERLAY -> EditTool.OVERLAY; RATIO -> EditTool.RATIO; EXPORT, HISTORY -> null
+            FILTERS -> EditTool.FILTERS; OVERLAY -> EditTool.OVERLAY; RATIO -> EditTool.RATIO; TEMPLATES -> EditTool.TEMPLATES; EXPORT, HISTORY -> null
         }
 }
 
@@ -211,6 +215,10 @@ data class EditSuiteUi(
     val captionNotice: String? = null,
     /** Tablet (plans/edit-layout.md): the inspector is hidden ("Show inspector" in the top bar). It starts shown. */
     val inspectorHidden: Boolean = false,
+    /** Edit templates (EditTemplatesLogic.kt): the library, the picked template and its settings. */
+    val templates: TemplatesUi = TemplatesUi(),
+    /** A template previewed on the real edit (its dry run applied to a copy): the player shows it, nothing is saved. */
+    val templatePreview: EditProject? = null,
 ) {
     val duration: Double get() = project?.let(::durationSec) ?: 0.0
     val ready: Boolean get() = phase == SuitePhase.Ready && project != null

@@ -347,6 +347,16 @@ sealed interface EditAction {
     data object ClearClaudeNote : EditAction
     /** Opening a session while this device has edits it doesn't: keep them (pushed on top) or use the latest. */
     data class ResolveConflict(val keepLocal: Boolean) : EditAction
+    // Edit templates (plans/edit-templates.md §5): owner only, run by the session sync ([SessionActions.template]).
+    data object LoadTemplates : EditAction
+    data class TemplateFilter(val filter: String) : EditAction
+    /** Picks a tile (its settings at their defaults, then the preview on the real edit); null closes it. */
+    data class PickTemplate(val id: String?) : EditAction
+    data class TemplateParam(val key: String, val value: kotlinx.serialization.json.JsonElement) : EditAction
+    /** Apply: to the current target, or to every cut / clip ([every]). */
+    data class ApplyTemplate(val every: Boolean = false) : EditAction
+    /** Save as template (the clip's long-press menu): the selection, on its clip or the cut before it. */
+    data class SaveTemplate(val name: String, val kind: String, val cut: Boolean) : EditAction
 }
 
 /** Edit sessions (workstream 3): what the controller hands to the session sync. */
@@ -354,6 +364,8 @@ interface SessionActions {
     fun undoEntry(entryId: Long)
     fun answerPending(id: String, approve: Boolean)
     fun resolveConflict(keepLocal: Boolean)
+    /** Edit templates: load, pick (preview), settings, apply, save. */
+    fun template(a: EditAction) {}
 }
 
 /**
@@ -508,7 +520,10 @@ class EditSuiteController(
         _ui.update { u ->
             val p = h.current
             val sel = u.selectedId?.takeIf { id -> p.locate(id) != null }
-            u.copy(project = p, canUndo = h.canUndo, canRedo = h.canRedo, selectedId = sel, playheadSec = u.playheadSec.coerceIn(0.0, durationSec(p)))
+            // A real change ends a template preview (it was made from the edit before it).
+            val ended = u.templatePreview != null && p != u.project
+            u.copy(project = p, canUndo = h.canUndo, canRedo = h.canRedo, selectedId = sel, playheadSec = u.playheadSec.coerceIn(0.0, durationSec(p)),
+                templatePreview = if (ended) null else u.templatePreview, templates = if (ended) u.templates.copy(previewOf = null) else u.templates)
         }
     }
 
@@ -521,6 +536,9 @@ class EditSuiteController(
             EditAction.Undo -> { dragBase = null; if (history?.undo() == true) { labels += "Undo"; editedLocally = true; synced() } }
             EditAction.Redo -> { dragBase = null; if (history?.redo() == true) { labels += "Redo"; editedLocally = true; synced() } }
             is EditAction.ResolveConflict -> sessionActions?.resolveConflict(a.keepLocal)
+            is EditAction.TemplateFilter -> _ui.update { it.copy(templates = it.templates.copy(filter = a.filter)) }
+            EditAction.LoadTemplates, is EditAction.PickTemplate, is EditAction.TemplateParam, is EditAction.ApplyTemplate, is EditAction.SaveTemplate ->
+                sessionActions?.template(a) ?: say(if (u.claudeOwner) "Templates work once this edit is online · check your connection" else "Templates are for the studio owner")
             is EditAction.ClaudePanel ->
                 if (u.session == null) { if (a.open) say("Claude joins once this edit is online · check your connection") }
                 else updateSession { it.copy(chatOpen = a.open) }
@@ -1063,8 +1081,11 @@ class EditSuiteController(
 
     // =================================================================== panels and estimates
     private fun open(panel: Panel?) {
+        // Leaving Templates ends a template preview (the player goes back to the edit).
+        if (panel != Panel.TEMPLATES && _ui.value.panel == Panel.TEMPLATES) _ui.update { it.copy(templatePreview = null, templates = it.templates.copy(picked = null, previewOf = null, notes = emptyList(), price = null)) }
         _ui.update { it.copy(panel = panel) }
         when (panel) {
+            Panel.TEMPLATES -> if (_ui.value.templates.library == null && !_ui.value.templates.loading) act(EditAction.LoadTemplates)
             Panel.CAPTIONS -> { checkHelpers { if (_ui.value.captionTrack == null && "captions" !in _ui.value.helpersOff) estimate("captions") }; estimate("cuts", silenceOnly()) }
             Panel.AUDIO -> { checkHelpers { if ("denoise" !in _ui.value.helpersOff) estimate("denoise") }; if (SuiteOps.musicTrack(project ?: return) != null) estimate("beats", source = musicSource()) }
             Panel.EFFECTS -> if (_ui.value.effectsTab == "Mask") matteTab()
