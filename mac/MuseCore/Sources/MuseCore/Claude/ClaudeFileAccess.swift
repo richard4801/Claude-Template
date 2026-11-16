@@ -49,6 +49,8 @@ public struct ClaudeFileSettings: Codable, Hashable, Sendable {
     public var alwaysTools: [String]?
     /// "Let Claude run code it writes" (owner, bundle-24): off (nil) by default.
     public var runCode: Bool?
+    /// "Full access" (owner, bundle-26): off (nil) by default; see ClaudeFullAccess.
+    public var fullAccess: Bool?
 
     public init(mode: ClaudeFileMode = .ask, folders: [ClaudeAllowedFolder] = []) {
         self.mode = mode
@@ -66,6 +68,9 @@ public struct ClaudeFileSettings: Codable, Hashable, Sendable {
     public var activeShell: ClaudeShellScope? { askAll ? nil : shellScope }
     public var activeTools: [String] { askAll ? [] : tools }
     public var runsCode: Bool { runCode ?? false }
+    public var hasFullAccess: Bool { fullAccess ?? false }
+    /// "Ask before anything" pauses it too.
+    public var activeFullAccess: Bool { askAll ? false : hasFullAccess }
     /// The one sentence under the switch in Settings → Claude.
     public static let runCodeHint = "Python or other code Claude writes into a command runs without asking inside your folders and temporary files, and uv may download Python packages for it; code that deletes files, runs other programs, uses the network or controls other apps still asks."
     /// "Ask before anything" pauses it too.
@@ -304,18 +309,26 @@ public enum ClaudeFilePolicy {
     /// and `readScript` look at the Mac (a command's folder arguments, an interpreter's script).
     public static func verdict(_ ask: ClaudePermissionAsk, mode: ClaudeFileMode, folders: [String], cwd: String, home: String,
                                rules: [ClaudeCommandRule] = [], askAll: Bool = false, shell: ClaudeShellScope? = nil, tools: [String] = [],
-                               runCode: Bool = false,
+                               runCode: Bool = false, fullAccess: Bool = false,
                                isDirectory: (String) -> Bool = { _ in false }, readScript: (String) -> String? = { _ in nil }) -> ClaudeFileVerdict {
         guard mode == .ask else { return .deny(offRefusal) }
         // A folder too wide to always allow (the disk, home, ~/Library) never counts, however it got on the list.
         let folders = folders.filter { ClaudeAlwaysRules.tooWide($0, home: home) == nil }
         let tool = ask.toolName
-        if tool == "Save" { return saveVerdict(ask, folders: folders, cwd: cwd, home: home, askAll: askAll, shell: shell) }
+        let fullAccess = fullAccess && !askAll
+        if tool == "Save" { return saveVerdict(ask, folders: folders, cwd: cwd, home: home, askAll: askAll, shell: shell, fullAccess: fullAccess) }
         if tool == "Bash" {
             let cmd = str(ask.input, "command") ?? ""
             if cmd.isEmpty { return .deny("Empty command") }
             if mentionsSecret(cmd) { return .deny(credentialRefusal) }
             if askAll { return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: askAllReason)) }
+            // "Full access": everything but deleting outside temp, admin rights and ~/Library runs (Allow once / Deny for those).
+            if fullAccess {
+                let f = ClaudeFullAccess.check(cmd, cwd: cwd, home: home, readScript: readScript)
+                if f.secret { return .deny(credentialRefusal) }
+                if let why = f.why { return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: "Always asks: \(why)")) }
+                return .allow
+            }
             // Rules saved before 2026-11-15 (one program each) still count.
             let c = ClaudeAlwaysRules.check(cmd, folders: folders, cwd: cwd, home: home, isDirectory: isDirectory, readScript: readScript)
             if c.clean, let r = c.rule, rules.contains(r) { return .allow }
@@ -348,6 +361,7 @@ public enum ClaudeFilePolicy {
         var folder = isFile ? (path as NSString).deletingLastPathComponent : path
         if folder.isEmpty { folder = "/" }
         let inLibrary = inside(path, home + "/Library")
+        if fullAccess, !inLibrary { return .allow }
         if !askAll, !inLibrary, folders.contains(where: { inside(path, $0) }) { return .allow }
         // Temporary files and ~/MUSE: shell commands always allowed already reach them, so reading and uploading there doesn't ask either.
         if !askAll, shell != nil, ClaudeKindGrants.isTemp(path) || ClaudeKindGrants.isMuseFolder(path, home: home) { return .allow }
@@ -418,11 +432,13 @@ public enum ClaudeFilePolicy {
     }
 
     static func saveVerdict(_ ask: ClaudePermissionAsk, folders: [String], cwd: String, home: String, askAll: Bool,
-                            shell: ClaudeShellScope? = nil) -> ClaudeFileVerdict {
+                            shell: ClaudeShellScope? = nil, fullAccess: Bool = false) -> ClaudeFileVerdict {
         guard let t = saveTarget(ask, cwd: cwd, home: home) else { return .deny("Nothing to save") }
         let path = t.folder + "/" + t.fileName
         if isSecret(t.folder) || isSecret(path) { return .deny(credentialRefusal) }
         guard saveLinkOK(t.url) else { return .deny(saveLinkRefusal) }
+        // Full access: any folder but ~/Library, without a card.
+        if fullAccess, !inside(t.folder, home + "/Library") { return .allow }
         guard saveFolderAllowed(t.folder, folders: folders, home: home) else { return .deny(saveFolderRefusal) }
         // A folder the person always allowed (reading, writing and uploading) takes saves without a card.
         if !askAll, folders.contains(where: { inside(t.folder, $0) }) { return .allow }

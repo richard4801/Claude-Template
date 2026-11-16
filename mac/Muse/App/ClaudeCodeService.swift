@@ -439,6 +439,13 @@ final class ClaudeCodeService: ObservableObject {
         recheckFileAsks()
     }
 
+    /// Settings → Claude: "Full access" (bundle-26), after its one confirmation; open cards it now covers go through.
+    func setFullAccess(_ on: Bool) {
+        fileSettings.fullAccess = on
+        saveFileSettings()
+        recheckFileAsks()
+    }
+
     /// Settings → Claude: "Let Claude run code it writes" (bundle-24); open cards it now covers go through.
     func setRunCode(_ on: Bool) {
         fileSettings.runCode = on
@@ -462,7 +469,7 @@ final class ClaudeCodeService: ObservableObject {
     private func fileVerdict(_ a: ClaudePermissionAsk, cwd: String) -> ClaudeFileVerdict {
         let s = fileSettings
         return ClaudeFilePolicy.verdict(a, mode: s.mode, folders: s.activeFolders, cwd: cwd, home: NSHomeDirectory(),
-                                        rules: s.activeRules, askAll: s.askAll, shell: s.activeShell, tools: s.activeTools, runCode: s.activeRunCode,
+                                        rules: s.activeRules, askAll: s.askAll, shell: s.activeShell, tools: s.activeTools, runCode: s.activeRunCode, fullAccess: s.activeFullAccess,
                                         isDirectory: { p in var d: ObjCBool = false; return FileManager.default.fileExists(atPath: p, isDirectory: &d) && d.boolValue },
                                         readScript: { p in
                                             guard let n = (try? FileManager.default.attributesOfItem(atPath: p)[.size] as? NSNumber)?.intValue, n <= 512 * 1024 else { return nil }

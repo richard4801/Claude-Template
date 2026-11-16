@@ -81,6 +81,8 @@ struct ClaudeFileCardView: View {
 struct ClaudeFileSettingsSection: View {
     @Environment(\.theme) private var t
     @ObservedObject private var service: ClaudeCodeService = .shared
+    /// "Full access" asks once, in plain words, before it turns on (bundle-26).
+    @State private var confirmFullAccess = false
 
     private func short(_ p: String) -> String {
         if ClaudeKindGrants.isTemp(p) { return "Temporary files (\(p))" }
@@ -100,6 +102,20 @@ struct ClaudeFileSettingsSection: View {
             .labelsHidden().pickerStyle(.menu).fixedSize()
         }
         if s.mode == .ask {
+            // Bundle-26 (owner): one switch for terminal work in any folder; off by default, paused by "Ask before anything".
+            SettingRow("Full access", hint: s.askAll && s.hasFullAccess ? "Paused: you chose Ask before anything" : ClaudeFullAccess.rowHint) {
+                Toggle("Full access", isOn: Binding(get: { s.hasFullAccess }, set: { on in
+                    if on { confirmFullAccess = true } else { service.setFullAccess(false) }
+                }))
+                .labelsHidden().toggleStyle(.switch)
+                .accessibilityIdentifier("settings.claude.fullAccess")
+            }
+            .opacity(s.askAll ? 0.6 : 1)
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "settings full access") } }
+            .sheet(isPresented: $confirmFullAccess) {
+                ClaudeFullAccessConfirm(onConfirm: { service.setFullAccess(true); confirmFullAccess = false },
+                                        onCancel: { confirmFullAccess = false })
+            }
             SettingRow("Ask before anything", hint: s.askAll
                        ? "Every file and command asks, and the Always allowed list is paused"
                        : "Folders and commands you always allowed run without asking. Deleting, moving, network, installs and ~/Library always ask.") {
@@ -201,5 +217,35 @@ struct ClaudeResultDot: View {
             Circle().fill(t.roles.accent).frame(width: 7, height: 7).offset(x: -3, y: 3)
                 .accessibilityLabel("\(service.unseenResults) result\(service.unseenResults == 1 ? "" : "s") arrived")
         }
+    }
+}
+
+/// The one confirmation before "Full access" turns on (bundle-26): what it allows, what still asks, and that it can be
+/// turned off at any time.
+struct ClaudeFullAccessConfirm: View {
+    @Environment(\.theme) private var t
+    var onConfirm: () -> Void
+    var onCancel: () -> Void
+
+    var body: some View {
+        let r = t.roles
+        VStack(alignment: .leading, spacing: Space.s3) {
+            Text(ClaudeFullAccess.confirmTitle).scaled(t.scale.title, r.ink).fixedSize(horizontal: false, vertical: true)
+            Text(ClaudeFullAccess.confirmAllows).scaled(t.scale.body, r.ink).fixedSize(horizontal: false, vertical: true)
+            Text(ClaudeFullAccess.confirmStillAsks).scaled(t.scale.body, r.ink2).fixedSize(horizontal: false, vertical: true)
+            Text(ClaudeFullAccess.confirmOff).scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Space.s2) {
+                Spacer()
+                RButton("Cancel", kind: .plain, small: false) { onCancel() }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("claude.fullAccess.cancel")
+                RButton("Turn on full access", kind: .action, small: false) { onConfirm() }
+                    .accessibilityIdentifier("claude.fullAccess.confirm")
+            }
+            .padding(.top, Space.s2)
+        }
+        .padding(Space.s5)
+        .frame(width: 440)
+        .background(r.raised)
     }
 }
