@@ -82,6 +82,7 @@ private struct AccountSettings: View {
         Group { who; appearance }
         Group { notifications }
         Group { ClaudeFileSettingsSection() }.id("settings.claude")
+        if store.isOwner { PipelineSkillSettingsSection().id("settings.claude.pipeline") }
         Group { about }
     }
 
