@@ -23,7 +23,8 @@ export type AttachmentMime = 'image/jpeg' | 'image/png' | 'image/webp';
 export type Attachment = { id: string; uploadId: string; key: string; mimeType: AttachmentMime; bytes: number; width: number; height: number; video?: undefined }
   /** A video (plans/claude-video-vision.md): kept as the upload itself (key = its storage key); Claude watches it with watch {id: uploadId}. */
   | { id: string; uploadId: string; key: string; mimeType: string; bytes: number; width: 0; height: 0; video: true };
-export const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+/** Edit footage up to 60 min / 2 GB (owner 2026-11-16); never decoded here: watch reads at most 30 min of it. */
+export const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
 
 export const AttachmentsInput = z.array(z.object({ uploadId: z.string().min(1).max(80) }).strict()).max(MAX_ATTACHMENTS, `attachments: at most ${MAX_ATTACHMENTS} images a message`);
 
@@ -84,7 +85,7 @@ export async function storeAttachments(ctx: Ctx, u: AuthUser, threadId: string, 
     const [up] = await ctx.db.select().from(uploads).where(and(eq(uploads.id, id), eq(uploads.studioId, u.studioId)));
     if (!up || !/^video\//i.test(up.contentType)) continue;
     if (up.state !== 'ready') throw new ApiError(409, 'upload_not_ready', `${id}: the upload isn't confirmed yet`);
-    if ((up.bytes ?? 0) > MAX_VIDEO_BYTES) throw badRequest(`${id}: at most 500 MB a video`);
+    if ((up.bytes ?? 0) > MAX_VIDEO_BYTES) throw badRequest(`${id}: at most 2 GB a video`);
     videos.set(id, { id: uid('att'), uploadId: id, key: up.storageKey, mimeType: up.contentType, bytes: up.bytes ?? 0, width: 0, height: 0, video: true });
   }
   const ready = await Promise.all(ids.filter(id => !videos.has(id)).map(async id => { const { buf, kind } = await uploadImage(ctx, u, id); return { id, ...(await normaliseImage(buf, kind, id)) }; }));

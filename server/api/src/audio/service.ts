@@ -39,10 +39,18 @@ export function analyzeClip(ctx: Ctx, clipId: string, onDone?: (row: ClipRow) =>
     try {
       const [c] = await ctx.db.select().from(clips).where(eq(clips.id, clipId));
       if (!c?.storageKey) return null;
-      const obj = await ctx.storage.get(c.storageKey);
-      if (!obj) return null;
-      const file = path.join(tmp, `clip${path.extname(c.storageKey) || '.mp4'}`);
-      await pipeline(obj.body, fs.createWriteStream(file));
+      // Only the first 30 s are decoded (detect.ts MAX_SECONDS): on R2, ffmpeg reads them by range requests from a
+      // short-lived link, so an hour-long 2 GB import is never copied here just to classify its opening.
+      let file: string;
+      if (ctx.storage.kind === 's3') {
+        if (!(await ctx.storage.head(c.storageKey))) return null;
+        file = await ctx.storage.presignGet(c.storageKey, 600);
+      } else {
+        const obj = await ctx.storage.get(c.storageKey);
+        if (!obj) return null;
+        file = path.join(tmp, `clip${path.extname(c.storageKey) || '.mp4'}`);
+        await pipeline(obj.body, fs.createWriteStream(file));
+      }
       const r = await detectTalking(ctx.config.FFMPEG_PATH, file);
       const audio: ClipAudio = { kind: r.kind, speaking: r.speaking, confidence: r.confidence, detectedAt: Date.now() };
       const [u] = await ctx.db.update(clips).set({ meta: { ...(c.meta ?? {}), audio }, checks: talkingChecks(c.checks, saidTalking(c) || audio.speaking) })

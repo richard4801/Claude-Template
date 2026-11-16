@@ -1,5 +1,6 @@
 // AI suite · the service behind /v1/suite: catalog, settings, estimate, shots (as render jobs on the existing
 // job/wallet pipeline: hold → run → exact settle, or full refund), and the suite line that runs them.
+import { suiteSourceTooLong } from '../imports/limits.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -657,6 +658,9 @@ export class SuiteService {
     const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, u.studioId)));
     if (!clip) throw notFound('Clip');
     if (!clip.storageKey) throw badRequest('Upload the clip file first');
+    // A long Library clip (imports go up to 60 min, for edits): said plainly, with the numbers for the trim.
+    const long = suiteSourceTooLong(clip.durationSec, 'Recast');
+    if (long) throw long;
     const seen = new Set<string>();
     for (const c of r.cast) {
       const k = c.personIndex ? `i${c.personIndex}` : c.personHint ? `h${c.personHint}` : '';
@@ -823,6 +827,8 @@ export class SuiteService {
     if (!hosted && this.ctx.gpu.mode === 'runpod') this.ctx.jobs.requireCapabilities(req.engine as 'h3' | 'viggle');
     const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.id, req.clipId), eq(clips.studioId, u.studioId)));
     if (!clip) throw notFound('Clip');
+    const long = suiteSourceTooLong(clip.durationSec, 'Swap');
+    if (long) throw long;
     const rr: P.RenderReq = !choice ? { engine: 'replicate', quality: req.quality, takes: req.takes, clipSeconds: clip?.durationSec, pricePerSec: this.ctx.jobs.qualityPrice(req.quality) }
       : (await modelChoice(this.ctx).swapQuote(u.studioId, choice.model, req.quality, clip.durationSec, req.takes)).rr;
     const est = P.totalCost(rr);

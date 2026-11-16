@@ -1,0 +1,18 @@
+{
+  "id": "HourLong001",
+  "title": "Big but short",
+  "webpage_url": "https://www.youtube.com/shorts/HourLong001",
+  "extractor_key": "Youtube",
+  "duration": 3725,
+  "availability": "public",
+  "age_limit": 0,
+  "live_status": "not_live",
+  "requested_formats": [
+    {
+      "filesize": 900000000
+    },
+    {
+      "filesize": 40000000
+    }
+  ]
+}

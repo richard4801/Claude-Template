@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { AbortMultipartUploadCommand, CompleteMultipartUploadCommand, CreateMultipartUploadCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListPartsCommand,
+  PutObjectCommand, S3Client, UploadPartCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Config } from '../config.js';
 
@@ -24,7 +25,22 @@ export interface Storage {
   presignPut(key: string, contentType: string, ttlSec: number): Promise<{ url: string; headers: Record<string, string> }>;
   /** A URL the holder can GET the object from, until it expires. With [download], the response saves as that file name. */
   presignGet(key: string, ttlSec: number, download?: DownloadAs): Promise<string>;
+  /**
+   * Multipart upload for large files (long imports, up to 2 GB): the client PUTs parts to presigned URLs (resumable:
+   * the parts already stored are listed), then the server completes. `id` is the store's own upload id.
+   */
+  multipart: {
+    create(key: string, contentType: string): Promise<string>;
+    partUrl(key: string, id: string, n: number, ttlSec: number): Promise<string>;
+    listParts(key: string, id: string): Promise<{ n: number; etag: string; size: number }[]>;
+    complete(key: string, id: string, parts: { n: number; etag: string }[]): Promise<void>;
+    abort(key: string, id: string): Promise<void>;
+  };
 }
+
+/** Upload parts: 64 MiB (≥ S3's 5 MiB minimum; 2 GB = 32 parts), at most 10 000. */
+export const PART_BYTES = 64 * 1024 * 1024;
+const unquote = (e: string | undefined) => (e ?? '').replace(/^"|"$/g, '');
 
 export const contentTypeFor = (key: string) =>
   key.endsWith('.png') ? 'image/png' : key.endsWith('.webp') ? 'image/webp' : key.endsWith('.mp4') ? 'video/mp4'
@@ -70,6 +86,29 @@ export class S3Storage implements Storage {
     const url = await getSignedUrl(this.client, new PutObjectCommand({ Bucket: this.bucket, Key: safeKey(key), ContentType: contentType }), { expiresIn: ttlSec });
     return { url, headers: { 'content-type': contentType } };
   }
+  readonly multipart: Storage['multipart'] = {
+    create: async (key, contentType) => {
+      const r = await this.client.send(new CreateMultipartUploadCommand({ Bucket: this.bucket, Key: safeKey(key), ContentType: contentType }));
+      if (!r.UploadId) throw new Error('multipart upload not created');
+      return r.UploadId;
+    },
+    partUrl: (key, id, n, ttlSec) => getSignedUrl(this.client, new UploadPartCommand({ Bucket: this.bucket, Key: safeKey(key), UploadId: id, PartNumber: n }), { expiresIn: ttlSec }),
+    listParts: async (key, id) => {
+      const out: { n: number; etag: string; size: number }[] = [];
+      let marker: string | undefined;
+      for (;;) {
+        const r = await this.client.send(new ListPartsCommand({ Bucket: this.bucket, Key: safeKey(key), UploadId: id, PartNumberMarker: marker }));
+        for (const p of r.Parts ?? []) if (p.PartNumber) out.push({ n: p.PartNumber, etag: unquote(p.ETag), size: p.Size ?? 0 });
+        if (!r.IsTruncated) return out;
+        marker = r.NextPartNumberMarker;
+      }
+    },
+    complete: async (key, id, parts) => {
+      await this.client.send(new CompleteMultipartUploadCommand({ Bucket: this.bucket, Key: safeKey(key), UploadId: id,
+        MultipartUpload: { Parts: parts.map(p => ({ PartNumber: p.n, ETag: `"${unquote(p.etag)}"` })) } }));
+    },
+    abort: async (key, id) => { await this.client.send(new AbortMultipartUploadCommand({ Bucket: this.bucket, Key: safeKey(key), UploadId: id })); },
+  };
   presignGet(key: string, ttlSec: number, download?: DownloadAs) {
     return getSignedUrl(this.client, new GetObjectCommand({
       Bucket: this.bucket, Key: safeKey(key),
@@ -100,6 +139,68 @@ export class LocalStorage implements Storage {
     } finally { await fs.promises.rm(tmp, { force: true }); }
   }
   async head(key: string) { const f = this.file(key); return fs.existsSync(f) ? { size: fs.statSync(f).size } : null; }
+  /**
+   * A presigned PUT's body, streamed to disk (never buffered: a 2 GB import used to be held in memory here). Refused
+   * past `maxBytes`. With `part`, it is one part of a multipart upload. Returns the md5 (the ETag).
+   */
+  async putFrom(key: string, body: Readable, maxBytes: number, part?: { id: string; n: number }): Promise<{ etag: string; size: number }> {
+    const f = part ? this.partFile(key, part.id, part.n) : this.file(key), tmp = `${f}.${crypto.randomBytes(6).toString('hex')}.part`;
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const md5 = crypto.createHash('md5');
+    let size = 0;
+    try {
+      await pipeline(body, async function* (src: AsyncIterable<Buffer>) {
+        for await (const c of src) { size += c.length; if (size > maxBytes) throw Object.assign(new Error('too large'), { tooLarge: true }); md5.update(c); yield c; }
+      }, fs.createWriteStream(tmp));
+      await fs.promises.rename(tmp, f);
+      return { etag: md5.digest('hex'), size };
+    } finally { await fs.promises.rm(tmp, { force: true }); }
+  }
+  private partDir(key: string, id: string) {
+    if (!/^[A-Za-z0-9]{8,64}$/.test(id)) throw new Error('bad multipart id');
+    return `${this.file(key)}.mp-${id}`;
+  }
+  private partFile(key: string, id: string, n: number) {
+    if (!(Number.isInteger(n) && n >= 1 && n <= 10000)) throw new Error('bad part number');
+    if (!fs.existsSync(this.partDir(key, id))) throw new Error('no such multipart upload');
+    return path.join(this.partDir(key, id), String(n).padStart(5, '0'));
+  }
+  readonly multipart: Storage['multipart'] = {
+    create: async key => {
+      const id = crypto.randomBytes(12).toString('hex');
+      fs.mkdirSync(this.partDir(key, id), { recursive: true });
+      return id;
+    },
+    partUrl: async (key, id, n, ttlSec) => {
+      this.partFile(key, id, n);
+      const exp = Date.now() + ttlSec * 1000, scope = `${key}#${id}#${n}`;
+      return `${this.publicBase()}/storage/local/${safeKey(key)}?mp=${id}&part=${n}&exp=${exp}&sig=${this.sign('PUT', scope, exp)}`;
+    },
+    listParts: async (key, id) => {
+      const dir = this.partDir(key, id);
+      if (!fs.existsSync(dir)) throw new Error('no such multipart upload');
+      const out: { n: number; etag: string; size: number }[] = [];
+      for (const name of fs.readdirSync(dir).filter(x => /^\d{5}$/.test(x)).sort()) {
+        const file = path.join(dir, name), md5 = crypto.createHash('md5');
+        await pipeline(fs.createReadStream(file), md5);
+        out.push({ n: Number(name), etag: md5.digest('hex'), size: fs.statSync(file).size });
+      }
+      return out;
+    },
+    complete: async (key, id, parts) => {
+      const have = new Map((await this.multipart.listParts(key, id)).map(p => [p.n, p.etag]));
+      for (const p of parts) if (have.get(p.n) !== unquote(p.etag)) throw Object.assign(new Error(`part ${p.n} is missing or different`), { badPart: p.n });
+      const f = this.file(key), tmp = `${f}.${crypto.randomBytes(6).toString('hex')}.part`;
+      try {
+        const out = fs.createWriteStream(tmp);
+        for (const p of [...parts].sort((a, b) => a.n - b.n)) await pipeline(fs.createReadStream(this.partFile(key, id, p.n)), out, { end: false });
+        await new Promise<void>((res, rej) => out.end((e?: Error | null) => (e ? rej(e) : res())));
+        await fs.promises.rename(tmp, f);
+      } finally { await fs.promises.rm(tmp, { force: true }); }
+      await fs.promises.rm(this.partDir(key, id), { recursive: true, force: true });
+    },
+    abort: async (key, id) => { await fs.promises.rm(this.partDir(key, id), { recursive: true, force: true }); },
+  };
   async delete(key: string) { await fs.promises.rm(this.file(key), { force: true }); }
   sign(method: string, key: string, exp: number) { return crypto.createHmac('sha256', this.secret).update(`${method}\n${key}\n${exp}`).digest('base64url'); }
   verify(method: string, key: string, exp: number, sig: string) {

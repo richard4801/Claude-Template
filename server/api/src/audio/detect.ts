@@ -19,7 +19,7 @@ const MAX_SECONDS = 30;
 /** Decodes up to 30 s of the first audio stream to 16 kHz mono float samples, or null when there is none. */
 export function decodeAudio(ffmpeg: string, file: string, timeoutMs = 60_000): Promise<Float32Array | null> {
   return new Promise((resolve, reject) => {
-    execFile(ffmpeg, ['-v', 'error', '-i', file, '-vn', '-ac', '1', '-ar', String(RATE), '-t', String(MAX_SECONDS), '-f', 's16le', 'pipe:1'],
+    execFile(ffmpeg, ['-v', 'error', '-threads', '1', '-i', file, '-vn', '-ac', '1', '-ar', String(RATE), '-t', String(MAX_SECONDS), '-f', 's16le', 'pipe:1'],
       { encoding: 'buffer', timeout: timeoutMs, maxBuffer: RATE * 2 * MAX_SECONDS + 1024 * 1024 }, (err, stdout, stderr) => {
         // No audio track: nothing to decode.
         if (err && /does not contain any stream|matches no streams/i.test(String(stderr ?? ''))) return resolve(null);

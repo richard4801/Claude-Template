@@ -9,7 +9,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { putObject } from '../src/storage/objects.js';
 import { recreateOf } from '../src/recreate/references.js';
-import { IMPORT_MAX_SEC } from '../src/imports/service.js';
+import { SUITE_SOURCE_MAX_SEC } from '../src/imports/service.js';
 import { makeApp, people, type Client } from './helpers.js';
 import { ENC, ff, hasFfmpeg, makeReference } from './recreate-fixture.js';
 
@@ -24,6 +24,8 @@ function fakeYtDlp(dir: string, video: string) {
     'https://www.tiktok.com/@muse.studio/video/7431234567890000003': { info: path.join(FIX, 'tiktok-second.info.json') },
     'https://www.youtube.com/shorts/HugeShort01': { info: path.join(FIX, 'youtube-huge.info.json') },
     'https://www.youtube.com/shorts/BigShort020': { info: path.join(FIX, 'youtube-big-short.info.json') },
+    'https://www.youtube.com/shorts/HourLong001': { info: path.join(FIX, 'youtube-hour.info.json') },
+    'https://www.youtube.com/shorts/GiantVid001': { info: path.join(FIX, 'youtube-giant.info.json') },
     'https://www.youtube.com/shorts/AgeGated123': { info: path.join(FIX, 'youtube-age.info.json') },
     'https://www.instagram.com/reel/C9xBlocked1/': { stderr: "ERROR: [Instagram] C9xBlocked1: Requested content is not available, rate-limit reached or login required" },
   };
@@ -53,7 +55,7 @@ describe.skipIf(!hasFfmpeg)('Import a video from a link', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'muse-imports-'));
     video = makeReference(dir);
     long = path.join(dir, 'long.mp4');
-    ff('-f', 'lavfi', '-i', `testsrc2=s=90x160:r=10`, '-t', String(IMPORT_MAX_SEC + 2), ...ENC.filter((_, i, l) => !(l[i - 1] === '-r' || l[i] === '-r')), '-r', '10', long);
+    ff('-f', 'lavfi', '-i', `testsrc2=s=90x160:r=10`, '-t', String(SUITE_SOURCE_MAX_SEC + 2), ...ENC.filter((_, i, l) => !(l[i - 1] === '-r' || l[i] === '-r')), '-r', '10', long);
     fake = fakeYtDlp(dir, video);
     a = await makeApp({ YTDLP_PATH: fake.bin, RECREATE_POSE: 'false' });
     ({ owner, members: [member, other] } = await people(a, 2) as any);
@@ -71,11 +73,11 @@ describe.skipIf(!hasFfmpeg)('Import a video from a link', () => {
     return p.body.uploadId as string;
   };
 
-  it('settings: the studio\'s link rules with the import limits (swap sources, 30 s), and the reference limits', async () => {
+  it('settings: the studio\'s link rules with the import limits (edit footage: 60 min, 2 GB), and the reference limits', async () => {
     const s = (await member.req('GET', '/v1/links/settings')).body;
-    expect(s).toMatchObject({ strictLinks: true, platforms: ['tiktok', 'instagram', 'youtube'], tiktokDownloadsOff: 'refuse', maxSec: 30, maxMb: 150, cookies: false, canEdit: false,
-      reference: { maxSec: 60, maxMb: 80 } });
-    expect(IMPORT_MAX_SEC).toBe(30);
+    expect(s).toMatchObject({ strictLinks: true, platforms: ['tiktok', 'instagram', 'youtube'], tiktokDownloadsOff: 'refuse', maxSec: 3600, maxMb: 2048, cookies: false, canEdit: false,
+      limitText: 'Up to 60 minutes and 2 GB', suite: { maxSec: 30 }, reference: { maxSec: 60, maxMb: 80 } });
+    expect(SUITE_SOURCE_MAX_SEC).toBe(30);
     expect((await owner.req('GET', '/v1/links/settings')).body.canEdit).toBe(true);
   });
 
@@ -150,13 +152,24 @@ describe.skipIf(!hasFfmpeg)('Import a video from a link', () => {
     expect((await owner.req('GET', '/v1/imports')).body).toHaveLength(1);
   }, 30_000);
 
-  it('device refusals: too long for a swap source, too big, a link outside the rules, not a video, used upload', async () => {
-    const tooLong = await member.req('POST', '/v1/imports', { uploadId: await upload(member, long) });
-    expect([tooLong.status, tooLong.body.code, tooLong.body.error]).toEqual([400, 'too_long', `Imports can be up to 30 s (this one is ${IMPORT_MAX_SEC + 2} s)`]);
+  it('device refusals: too long, too big (each naming its limit), a link outside the rules, not a video, used upload', async () => {
+    // Longer than a swap source is fine now (edit footage); the Suite's 30 s applies when the clip is used there.
+    const ok = await member.req('POST', '/v1/imports', { uploadId: await upload(member, long) });
+    expect([ok.status, Math.round(ok.body.durationSec)]).toEqual([200, SUITE_SOURCE_MAX_SEC + 2]);
+    const sec = a.ctx.config.IMPORT_MAX_SEC_EDIT;
+    (a.ctx.config as any).IMPORT_MAX_SEC_EDIT = 20;
+    try {
+      const tooLong = await member.req('POST', '/v1/imports', { uploadId: await upload(member, long) });
+      expect([tooLong.status, tooLong.body.code, tooLong.body.error]).toEqual([400, 'too_long', `This video is ${SUITE_SOURCE_MAX_SEC + 2} s long · the limit is 20 seconds (imports: up to 20 seconds and 2 GB)`]);
+    } finally { (a.ctx.config as any).IMPORT_MAX_SEC_EDIT = sec; }
     expect((await member.req('POST', '/v1/imports', { uploadId: await upload(member), sourceUrl: 'https://vimeo.com/1234' })).body.code).toBe('link_unsupported');
     const mb = a.ctx.config.IMPORT_MAX_MB;
     (a.ctx.config as any).IMPORT_MAX_MB = 0.001;
-    try { expect((await member.req('POST', '/v1/imports', { uploadId: await upload(member) })).body.code).toBe('link_too_big'); }
+    try {
+      const big = (await member.req('POST', '/v1/imports', { uploadId: await upload(member) })).body;
+      expect(big.code).toBe('link_too_big');
+      expect(big.error).toMatch(/^This video is \d+ MB · the limit is 1 MB \(imports: up to 60 minutes and 1 MB\)$/);
+    }
     finally { (a.ctx.config as any).IMPORT_MAX_MB = mb; }
     const img = await member.req('POST', '/v1/uploads/presign', { kind: 'image', contentType: 'image/png' });
     expect((await member.req('POST', '/v1/imports', { uploadId: img.body.uploadId })).status).toBe(400);
@@ -187,8 +200,8 @@ describe.skipIf(!hasFfmpeg)('Import a video from a link', () => {
     expect(fake.calls()).toHaveLength(2);
     const cases: [string, number, string][] = [
       ['https://www.tiktok.com/@muse.studio/video/7431234567890000003', 422, 'link_downloads_off'],
-      ['https://youtube.com/shorts/HugeShort01', 400, 'too_long'],
-      ['https://youtube.com/shorts/BigShort020', 422, 'link_too_big'],
+      ['https://youtube.com/shorts/HourLong001', 400, 'too_long'],
+      ['https://youtube.com/shorts/GiantVid001', 422, 'link_too_big'],
       ['https://youtube.com/shorts/AgeGated123', 422, 'link_private'],
       ['https://www.instagram.com/reel/C9xBlocked1/', 502, 'link_blocked'],
       ['https://example.com/v.mp4', 422, 'link_unsupported'],
@@ -197,7 +210,8 @@ describe.skipIf(!hasFfmpeg)('Import a video from a link', () => {
       const x = await member.req('POST', '/v1/imports', { url });
       expect([url, x.status, x.body.code]).toEqual([url, status, code]);
     }
-    expect((await member.req('POST', '/v1/imports', { url: 'https://youtube.com/shorts/HugeShort01' })).body.error).toBe('Imports can be up to 30 s for now (this one is 40 s)');
+    expect((await member.req('POST', '/v1/imports', { url: 'https://youtube.com/shorts/HourLong001' })).body.error).toBe('This video is 1 h 2 min long · the limit is 60 minutes (imports: up to 60 minutes and 2 GB)');
+    expect((await member.req('POST', '/v1/imports', { url: 'https://youtube.com/shorts/GiantVid001' })).body.error).toBe('This video is 2.5 GB · the limit is 2 GB (imports: up to 60 minutes and 2 GB)');
     expect(fake.calls().filter(c => c.args.includes('--load-info-json'))).toHaveLength(1); // nothing else was downloaded
     // Server fetching off: the plain fallback.
     (a.ctx.config as any).RECREATE_LINKS = false;

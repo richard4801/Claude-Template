@@ -4,6 +4,7 @@
 // GPU queue (state "running", gpuState "pending") → a GPU slot claims it (fair round-robin between users) →
 // progress → done (takes created, hold settled to the actual cost) or failed (hold released in full).
 // `queue: true` parks a job as "queued" (nothing held) until POST /v1/queue/run.
+import { suiteSourceTooLong } from '../imports/limits.js';
 import { and, desc, eq, getTableColumns, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
@@ -190,6 +191,9 @@ export class JobService {
     if (r.engine === 'h3' && (r.steps < P.STEPS_MIN || r.steps > P.STEPS_MAX)) throw badRequest('Steps must be 4–30');
     if (replicate && !clip?.storageKey) throw badRequest('Upload the clip file first');
     if (!replicate && this.ctx.gpu.mode === 'runpod' && !clip?.storageKey) throw badRequest('Upload the clip file first');
+    // Over 30 s (imports go up to 60 min, for edits): never sent to a swap engine; the person trims or picks the part.
+    const long = suiteSourceTooLong(clip?.durationSec, 'Swap');
+    if (long) throw long;
     if (r.clipSeconds == null && clip) r.clipSeconds = clip.durationSec;
     const [m] = await this.ctx.db.select().from(models).where(and(eq(models.id, r.modelId), eq(models.studioId, user.studioId)));
     if (!m) throw notFound('Model');

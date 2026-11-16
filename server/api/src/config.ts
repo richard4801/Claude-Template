@@ -197,8 +197,17 @@ const Env = z.object({
   RECREATE_LINKS: bool(true),
   YTDLP_PATH: z.string().default('yt-dlp'),
   RECREATE_LINK_MAX_MB: num(80),
-  /** Import a video from a link (plans/api.md "Import a video from a link"): the size cap on an imported clip. */
-  IMPORT_MAX_MB: num(150),
+  /**
+   * Import a video (file or link; plans/api.md "Import a video from a link"): the caps on an imported clip. Imports are
+   * source footage for edits (owner 2026-11-16: "up to 1 hr long, about 2 GB"); the Suite's swap/recast engines keep
+   * their own, shorter limits, applied when a clip is used there (imports/limits.ts), never at import.
+   */
+  IMPORT_MAX_MB: num(2048),
+  IMPORT_MAX_SEC_EDIT: num(3600),
+  /** The server-side link fetch (yt-dlp fallback) of a long video: how long the download may take. */
+  IMPORT_FETCH_TIMEOUT_SEC: num(2700),
+  /** Temp disk kept free beyond what an import needs (a long download, its copy for probing); short = a plain error. */
+  IMPORT_MIN_FREE_MB: num(512),
   /** Paid AI editing helpers (workstream 1): the price is the provider's cost × this (the owner's choice, like Upscale). */
   EDITOR_MARKUP: num(2),
   /** Per studio per day (UTC), what paid AI editing helpers may charge in all; the owner can change it in the app. */

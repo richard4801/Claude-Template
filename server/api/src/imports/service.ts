@@ -21,17 +21,13 @@ import { analyzeClip, audioView } from '../audio/service.js';
 import { putObject } from '../storage/objects.js';
 import { checkInfo, FALLBACK, linkError, linkFor, tiktokDownloadsOff, type AnyPlatform } from '../recreate/links.js';
 import { MAX_REFERENCE_SEC, recreateOf } from '../recreate/references.js';
-import { MODELS } from '../suite/registry.js';
+import { limitText, requireTempSpace, SUITE_SOURCE_MAX_SEC, tooBigError, tooLongError } from './limits.js';
 
 type ClipRow = typeof clips.$inferSelect;
 /** What an import keeps in `clips.meta` (no migration: the clip row is the Library item the swap already takes). */
 export type ImportMeta = { source: 'import'; sourceUrl?: string | null; platform?: AnyPlatform | null; bytes: number; posterKey?: string | null; uploadId: string; userId: string; via: 'device' | 'server' };
 
-/**
- * The longest source the Suite's swap and recast engines take (registry `recast.sourceSeconds`, and reference videos'
- * `videoSecondsMax`): 30 s today. Imports are for those tools, so they are held to it.
- */
-export const IMPORT_MAX_SEC = Math.max(30, ...MODELS.map(m => Math.max((m as { recast?: { sourceSeconds?: [number, number] } }).recast?.sourceSeconds?.[1] ?? 0, m.refs?.videoSecondsMax ?? 0)));
+export { SUITE_SOURCE_MAX_SEC } from './limits.js';
 const POSTER_AT = 0.5;
 
 const CreateBody = z.union([
@@ -54,6 +50,8 @@ export class Imports {
   constructor(private ctx: Ctx) {}
   private get rx() { return recreateOf(this.ctx); }
   private get maxBytes() { return this.ctx.config.IMPORT_MAX_MB * 1048576; }
+  /** Edit-grade length cap (60 min): imports are source footage for edits; the Suite's 30 s applies at use. */
+  private get maxSec() { return this.ctx.config.IMPORT_MAX_SEC_EDIT; }
   private url(key: string) { return `${this.ctx.config.PUBLIC_URL ?? ''}/uploads/${key}`; }
 
   /** The Library clip, with what an import adds: where it came from, its poster and file. */
@@ -79,7 +77,9 @@ export class Imports {
   async settings(u: AuthUser) {
     const strict = await this.rx.strictLinks(u.studioId);
     return { strictLinks: strict, platforms: strict ? ['tiktok', 'instagram', 'youtube'] : ['any'], tiktokDownloadsOff: strict ? 'refuse' : 'allow',
-      maxSec: IMPORT_MAX_SEC, maxMb: this.ctx.config.IMPORT_MAX_MB, serverFetch: this.ctx.config.RECREATE_LINKS, cookies: false, canEdit: u.role === 'owner',
+      maxSec: this.maxSec, maxMb: this.ctx.config.IMPORT_MAX_MB, limitText: limitText(this.maxSec, this.ctx.config.IMPORT_MAX_MB),
+      // The Suite's swap/recast engines take far less: a longer clip is trimmed (or its part picked) when used there.
+      suite: { maxSec: SUITE_SOURCE_MAX_SEC }, serverFetch: this.ctx.config.RECREATE_LINKS, cookies: false, canEdit: u.role === 'owner',
       reference: { maxSec: MAX_REFERENCE_SEC, maxMb: this.ctx.config.RECREATE_LINK_MAX_MB } };
   }
   /** POST /v1/links/check {url, purpose}: the link under the studio's rules, and this member's import (or reference) from it. */
@@ -157,7 +157,7 @@ export class Imports {
       if (hit) { await this.dropUpload(up); return this.view(hit, { cached: true }); }
     }
     if (head.size > this.maxBytes) throw this.tooBig(head.size);
-    return this.withLocal(up.storageKey, file => this.store(u, { file, key: up.storageKey, uploadId: up.id, bytes: head.size, link, name: b.name, via: 'device' }));
+    return this.withInput(up.storageKey, head.size, file => this.store(u, { file, key: up.storageKey, uploadId: up.id, bytes: head.size, link, name: b.name, via: 'device' }));
   }
 
   /** The server fetches the link itself (often blocked by the platforms; the apps' device download comes first). */
@@ -172,7 +172,10 @@ export class Imports {
     let url = n.url;
     try { if (info.webpage_url) url = linkFor(info.webpage_url, { strict }).url; } catch { /* keep the pasted form */ }
     if (url !== n.url) { const again = await this.cached(u, url); if (again) return this.view(again, { cached: true }); }
-    checkInfo(info, { maxSec: IMPORT_MAX_SEC, maxBytes: this.maxBytes, what: 'Imports' });
+    checkInfo(info, { maxSec: this.maxSec, maxBytes: this.maxBytes, what: 'Imports', tooLong: sec => this.tooLong(sec), tooBig: bytes => this.tooBig(bytes) });
+    // A long video: the download (and yt-dlp's merge of video + audio, about twice its size) goes to temp disk first.
+    const est = info.filesize ?? info.filesize_approx ?? (info.requested_formats?.reduce((a, f) => a + (f.filesize ?? f.filesize_approx ?? 0), 0) || 0);
+    requireTempSpace(est * 2, this.ctx.config.IMPORT_MIN_FREE_MB, this.freeBytes);
     if (n.platform === 'tiktok' && strict) {
       const html = await rx.serial(() => rx.fetchPage(url)).catch(e => { throw e instanceof ApiError ? e : linkError('link_blocked', FALLBACK); });
       if (tiktokDownloadsOff(html) === true) throw linkError('link_downloads_off', 'The creator turned downloads off for this video, so MUSE won’t fetch it. Use another video, or ask the creator');
@@ -181,7 +184,7 @@ export class Imports {
     try {
       const infoFile = path.join(dir, 'info.json');
       fs.writeFileSync(infoFile, JSON.stringify(info));
-      const file = await rx.serial(() => rx.links.download(infoFile, dir, { maxBytes: this.maxBytes, ffmpeg: this.ctx.config.FFMPEG_PATH }))
+      const file = await rx.serial(() => rx.links.download(infoFile, dir, { maxBytes: this.maxBytes, ffmpeg: this.ctx.config.FFMPEG_PATH, timeoutMs: this.ctx.config.IMPORT_FETCH_TIMEOUT_SEC * 1000 }))
         .catch(e => { rx.logLinkFailure(n.platform, 'download', e); throw e; });
       const size = fs.statSync(file).size;
       if (size > this.maxBytes) throw this.tooBig(size);
@@ -195,13 +198,14 @@ export class Imports {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
 
-  private tooBig(bytes: number) {
-    return linkError('link_too_big', `This video is too big (${Math.round(bytes / 1048576)} MB; the limit is ${this.ctx.config.IMPORT_MAX_MB} MB)`);
-  }
+  private tooBig(bytes: number) { return tooBigError(bytes, this.ctx.config.IMPORT_MAX_MB, this.maxSec); }
+  private tooLong(sec: number) { return tooLongError(sec, this.maxSec, this.ctx.config.IMPORT_MAX_MB); }
+  /** Free temp space (tests replace it). */
+  freeBytes: ((dir?: string) => number | null) | undefined = undefined;
   private async probeChecked(file: string) {
     const info = await probe(this.ctx.config.FFPROBE_PATH, file).catch(() => null);
     if (!info?.width) throw badRequest('That file isn’t a video MUSE can read');
-    if (info.duration > IMPORT_MAX_SEC + 0.5) throw new ApiError(400, 'too_long', `Imports can be up to ${IMPORT_MAX_SEC} s (this one is ${Math.round(info.duration)} s)`);
+    if (info.duration > this.maxSec + 0.5) throw this.tooLong(info.duration);
     return info;
   }
 
@@ -236,7 +240,14 @@ export class Imports {
     await this.ctx.storage.delete(up.storageKey).catch(() => undefined);
     await this.ctx.db.delete(uploads).where(eq(uploads.id, up.id)).catch(() => undefined);
   }
-  private async withLocal<T>(key: string, fn: (file: string) => Promise<T>): Promise<T> {
+  /**
+   * The stored upload as something ffprobe/ffmpeg can read. On R2: a short-lived link (probe and poster read only the
+   * header and one frame by range requests, so a 2 GB file is never copied here). Locally (dev): a temp copy, after
+   * checking the disk has room.
+   */
+  private async withInput<T>(key: string, bytes: number, fn: (input: string) => Promise<T>): Promise<T> {
+    if (this.ctx.storage.kind === 's3') return fn(await this.ctx.storage.presignGet(key, 1800));
+    requireTempSpace(bytes, this.ctx.config.IMPORT_MIN_FREE_MB, this.freeBytes);
     const obj = await this.ctx.storage.get(key);
     if (!obj) throw new ApiError(409, 'upload_missing', 'The file has not arrived yet · upload it first');
     const file = path.join(os.tmpdir(), `${uid('imp')}${path.extname(key) || '.mp4'}`);

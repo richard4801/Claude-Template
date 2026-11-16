@@ -1,0 +1,18 @@
+{
+  "id": "GiantVid001",
+  "title": "Big but short",
+  "webpage_url": "https://www.youtube.com/shorts/GiantVid001",
+  "extractor_key": "Youtube",
+  "duration": 1800,
+  "availability": "public",
+  "age_limit": 0,
+  "live_status": "not_live",
+  "requested_formats": [
+    {
+      "filesize": 2600000000
+    },
+    {
+      "filesize": 60000000
+    }
+  ]
+}

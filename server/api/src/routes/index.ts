@@ -1,6 +1,6 @@
 // App-facing routes: plans/api.md, plus invites, wallets/members, settings and presigned uploads.
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -25,7 +25,8 @@ import { ASSET_DIR, ASSET_KEYS, PhotoError, PROVIDERS, type ShootRefIn } from '.
 import { PhotoBill } from '../images/bill.js';
 import { MODEL_ID_RE } from '../replicate/catalog.js'; // WS5
 import type { EngineSelection } from '../images/engines.js'; // WS5
-import { LocalStorage, contentTypeFor } from '../storage/index.js';
+import { LocalStorage, PART_BYTES, contentTypeFor } from '../storage/index.js';
+import { registerMultipartRoutes } from './multipart.js';
 import { cleanUploadedPhoto, objectInfo, putFile, putObject } from '../storage/objects.js';
 import { cleanMemberPhoto } from '../storage/clean.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
@@ -730,6 +731,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       return makeClip(req.user, { name: (t.title || 'Take').slice(0, 200), durationSec, width: Math.round(num(info?.width, num(m.width, 1080))), height: Math.round(num(info?.height, num(m.height, 1920))), fps: Math.max(1, Math.round(num(info?.fps, num(m.fps, 30)))) }, key);
     } finally { await fs.promises.rm(tmp, { force: true }); }
   });
+  registerMultipartRoutes(app, ctx); // files over ~100 MB: parts, resumable (routes/multipart.ts)
   // Large files: presigned PUT straight to R2, then confirm.
   app.post('/v1/uploads/presign', async req => {
     const b = parse(z.object({ kind: z.enum(['image', 'clip']), contentType: z.string().max(100), bytes: z.number().int().positive().max(2 * 1024 ** 3).optional() }), req.body);
@@ -752,7 +754,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       return { url: uploadUrl(up.storageKey) };
     }
     await db.update(uploads).set({ state: 'ready', bytes: head.size, sha256: null }).where(eq(uploads.id, up.id));
-    await objectInfo(ctx, up.storageKey); // records bytes + sha256 for the GPU worker
+    // bytes + sha256 for the GPU worker. A long import (edit footage, up to 2 GB) isn't read back here: the hash is
+    // made on first use (objectInfo), so confirm answers at once instead of streaming the whole file through the API.
+    if (head.size <= 150 * 1048576) await objectInfo(ctx, up.storageKey);
     return makeClip(req.user, (req.body as any)?.meta ?? req.body, up.storageKey);
   });
 
@@ -784,11 +788,26 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!local.verify(method, key, Number(q.exp), q.sig ?? '')) throw new ApiError(403, 'bad_signature', 'Link expired or not valid');
       return key;
     };
-    app.put('/storage/local/*', { config: { public: true }, bodyLimit: 2 * 1024 ** 3 }, async (req, reply) => {
-      const key = check(req, 'PUT');
-      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? ''));
-      await local.put(key, body);
-      return reply.status(200).header('etag', `"${createHash('md5').update(body).digest('hex')}"`).send();
+    // The PUT streams to disk (a 2 GB import was held in memory as one Buffer before): its own parser hands the raw
+    // body through, in an encapsulated context so other routes keep theirs. ?mp=&part= is one part of a multipart upload.
+    await app.register(async sub => {
+      sub.removeAllContentTypeParsers();
+      sub.addContentTypeParser('*', (_req, payload, done) => done(null, payload));
+      sub.put('/storage/local/*', { config: { public: true } }, async (req, reply) => {
+        const key = (req.params as { '*': string })['*'];
+        const q = req.query as { exp?: string; sig?: string; mp?: string; part?: string };
+        const part = q.mp ? { id: q.mp, n: Number(q.part) } : undefined;
+        if (!local.verify('PUT', part ? `${key}#${part.id}#${part.n}` : key, Number(q.exp), q.sig ?? '')) throw new ApiError(403, 'bad_signature', 'Link expired or not valid');
+        const body = (req.body ?? req.raw) as NodeJS.ReadableStream;
+        try {
+          const r = await local.putFrom(key, Readable.from(body as AsyncIterable<Buffer>), part ? PART_BYTES : 2 * 1024 ** 3, part);
+          return reply.status(200).header('etag', `"${r.etag}"`).send();
+        } catch (e) {
+          if ((e as { tooLarge?: boolean }).tooLarge) throw new ApiError(413, 'too_large', part ? `A part can be at most ${PART_BYTES / 1048576} MB` : 'At most 2 GB a file');
+          if (/multipart|part number/.test((e as Error).message)) throw new ApiError(404, 'upload_missing', 'That upload was cancelled or finished · start it again');
+          throw e;
+        }
+      });
     });
     app.get('/storage/local/*', { config: { public: true } }, async (req, reply) => {
       const key = check(req, 'GET');
