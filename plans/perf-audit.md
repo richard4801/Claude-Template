@@ -220,3 +220,7 @@ Checked and fine: heartbeats (Claude Code, Blender relay, 20 s network calls), E
 MuseCore on Linux (Swift 6.0.3): 1046 tests, 0 failures (26 skipped). The 7 new ones are in `IdlePerfTests` (coalescer order and equivalence, the orb's chunk gap, the bounded memo, the cache matching the filter and parser).
 
 After numbers: from the first CI run of this branch (filled in by the report to the coordinator).
+
+### Edit while Claude patches (second commit)
+
+Static read of the path: a patch from the live session lands in `showRemote` → `state.applyRemote` → `projectChanged`. That rebuilds the player item 120 ms later (debounced, keeping the playhead), and makes filmstrips and waveforms only for assets that have none yet (cached by asset id, so a patch doesn't regenerate them). The big edit check gains step 7, "Claude patches into the big edit": 20 patches at 2 a second (text changes and main-shot framing, alternately, through the fake session as `apply_edit_ops` sends them). Each must show within 2 s. The step logs the CPU median (fails above 80 %), the preview rebuilds it caused, the main thread's heaviest frames, and the idle CPU afterwards (fails above 25 %). Fixes on this path wait for those numbers.
