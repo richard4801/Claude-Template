@@ -14,7 +14,7 @@ struct PipelineSkillSettingsSection: View {
     @State private var busy = false
     @State private var error: String?
 
-    private var api: HTTPClaudeAPI? { ClaudeCodeService.shared.api as? HTTPClaudeAPI }
+    private var api: (any PipelineSkillAPI)? { ClaudeCodeService.shared.api as? any PipelineSkillAPI }
 
     var body: some View {
         let r = t.roles
@@ -23,7 +23,9 @@ struct PipelineSkillSettingsSection: View {
                 SettingRow("Edit pipeline skill", hint: "Version \(s.version). Claude reads it at the start of every edit and improves it after each one. Core \(s.coreChars) of \(s.coreBudget) characters, \(s.pages.filter { $0.status != "retired" }.count) techniques, \(s.houseStyle.count) house-style notes.") {
                     RButton("Undo last change", kind: .plain, small: true, off: busy || s.version <= 1) { run { _ = try await $0.pipelineUndo() } }
                         .help("Go back to the version before this one")
+                        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline undo") } }
                 }
+                .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline heading") } }
                 if !s.pending.isEmpty {
                     Text("Waiting for you").scaled(t.scale.body, r.ink).padding(.top, Space.s2)
                     ForEach(s.pending) { p in pendingRow(p) }
@@ -52,10 +54,13 @@ struct PipelineSkillSettingsSection: View {
             beforeAfter(before: p.before, after: p.after)
             HStack(spacing: Space.s2) {
                 RButton("Approve", kind: .action, small: true, off: busy) { run { _ = try await $0.pipelineDecide(p.id, approve: true) } }
+                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline approve") } }
                 RButton("Decline", kind: .plain, small: true, off: busy) { run { _ = try await $0.pipelineDecide(p.id, approve: false) } }
+                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline decline") } }
             }
         }
         .padding(.vertical, Space.s2)
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline pending \(p.id)") } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Change waiting for you: \(p.why)")
     }
@@ -68,7 +73,8 @@ struct PipelineSkillSettingsSection: View {
                 Text(Date(timeIntervalSince1970: v.createdAt / 1000), style: .date).scaled(t.scale.caption, r.ink2)
                 Spacer(minLength: Space.s3)
                 RButton(open == v.version ? "Hide changes" : "Show changes", kind: .plain, small: true) { toggle(v.version) }
-                if !current { RButton("Roll back to this", kind: .plain, small: true, off: busy) { run { _ = try await $0.pipelineRollback(to: v.version) } } }
+                if !current { RButton("Roll back to this", kind: .plain, small: true, off: busy) { run { _ = try await $0.pipelineRollback(to: v.version) } }
+                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline rollback \(v.version)") } } }
             }
             ForEach(Array(v.changelog.prefix(4).enumerated()), id: \.offset) { _, c in
                 Text("\(c.what) (\(c.why))").scaled(t.scale.caption, r.ink2).lineLimit(2)
@@ -83,6 +89,7 @@ struct PipelineSkillSettingsSection: View {
             }
         }
         .padding(.vertical, Space.s1)
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline version \(v.version)") } }
     }
 
     /// Before → after, plainly: the old words struck through, the new ones under them.
@@ -115,7 +122,7 @@ struct PipelineSkillSettingsSection: View {
         }
     }
 
-    private func run(_ act: @escaping (HTTPClaudeAPI) async throws -> Void) {
+    private func run(_ act: @escaping (any PipelineSkillAPI) async throws -> Void) {
         guard let api, !busy else { return }
         busy = true
         Task {

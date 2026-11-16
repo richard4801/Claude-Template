@@ -187,6 +187,7 @@ enum SnapshotRunner {
             await editBigCheck(store, dir: dir)   // Owner bugs, build 597: a 66-shot 16:9 edit opened by Claude, idle CPU, playback, Shape round trip
             await editRealMediaCheck(store, dir: dir)   // Owner report ci_83f9d0dcd92f: a 64 s edit of 20 real 1080p files, idle CPU after a restart
             await claudeAllowCheck(store, dir: dir)   // Allow always (owner 2026-11-12): file, safe and dangerous cards, the list in Settings
+            await pipelineSkillCheck(store, dir: dir)   // Edit pipeline skill in Settings → Claude at 1000 × 700: a big change waiting, the changelog
             await claudeChipsCheck(store, dir: dir)   // Live chips (owner 2026-11-12): Edit without vs with captions, different chips
             await editLayoutShots(store, dir: dir)   // Edit layout audit (owner 2026-11-08): three window sizes, four themes
             await editSafeWarningShots(store, dir: dir)   // Edit's safe-area warning line on camera (SnapshotRunner+EditSafeWarning.swift)
