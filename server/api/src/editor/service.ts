@@ -2,6 +2,7 @@
 // background removal (green-screen video the apps key out) and voice clean-up. Each job: estimate → hold → run on the
 // provider → settle at the GPU time actually billed (or release on failure/cancel), with `editor` live events. Results are
 // data the APP applies to its edit project; nothing here touches video frames (outputs are copied byte for byte).
+import { providerFailure } from '../lib/failure.js';
 import { resultsOf } from '../claude/results.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -154,9 +155,11 @@ const viewOptions = (o: Record<string, unknown>) => { const { runner: _r, ...res
  */
 const viewResult = (res: Record<string, unknown> | null, role: 'owner' | 'member') => {
   if (!res) return {};
-  const { errorCode, paid, recovering: _x, ...rest } = res as { errorCode?: string; paid?: { recoverable?: boolean; usd?: number }; recovering?: boolean };
+  const { errorCode, paid, recovering: _x, failure, ...rest } = res as { errorCode?: string; paid?: { recoverable?: boolean; usd?: number }; recovering?: boolean; failure?: unknown };
   return { ...(Object.keys(rest).length ? { result: rest } : {}), ...(errorCode ? { errorCode, recoverable: !!paid?.recoverable } : {}),
-    ...(role === 'owner' && paid?.usd != null ? { paidUsd: paid.usd } : {}) };
+    ...(role === 'owner' && paid?.usd != null ? { paidUsd: paid.usd } : {}),
+    // The provider's own words on a failed helper (lib/failure.ts): the owner only.
+    ...(role === 'owner' && failure ? { failure } : {}) };
 };
 
 export class EditorAiService {
@@ -696,7 +699,8 @@ export class EditorAiService {
         : e instanceof ReplicateError && e.kind === 'out_of_credit' ? 'The studio is out of AI credit · ask the owner'
         : e instanceof TranslateError ? (e.kind === 'refused' ? 'These captions couldn’t be translated · you weren’t charged' : 'Couldn’t translate these captions this time · you weren’t charged')
         : e instanceof ReplicateError && (row.kind === 'reverse' || row.kind === 'stabilize' || row.kind === 'slowmo') && /^(Reverse|Stabilise|Slow motion) works/.test(e.message) ? e.message : 'Something went wrong · try again';
-      await this.patch(id, { state: cancelled ? 'cancelled' : 'failed', phase: msg, error: msg, finishedAt: Date.now() }).catch(() => {});
+      const failure = cancelled ? undefined : providerFailure(e, { provider: /^Higgsfield/.test((e as Error)?.message ?? '') || isGenjutsuHelper(row.kind) ? 'higgsfield' : 'replicate', model: row.models?.[0] ?? row.kind });
+      await this.patch(id, { state: cancelled ? 'cancelled' : 'failed', phase: msg, error: msg, finishedAt: Date.now(), ...(failure ? { result: { ...(row.result ?? {}), failure } } : {}) }).catch(() => {});
     } finally {
       rmQuiet(file);
       for (const t of temps) rmQuiet(t);

@@ -1,5 +1,6 @@
 // Picks the studio's image engine, runs it, stores every image in our storage and records its recipe
 // (provider, model, prompt, seed, cost) so any image can be reproduced.
+import { failureOfError, providerFailure, withFailure, type ProviderFailure } from '../lib/failure.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +22,10 @@ import { applySent, guidesOf, roleOfGuides, whyOf, type Resolved, type SentImage
 import { exactOne } from '../replicate/prices.js';
 import type { StepOverrides } from './steps.js';
 
+/** An outside provider's reference: sent as stored up to this size (Seedream, for one, refuses images over 10 MB). */
+const PROVIDER_REF_MAX_BYTES = 8 * 1024 * 1024;
+const PROVIDER_REF_MAX_PX = 4096;
+
 /** Member-safe messages (plans/api.md "App clean-up" §1). The engine's own words go to the log only. */
 export const PHOTO_FAILED = "Something went wrong making the photos · you weren't charged";
 export const PHOTO_REFUSED = "This photo was refused by the content filter · you weren't charged";
@@ -31,8 +36,12 @@ export const OUT_OF_CREDIT = "Something went wrong · you weren't charged. The s
 /** Paid images already made (and stored) when a later image failed: a caller may keep them (PhotoBill.keep) as a partial result. */
 export type PhotoPartial = { images: ImageRef[]; costs: number[]; seed?: number; selection: EngineSelection };
 export class PhotoError extends ApiError {
+  /** The owner's diagnostic (lib/failure.ts): the provider's own words. Never in `message` (members see that). */
+  failure?: ProviderFailure;
   constructor(status: number, code: string, message: string, readonly spentUsd: number, readonly partial?: PhotoPartial) { super(status, code, message); }
 }
+/** A PhotoError carrying the diagnostic of the provider error behind it. */
+const photoFail = (pe: PhotoError, f: ProviderFailure | undefined) => withFailure(pe, f);
 
 export type ShootRefIn = { image: ImageRef; guides: ShootGuide[] };
 export type ShotPlan = { images: ImageRef[]; sent: SentRef[]; refs: { index: number | null; guides: ShootGuide[]; dropped?: true }[] };
@@ -285,7 +294,8 @@ export class ImageService {
 
   /** Storage key behind an /uploads/... URL, if it is one of ours. */
   keyOf(ref: ImageRef | null | undefined): string | null {
-    const m = ref?.url ? /\/uploads\/([A-Za-z0-9][A-Za-z0-9._\/-]*)$/.exec(ref.url) : null;
+    // A query or fragment (a cache-buster) is not part of the key: such a link would otherwise go out as a redirect.
+    const m = ref?.url ? /\/uploads\/([A-Za-z0-9][A-Za-z0-9._\/-]*)(?:[?#][^/]*)?$/.exec(ref.url) : null;
     return m?.[1] ?? null;
   }
 
@@ -300,6 +310,42 @@ export class ImageService {
       return k;
     }
     return null;
+  }
+
+  /**
+   * A reference for an outside provider's own fetcher (custom models on Muapi, fal, Higgsfield, Replicate…; coordinator
+   * 2026-11-16, job j_c1d11a56e120): always a direct signed storage link (no redirect, a fresh 2 h lifetime, no login).
+   * A stored image goes as is when it's JPEG, PNG or WebP and at most 8 MB; otherwise, and for an outside link (which may
+   * be a short-lived signed link, a page that redirects, or a host the provider can't reach), a JPEG copy (at most
+   * 4096 px) is stored once under rx/ and sent instead. An outside link that can't be read here is sent as given.
+   */
+  async providerRef(ref: ImageRef | null | undefined, studioId: string): Promise<string | null> {
+    if (!ref) return null;
+    const c = this.ctx.config, ttl = c.REPLICATE_INPUT_URL_TTL_SEC;
+    const key = await this.storedKey(ref, studioId);
+    if (!key && !(ref.url && /^https?:\/\//.test(ref.url))) return null;
+    if (key) {
+      const h = await this.ctx.storage.head(key).catch(() => null);
+      if (!h) return this.ctx.storage.presignGet(key, ttl);
+      // The type the store recorded, else the key's extension (local storage records none).
+      const typeOk = h.contentType ? /^image\/(jpe?g|png|webp)\b/i.test(h.contentType) : /\.(jpe?g|png|webp)$/i.test(key);
+      if (h.size <= PROVIDER_REF_MAX_BYTES && typeOk) return this.ctx.storage.presignGet(key, ttl);
+    }
+    const src = key ?? ref.url!;
+    const rx = `rx/p_${sha256(`${src}|${PROVIDER_REF_MAX_PX}`).slice(0, 32)}.jpg`;
+    if (!(await this.ctx.storage.head(rx).catch(() => null))) {
+      const got = await this.refBytes(ref, studioId).catch(() => null);
+      try {
+        if (!got) throw new Error('unreadable');
+        const sharp = (await import('sharp')).default;
+        const data = await sharp(got.buf).rotate().resize(PROVIDER_REF_MAX_PX, PROVIDER_REF_MAX_PX, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
+        await putObject(this.ctx, { key: rx, body: data, studioId, kind: 'generated', contentType: 'image/jpeg' });
+      } catch (e) {
+        this.ctx.log.warn({ err: (e as Error).message, stored: !!key }, 'a provider reference could not be copied · sent as it is');
+        return key ? this.ctx.storage.presignGet(key, ttl) : ref.url!;
+      }
+    }
+    return this.ctx.storage.presignGet(rx, ttl);
   }
 
   /** A URL an outside service (fal, a GPU worker) can GET: a presigned storage URL, or the image's own https URL. */
@@ -345,8 +391,8 @@ export class ImageService {
           const spent = costs.reduce((a, b) => a + b, 0) + (e instanceof PhotoError ? e.spentUsd : 0);
           o.bill?.waste(spent);
           const partial = images.length ? { images: images.slice(), costs: costs.slice(), seed: o.req.seed, selection: { ...sel, model: stepModel } } : undefined;
-          if (e instanceof PhotoError) throw new PhotoError(e.status, e.code, e.message, spent, partial);
-          if (partial) throw new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, spent, partial);
+          if (e instanceof PhotoError) throw photoFail(new PhotoError(e.status, e.code, e.message, spent, partial), e.failure);
+          if (partial) throw photoFail(new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, spent, partial), providerFailure(e, { provider: 'replicate', model: stepModel }));
           throw e;
         }
       }
@@ -367,7 +413,8 @@ export class ImageService {
           const edit = await this.replicateRef(o.editOf, o.studioId).catch(() => null);
           if (edit) req.editOf = edit.url;
         }
-      } else req.referenceImages = (await Promise.all(list.map(r => this.loadableUrl(r)))).filter(Boolean) as string[];
+      } else if (sel.provider === 'byo') req.referenceImages = (await Promise.all(list.map(r => this.providerRef(r, o.studioId).catch(() => this.loadableUrl(r))))).filter(Boolean) as string[];
+      else req.referenceImages = (await Promise.all(list.map(r => this.loadableUrl(r)))).filter(Boolean) as string[];
     }
     const prices = this.photoPrices();
     const edit = !!o.editOf && sel.provider === 'replicate';
@@ -442,20 +489,24 @@ export class ImageService {
       o.bill?.waste(spent);
       const partial = made?.refs.length ? { images: made.refs, costs: made.costs, seed: o.req.seed, selection: sel } : undefined;
       const code = e instanceof ImageEngineError ? e.code : undefined;
-      if (code === 'provider_refused') throw new PhotoError(422, 'provider_refused', PHOTO_REFUSED, spent, partial);
-      if (code === 'provider_rate_limited') throw new PhotoError(429, 'provider_rate_limited', PHOTO_BUSY, spent, partial);
+      // The owner's diagnostic: the engine's own (a custom model names its provider and model), else built here.
+      const f = failureOfError(e) ?? providerFailure(e, { provider: sel.provider, model: req.editOf || edit ? sel.editModel ?? sel.model : sel.model });
+      this.ctx.log.warn({ provider: sel.provider, model: sel.model, failure: f }, 'image engine failure (owner diagnostic)');
+      if (code === 'provider_refused') throw photoFail(new PhotoError(422, 'provider_refused', PHOTO_REFUSED, spent, partial), f);
+      if (code === 'provider_rate_limited') throw photoFail(new PhotoError(429, 'provider_rate_limited', PHOTO_BUSY, spent, partial), f);
       if (code === 'provider_out_of_credit') {
-        await this.ctx.engines.outOfCredit(o.studioId, 'replicate', (e as Error).message);
-        throw new PhotoError(503, 'provider_out_of_credit', OUT_OF_CREDIT, spent, partial);
+        // Only Replicate's own account is flagged as Replicate's (a custom model's provider is the owner's key).
+        if (sel.provider === 'replicate') await this.ctx.engines.outOfCredit(o.studioId, 'replicate', (e as Error).message);
+        throw photoFail(new PhotoError(503, 'provider_out_of_credit', OUT_OF_CREDIT, spent, partial), f);
       }
-      if (code === 'engine_unavailable') throw new PhotoError(400, 'engine_unavailable', "Photos aren't available right now", spent, partial);
-      throw new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, spent, partial);
+      if (code === 'engine_unavailable') throw photoFail(new PhotoError(400, 'engine_unavailable', "Photos aren't available right now", spent, partial), f);
+      throw photoFail(new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, spent, partial), f);
     }
     if (sel.provider === 'replicate') this.ctx.engines.worked('replicate');
     const { refs, costs, lostUsd } = await keepImages(out.images.slice(0, o.req.count), out.costUsd, out.seed);
     const total = costs.reduce((a, b) => a + b, 0);
     o.bill?.waste(lostUsd);
-    if (!refs.length) { o.bill?.waste(total); throw new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, total); }
+    if (!refs.length) { o.bill?.waste(total); throw photoFail(new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, total), providerFailure(new Error('the provider answered but no image could be kept'), { provider: sel.provider, model: sel.model, stage: 'download' })); }
     o.bill?.add(total);
     return { images: refs, seed: out.seed, costUsd: total, costs, selection: sel };
   }
@@ -514,15 +565,16 @@ export class ImageService {
     if (e instanceof ApiError) return new PhotoError(e.status, e.code, e.message, spent);
     const msg = (e as Error)?.message ?? String(e);
     this.ctx.log.warn({ ...ctxInfo, err: msg.slice(0, 300) }, 'image model failed');
+    const f = failureOfError(e) ?? providerFailure(e, { provider: 'replicate', model: typeof ctxInfo.model === 'string' ? ctxInfo.model : null });
     const kind = e instanceof ReplicateError ? e.kind : e instanceof ImageEngineError ? e.code : undefined;
-    if (kind === 'refused' || kind === 'provider_refused') return new PhotoError(422, 'provider_refused', PHOTO_REFUSED, spent);
-    if (kind === 'rate_limited' || kind === 'provider_rate_limited') return new PhotoError(429, 'provider_rate_limited', PHOTO_BUSY, spent);
+    if (kind === 'refused' || kind === 'provider_refused') return photoFail(new PhotoError(422, 'provider_refused', PHOTO_REFUSED, spent), f);
+    if (kind === 'rate_limited' || kind === 'provider_rate_limited') return photoFail(new PhotoError(429, 'provider_rate_limited', PHOTO_BUSY, spent), f);
     if (kind === 'out_of_credit' || kind === 'provider_out_of_credit') {
       await this.ctx.engines.outOfCredit(studioId, 'replicate', msg);
-      return new PhotoError(503, 'provider_out_of_credit', OUT_OF_CREDIT, spent);
+      return photoFail(new PhotoError(503, 'provider_out_of_credit', OUT_OF_CREDIT, spent), f);
     }
-    if (kind === 'unavailable' || kind === 'engine_unavailable') return new PhotoError(400, 'engine_unavailable', "Photos aren't available right now", spent);
-    return new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, spent);
+    if (kind === 'unavailable' || kind === 'engine_unavailable') return photoFail(new PhotoError(400, 'engine_unavailable', "Photos aren't available right now", spent), f);
+    return photoFail(new PhotoError(502, 'image_engine_failed', PHOTO_FAILED, spent), f);
   }
 
   /**

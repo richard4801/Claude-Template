@@ -4,6 +4,7 @@
 // go through the normal estimate → confirm → hold → settle flow and the daily caps; enabled image models run Photo. Members
 // see every enabled custom model by the owner's display name unless the owner hides it from members (4c: the switch lives
 // in suite_settings.models, engines/members.ts; `members` here is "shown to members", the old column is no longer read).
+import { note, providerFailure, withFailure, type FailureStage } from '../lib/failure.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { Readable } from 'node:stream';
@@ -354,6 +355,9 @@ export class ByoService {
           const h = await self.adapters[p.kind as ProviderKind].start(key, { ref: r.ref, version: r.version }, input);
           return JSON.stringify({ p: p.id, h });
         } catch (e) {
+          // The owner's diagnostic names the provider and its model (not "byo"); the key never goes into it.
+          if (e && typeof e === 'object') note(e, { provider: p.kind, model: r.ref, stage: 'submit' });
+          if (e instanceof ReplicateError && e.detail) e.detail = e.detail.split(key).join('[redacted]');
           if (e instanceof ReplicateError && (e.status === 401 || e.status === 403) && e.kind === 'unavailable') await self.markInvalid(p.id);
           throw e;
         }
@@ -362,6 +366,7 @@ export class ByoService {
         const { p, h } = JSON.parse(id) as { p: string; h: string };
         const k = await self.keyOf(p);
         const s = await self.adapters[k.p.kind as ProviderKind].get(k.key, h);
+        if (s.error) { note(s.error, { provider: k.p.kind, stage: 'poll' }); if (s.error.detail) s.error.detail = s.error.detail.split(k.key).join('[redacted]'); }
         return { status: s.status, url: s.url ?? null, billedSeconds: null, error: s.error };
       },
       async cancel(id: string) {
@@ -374,8 +379,8 @@ export class ByoService {
   /** Outputs are public result URLs: fetched without any key. */
   async download(url: string, file: string) {
     if (!/^https?:\/\//.test(url)) throw new ReplicateError('the provider returned no file', 'failed');
-    const res = await this.fetchFn(url, { signal: AbortSignal.timeout(10 * 60_000) }).catch(e => { throw new ReplicateError(`Couldn't download the result (${(e as Error).name})`, 'failed'); });
-    if (!res.ok || !res.body) throw new ReplicateError(`Couldn't download the result (${res.status})`, 'failed', res.status);
+    const res = await this.fetchFn(url, { signal: AbortSignal.timeout(10 * 60_000) }).catch(e => { throw note(new ReplicateError(`Couldn't download the result (${(e as Error).name})`, 'failed'), { stage: 'download' }); });
+    if (!res.ok || !res.body) throw note(new ReplicateError(`Couldn't download the result (${res.status})`, 'failed', res.status), { stage: 'download' });
     await pipeline(Readable.fromWeb(res.body as any), fs.createWriteStream(file));
   }
 
@@ -419,6 +424,8 @@ export class ByoService {
         const images: EngineImage[] = [];
         // Made images carry no bill of their own here: their cost (and one the provider made but we lost) is recorded.
         const fail = (e: ImageEngineError, paidToo = false) => { e.partial = images.slice(); e.wastedUsd = perImage * (images.length + (paidToo ? 1 : 0)); return e; };
+        /** The owner's diagnostic (lib/failure.ts): this provider and model, the provider's own words (the key removed). */
+        const diag = (e: unknown, stage: FailureStage) => providerFailure(e, { provider: k.p.kind, model: r.ref, stage, secrets: [k.key] });
         // Owner 2026-11-09: the largest size the model offers; a size it refuses for this shape (e.g. 2K at 9:16) steps down.
         const sizes = largestFirst(r.analysis, r.fixedInputs);
         for (let i = 0; i < req.count; i++) {
@@ -431,8 +438,13 @@ export class ByoService {
             catch (e) {
               const re = e as ReplicateError;
               if (re.status === 401 || re.status === 403) await self.markInvalid(k.p.id);
-              if (more && re.kind === 'failed' && (re.status ?? 0) >= 400 && (re.status ?? 0) < 500) continue;
-              throw fail(new ImageEngineError(re.message, re.kind === 'refused' ? 'provider_refused' : re.kind === 'rate_limited' ? 'provider_rate_limited' : re.kind === 'unavailable' ? 'engine_unavailable' : undefined));
+              if (more && re.kind === 'failed' && (re.status ?? 0) >= 400 && (re.status ?? 0) < 500) {
+                self.ctx.log.warn({ provider: k.p.kind, model: r.ref, size: sizes[si], failure: diag(e, 'submit') }, 'custom image model refused this size · trying the next one');
+                continue;
+              }
+              // A provider that can't pay is said as such (it was "something went wrong" before, coordinator 2026-11-16).
+              throw withFailure(fail(new ImageEngineError(re.message, re.kind === 'refused' ? 'provider_refused' : re.kind === 'rate_limited' ? 'provider_rate_limited'
+                : re.kind === 'out_of_credit' ? 'provider_out_of_credit' : re.kind === 'unavailable' ? 'engine_unavailable' : undefined)), diag(e, 'submit'));
             }
             const t0 = Date.now();
             let retry = false;
@@ -440,10 +452,20 @@ export class ByoService {
               // A status check that didn't get through is asked again (the image may be on its way, and billed).
               const s = await ad.get(k.key, h).catch(() => ({ status: 'running' as const }));
               if (s.status === 'succeeded') { images.push({ url: s.url }); break; }
-              if (s.status === 'failed' && more && s.error?.kind !== 'refused' && s.error?.kind !== 'out_of_credit') { retry = true; break; }
-              if (s.status === 'failed' || s.status === 'canceled') throw fail(new ImageEngineError(s.error?.message ?? 'failed', s.error?.kind === 'refused' ? 'provider_refused' : undefined), !!(s.error as { paid?: boolean } | undefined)?.paid);
+              if (s.status === 'failed' && more && s.error?.kind !== 'refused' && s.error?.kind !== 'out_of_credit') {
+                self.ctx.log.warn({ provider: k.p.kind, model: r.ref, size: sizes[si], failure: diag(s.error, 'poll') }, 'custom image model failed at this size · trying the next one');
+                retry = true; break;
+              }
+              if (s.status === 'failed' || s.status === 'canceled') {
+                const err = s.error ?? new ReplicateError(s.status === 'canceled' ? 'the provider cancelled it' : 'failed', 'failed');
+                throw withFailure(fail(new ImageEngineError(err.message, err.kind === 'refused' ? 'provider_refused' : err.kind === 'out_of_credit' ? 'provider_out_of_credit' : undefined),
+                  !!(s.error as { paid?: boolean } | undefined)?.paid), diag(err, 'poll'));
+              }
               // Our timeout: asked to cancel, but the provider may still finish and bill it (recorded as overhead).
-              if (Date.now() - t0 > self.ctx.config.IMAGE_TIMEOUT_SEC * 1000) { await ad.cancel(k.key, h); throw fail(new ImageEngineError('timed out'), true); }
+              if (Date.now() - t0 > self.ctx.config.IMAGE_TIMEOUT_SEC * 1000) {
+                await ad.cancel(k.key, h);
+                throw withFailure(fail(new ImageEngineError('timed out'), true), diag(new ReplicateError(`no result after ${self.ctx.config.IMAGE_TIMEOUT_SEC}s`, 'timeout'), 'poll'));
+              }
               await sleep(Math.min(1500, self.ctx.config.REPLICATE_POLL_MS));
             }
             if (!retry) break;

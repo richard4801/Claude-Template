@@ -11,6 +11,7 @@ import type { AuthUser, Ctx } from '../ctx.js';
 import { clips, jobs, loras, models, outfits, takes, type ImageRef } from '../db/schema.js';
 import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
 import { compact, uid } from '../lib/util.js';
+import type { ProviderFailure } from '../lib/failure.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
 import { loraToken } from '../prompt/engine.js';
@@ -81,7 +82,8 @@ export const jobViewCols = {
     'errorCode', ${jobs.stats}->'errorCode',
     'replicate', jsonb_strip_nulls(jsonb_build_object('billedSeconds', ${jobs.stats}#>'{replicate,billedSeconds}')),
     'suite', jsonb_strip_nulls(jsonb_build_object('billedSeconds', ${jobs.stats}#>'{suite,billedSeconds}')),
-    'photo', jsonb_strip_nulls(jsonb_build_object('takeIds', ${jobs.stats}#>'{photo,takeIds}')))) end`.as('stats'),
+    'photo', jsonb_strip_nulls(jsonb_build_object('takeIds', ${jobs.stats}#>'{photo,takeIds}')),
+    'failure', ${jobs.stats}->'failure')) end`.as('stats'),
 };
 /** A job row as jobViewCols returns it: enough for view() and emitJob(). */
 export type JobViewRow = Omit<JobRow, 'outputs'>;
@@ -110,7 +112,11 @@ export class JobService {
   constructor(private ctx: Ctx) {}
 
   // ------------------------------------------------------------------ views
-  view(j: JobViewRow, takesOut?: unknown[]) {
+  /**
+   * A job as the apps see it. `viewer`: who asks; only the studio owner gets `failure` on a failed job (the provider's own
+   * words, lib/failure.ts). Hub events have no viewer: they never carry it.
+   */
+  view(j: JobViewRow, viewer?: Pick<AuthUser, 'role'> | null) {
     const q = j.state === 'running' && j.gpuState === 'pending' ? this.queueInfo.get(j.id) ?? this.lineInfo.get(j.id) : undefined;
     return compact({
       id: j.id, title: j.title, modelId: j.modelId, modelName: j.modelName, outfitId: j.outfitId, request: withoutChat(j.request), state: j.state,
@@ -122,6 +128,7 @@ export class JobService {
       billedSeconds: j.state === 'done' ? (j.stats as any)?.replicate?.billedSeconds ?? (j.stats as any)?.suite?.billedSeconds : undefined,
       draft: j.draft ?? undefined, // AI suite (workstream 1): the composer draft, for "Reuse settings"
       takeIds: isPhoto(j) ? (j.stats as any)?.photo?.takeIds : undefined, // WS19: a photo job's stills (jobless takes)
+      failure: j.state === 'failed' && viewer?.role === 'owner' ? (j.stats as { failure?: ProviderFailure } | null)?.failure ?? undefined : undefined,
     });
   }
   emitJob(j: JobViewRow, extra: Record<string, unknown> = {}) {
@@ -145,11 +152,17 @@ export class JobService {
       ...(j.state === 'failed' ? { error: j.error ?? 'It didn’t finish' } : {}), ...(j.modelId ? { modelId: j.modelId } : {}) });
   }
 
-  async list(studioId: string) {
+  async list(studioId: string, viewer?: Pick<AuthUser, 'role'> | null) {
     // view() never shows outputs or the run state in stats: they stay in the database.
     const rows = await this.ctx.db.select(jobViewCols).from(jobs)
       .where(and(eq(jobs.studioId, studioId), eq(jobs.kind, 'render'), isNull(jobs.hiddenAt))).orderBy(desc(jobs.createdAt));
-    return rows.map(r => this.view(r));
+    return rows.map(r => this.view(r, viewer));
+  }
+  /** One job of the caller's studio, as GET /v1/jobs/:id shows it (the owner also gets `failure`). */
+  async viewOne(user: AuthUser, id: string) {
+    const [r] = await this.ctx.db.select(jobViewCols).from(jobs).where(and(eq(jobs.id, id), eq(jobs.studioId, user.studioId), eq(jobs.kind, 'render')));
+    if (!r || r.hiddenAt) throw notFound('Job');
+    return this.view(r, user);
   }
   async get(id: string) { return (await this.ctx.db.select().from(jobs).where(eq(jobs.id, id)))[0] ?? null; }
 
@@ -478,12 +491,13 @@ export class JobService {
   }
 
   /** Failed: the hold goes back in full; the apps get a failed job event and then a balance event. */
-  async fail(jobId: string, error: string, retryable = false, errorCode?: string) {
+  async fail(jobId: string, error: string, retryable = false, errorCode?: string, failure?: ProviderFailure) {
     const j = await this.get(jobId);
     if (!j || j.state !== 'running') return null;
+    if (failure) this.ctx.log.warn({ job: jobId, failure }, 'job failed at the provider');
     const [u] = await this.ctx.db.update(jobs).set({
       state: 'failed', gpuState: 'failed', error, retryable, refunded: j.cost, finishedAt: Date.now(), phase: 'Failed',
-      ...(errorCode ? { stats: { ...((j.stats as object | null) ?? {}), errorCode } } : {}),
+      ...(errorCode || failure ? { stats: { ...((j.stats as object | null) ?? {}), ...(errorCode ? { errorCode } : {}), ...(failure ? { failure } : {}) } } : {}),
     }).where(and(eq(jobs.id, jobId), eq(jobs.state, 'running'))).returning();
     if (!u) return null;
     this.queueInfo.delete(u.id); this.lineInfo.delete(u.id);

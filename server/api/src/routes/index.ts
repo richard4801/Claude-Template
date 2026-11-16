@@ -1,4 +1,5 @@
 // App-facing routes: plans/api.md, plus invites, wallets/members, settings and presigned uploads.
+import { failureOfError } from '../lib/failure.js';
 import fs from 'node:fs';
 import { Readable } from 'node:stream';
 import os from 'node:os';
@@ -818,7 +819,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   }
 
   // ------------------------------------------------------------------ jobs and takes
-  app.get('/v1/jobs', async req => ctx.jobs.list(req.user.studioId));
+  app.get('/v1/jobs', async req => ctx.jobs.list(req.user.studioId, req.user));
+  // One job; the studio owner also gets `failure` on a failed one (the provider's own words, lib/failure.ts).
+  app.get<{ Params: { id: string } }>('/v1/jobs/:id', async req => ctx.jobs.viewOne(req.user, req.params.id));
   app.post('/v1/jobs', async req => ctx.jobs.create(req.user, req.body));
   app.delete<{ Params: { id: string } }>('/v1/jobs/:id', async (req, reply) => {
     await ctx.jobs.remove(req.user, req.params.id);
@@ -1182,8 +1185,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     }, async e => {
       // Failed after the bill settled (the member was charged): never "refunded".
       const paid = (e as { chargedUsd?: number }).chargedUsd;
+      // The owner's diagnostic (lib/failure.ts): the provider's own words, kept with the job (members never see it).
+      const failure = failureOfError(e);
+      if (failure) ctx.log.warn({ job: row.id, failure }, 'photo job failed at the provider');
       await set({ state: 'failed', error: String((e as Error)?.message ?? '').slice(0, 200) || 'It didn’t finish', refunded: paid != null ? Math.max(0, Math.round((cost - paid) * 10000) / 10000) : cost,
-        phase: 'Failed', finishedAt: Date.now() });
+        phase: 'Failed', finishedAt: Date.now(), ...(failure ? { stats: { ...((j0!.stats as Record<string, unknown> | null) ?? {}), failure } } : {}) });
       throw e;
     });
     if (!wait) {

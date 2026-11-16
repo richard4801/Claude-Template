@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CREDIT_RE, errorText, ReplicateError, SAFETY_RE } from '../replicate/client.js';
 import { analyse, type Analysis, type Kind } from './classify.js';
+import { note } from '../lib/failure.js';
 
 export type ProviderKind = 'replicate' | 'fal' | 'muapi' | 'higgsfield';
 export type Price = { basis: 'per_run' | 'per_second'; costUsd: number; source: 'provider' | 'owner' };
@@ -56,6 +57,9 @@ export function firstUrl(o: unknown): string | undefined {
 
 /** Turns a provider's HTTP refusal at submit into the suite's error kinds (the job failure mapping applies). */
 function submitError(label: string, status: number, text: string) {
+  return note(submitError0(label, status, text), { detail: text, stage: 'submit' });
+}
+function submitError0(label: string, status: number, text: string) {
   if (status === 401) return new ReplicateError(`${label} refused the studio's key`, 'unavailable', status);
   if (status === 402 || CREDIT_RE.test(text)) return new ReplicateError(`${label} is out of credit`, 'out_of_credit', status);
   if (status === 403) return new ReplicateError(`${label} refused the studio's key`, 'unavailable', status);
@@ -143,7 +147,7 @@ export class ReplicateAdapter implements ProviderAdapter {
   async start(key: string, m: { ref: string; version: string | null }, input: Record<string, unknown>) {
     const url = m.version ? `${trim(this.base())}/predictions` : `${trim(this.base())}/models/${m.ref}/predictions`;
     const r = await call(this.f, 'replicate', url, { method: 'POST', headers: this.h(key), body: JSON.stringify(m.version ? { version: m.version, input } : { input }) }, 60_000)
-      .catch(e => { throw e instanceof ProviderUnreachable ? new ReplicateError(e.message, 'unavailable') : e; });
+      .catch(e => { throw e instanceof ProviderUnreachable ? note(new ReplicateError(e.message, 'unavailable'), { stage: 'submit', provider: e.kind }) : e; });
     const text = await r.text().catch(() => '');
     if (!r.ok) throw submitError('Replicate', r.status, text);
     const j = JSON.parse(text) as { id: string };
@@ -252,7 +256,7 @@ export class FalAdapter implements ProviderAdapter {
   async start(key: string, m: { ref: string }, input: Record<string, unknown>) {
     const q = trim(this.urls().falQueue);
     const r = await call(this.f, 'fal', `${q}/${m.ref}`, { method: 'POST', headers: this.h(key), body: JSON.stringify(input) }, 60_000)
-      .catch(e => { throw e instanceof ProviderUnreachable ? new ReplicateError(e.message, 'unavailable') : e; });
+      .catch(e => { throw e instanceof ProviderUnreachable ? note(new ReplicateError(e.message, 'unavailable'), { stage: 'submit', provider: e.kind }) : e; });
     const text = await r.text().catch(() => '');
     if (!r.ok) throw submitError('fal', r.status, text);
     const j = JSON.parse(text) as { request_id: string; status_url?: string; response_url?: string; cancel_url?: string };
@@ -458,12 +462,13 @@ export class MuapiAdapter implements ProviderAdapter {
     if (!validSegment(endpoint)) throw new ReplicateError('not a Muapi model', 'failed');
     const body = Object.fromEntries(Object.entries(input).map(([k, v]) => [k, typeof v === 'string' && MUAPI_LIST.test(k) ? [v] : v]));
     const r = await call(this.f, 'muapi', `${trim(this.base())}/${endpoint}`, { method: 'POST', headers: this.h(key), body: JSON.stringify(body) }, 60_000)
-      .catch(e => { throw e instanceof ProviderUnreachable ? new ReplicateError(e.message, 'unavailable') : e; });
+      .catch(e => { throw e instanceof ProviderUnreachable ? note(new ReplicateError(e.message, 'unavailable'), { stage: 'submit', provider: e.kind }) : e; });
     const text = await r.text().catch(() => '');
     if (!r.ok) throw muapiError(r.status, text);
     let id: unknown;
     try { id = (JSON.parse(text) as { request_id?: unknown; id?: unknown }).request_id ?? (JSON.parse(text) as { id?: unknown }).id; } catch { id = null; }
-    if (typeof id !== 'string' || !id) throw new ReplicateError('Muapi gave no request id', 'failed');
+    // Muapi can answer 200 with an error body instead of a request id: its words are kept for the owner.
+    if (typeof id !== 'string' || !id) throw note(new ReplicateError('Muapi gave no request id', 'failed'), { detail: text, stage: 'submit', provider: 'muapi' });
     return JSON.stringify({ id });
   }
   async get(key: string, handle: string): Promise<RunStatus> {
@@ -481,7 +486,7 @@ export class MuapiAdapter implements ProviderAdapter {
       if (url) return { status: 'succeeded', url };
       // Made (and billed) but not usable: refused or empty, said honestly (never "you weren't charged").
       if (flags.some(x => x === true)) return { status: 'failed', error: paidError('Muapi flagged the result as NSFW', 'refused') };
-      return { status: 'failed', error: paidError('no output came back', 'failed') };
+      return { status: 'failed', error: note(paidError('no output came back', 'failed'), { detail: errorText(p), stage: 'poll', provider: 'muapi' }) };
     }
     if (st === 'failed' || st === 'error') {
       const t = errorText(p.error ?? 'failed');
@@ -500,6 +505,9 @@ export class MuapiAdapter implements ProviderAdapter {
 
 /** A Muapi refusal at submit as the suite's error kinds. Muapi answers 403 (not 401) to a refused key. */
 export function muapiError(status: number, text: string) {
+  return note(muapiError0(status, text), { detail: text, stage: 'submit', provider: 'muapi' });
+}
+function muapiError0(status: number, text: string) {
   const t = text.slice(0, 500);
   if (status === 402 || CREDIT_RE.test(t) || MUAPI_CREDIT_RE.test(t)) return new ReplicateError('Muapi is out of credit', 'out_of_credit', status);
   if (SAFETY_RE.test(t)) return new ReplicateError(`Muapi refused the request (${t.slice(0, 200)})`, 'refused', status);
@@ -536,6 +544,9 @@ const HF_SAMPLE = { image: 'https://example.com/muse-estimate.jpg', video: 'http
 
 /** A Higgsfield refusal at submit (or quote) as the suite's error kinds. */
 export function higgsfieldError(status: number, text: string) {
+  return note(higgsfieldError0(status, text), { detail: text, stage: 'submit', provider: 'higgsfield' });
+}
+function higgsfieldError0(status: number, text: string) {
   const t = text.slice(0, 500);
   if (status === 401 || (status === 403 && HF_KEY_RE.test(t))) return new ReplicateError("Higgsfield refused the studio's key", 'unavailable', status);
   if (status === 402 || status === 403 || CREDIT_RE.test(t) || HF_CREDIT_RE.test(t)) return new ReplicateError('Higgsfield is out of credit', 'out_of_credit', status);
@@ -625,12 +636,12 @@ export class HiggsfieldAdapter implements ProviderAdapter {
     if (!this.validRef(m.ref)) throw new ReplicateError('not a Higgsfield model', 'failed');
     const b = trim(this.base());
     const r = await call(this.f, 'higgsfield', `${b}/${m.ref}`, { method: 'POST', headers: this.h(key), body: JSON.stringify(input) }, 60_000)
-      .catch(e => { throw e instanceof ProviderUnreachable ? new ReplicateError(e.message, 'unavailable') : e; });
+      .catch(e => { throw e instanceof ProviderUnreachable ? note(new ReplicateError(e.message, 'unavailable'), { stage: 'submit', provider: e.kind }) : e; });
     const text = await r.text().catch(() => '');
     if (!r.ok) throw higgsfieldError(r.status, text);
     let j: { request_id?: unknown; status_url?: string; cancel_url?: string } = {};
     try { j = JSON.parse(text); } catch { /* below */ }
-    if (typeof j.request_id !== 'string' || !j.request_id) throw new ReplicateError('Higgsfield gave no request id', 'failed');
+    if (typeof j.request_id !== 'string' || !j.request_id) throw note(new ReplicateError('Higgsfield gave no request id', 'failed'), { detail: text, stage: 'submit', provider: 'higgsfield' });
     const req = `${b}/requests/${encodeURIComponent(j.request_id)}`;
     // The key is only ever sent to Higgsfield's own host: URLs pointing anywhere else are replaced by the documented ones.
     const same = (u: string | undefined) => { try { return u && new URL(u).origin === new URL(b).origin ? u : undefined; } catch { return undefined; } };

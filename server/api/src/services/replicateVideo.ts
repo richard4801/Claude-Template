@@ -5,6 +5,7 @@
 // one prediction per take (429s waited out) → download each output at once → cut it back to the exact source length
 // with the source's audio → thumbnail → store → complete (settle on the seconds Replicate billed). Prediction ids are
 // saved on the job (stats.replicate) as soon as they exist, so a restart resumes polling rather than paying twice.
+import { note, providerFailure } from '../lib/failure.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -403,6 +404,8 @@ export class ReplicateVideo {
       return true;
     };
 
+    /** Which provider and model the owner's failure diagnostic names (lib/failure.ts). */
+    let diag = { provider: lineOf(state.takes?.[0] ?? {}) as string, model: (typeof r.videoModel === 'string' ? r.videoModel : null) as string | null };
     try {
       if (!(await this.toolsReady())) throw new Error('ffmpeg is not installed on the server');
       await report(1, 0.01, recovering ? 'Recovering the video' : 'Preparing the clip');
@@ -440,10 +443,10 @@ export class ReplicateVideo {
           const s = await startOf();
           if (!(await report(i, 0.03, 'Starting'))) return;
           const lineId = (): LineId => (s.onHf || s.gj ? 'higgsfield' : 'replicate');
-          const begin = () => lines[lineId()].create(s.model, s.input, {
+          const begin = () => { diag = { provider: lineId(), model: s.model }; return lines[lineId()].create(s.model, s.input, {
             maxWaitMs: c.REPLICATE_MAX_RATE_WAIT_SEC * 1000, cancelled,
             onWait: async w => { await report(i, 0.03, `Waiting to start · retrying in ${w}s`); },
-          });
+          }).catch(e => { throw e && typeof e === 'object' ? note(e, { stage: 'submit' }) : e; }); };
           try { pred = await begin(); } catch (e) {
             const v = (e as { validation?: { field: string; type: string }[] }).validation;
             const adapted = s.gj && e instanceof ReplicateError && e.status === 422 && v?.length ? adaptGenjutsuInput(s.input, v) : null;
@@ -486,7 +489,7 @@ export class ReplicateVideo {
           if (ts.cancelAsked) throw new ReplicateError('timed out', 'timeout');
           throw new ReplicateError('the provider cancelled the render', 'failed');
         }
-        if (pred.status === 'failed') throw failedError(pred);
+        if (pred.status === 'failed') throw note(failedError(pred), { stage: 'poll' });
         const url = outputUrl(pred.output);
         if (!url) throw new ReplicateError('the provider returned no video', 'failed');
         // From here the provider has made (and charged for) the video: it must become a take. Nothing below may fail
@@ -530,7 +533,7 @@ export class ReplicateVideo {
         ctx.log.error({ job: job.id, take: e.take, kind: e.kind, err: e.why }, 'swap job: provider result paid but not saved');
         await this.saveState(job.id, { ...state, recovering: false, lost: { take: e.take, kind: e.kind, why: e.why.slice(0, 300), at: Date.now() } } as RunState).catch(() => {});
         const f = paidLostFailure(e);
-        await ctx.jobs.fail(job.id, f.message, false, f.code);
+        await ctx.jobs.fail(job.id, f.message, false, f.code, providerFailure(new Error(e.why), { ...diag, stage: e.kind === 'unsaved' ? 'download' : 'poll' }));
         await reportPaidLost(ctx, job, modelName, e, 'swap_line').catch(err => ctx.log.warn({ err: (err as Error).message }, 'swap: could not record the issue'));
         return;
       }
@@ -538,7 +541,7 @@ export class ReplicateVideo {
       ctx.log.warn({ job: job.id, code: f.code, err: (e as Error).message }, 'Replicate job failed');
       // Only Replicate's own credit problem is reported as Replicate's (a Higgsfield refusal carries its own words).
       if (f.code === 'provider_out_of_credit' && !(e as { userMessage?: string }).userMessage) await ctx.engines.outOfCredit(job.studioId, 'replicate', (e as Error).message);
-      await ctx.jobs.fail(job.id, f.message, f.retryable, f.code);
+      await ctx.jobs.fail(job.id, f.message, f.retryable, f.code, providerFailure(e, diag));
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

@@ -910,7 +910,7 @@ export class SuiteService {
     if (!j || j.studioId !== u.studioId || !isSuiteJob(j) || j.hiddenAt) throw notFound('Shot');
     const plan = (j.stats as any)?.suite?.plan as ShotPlan | undefined;
     const words = plan ? await this.wordsFor(u) : (s: string) => s;
-    const view = { job: this.ctx.jobs.view(j), warnings: plan ? [...plan.notes, ...plan.camera.notes].map(words) : [] };
+    const view = { job: this.ctx.jobs.view(j, u), warnings: plan ? [...plan.notes, ...plan.camera.notes].map(words) : [] };
     if (u.role !== 'owner' || !plan) return view;
     const m = modelById(plan.modelId);
     return { ...view, engine: { model: plan.modelId, name: m?.name, label: m ? specName(m) : undefined, provider: plan.provider, ref: plan.ref, resolution: plan.resolution, perSec: plan.perSec, test: (j.stats as any)?.suite?.mode === 'mock' },

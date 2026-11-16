@@ -16,6 +16,11 @@ export type Prediction = {
 export type ReplicateErrorKind = 'refused' | 'failed' | 'rate_limited' | 'timeout' | 'unavailable' | 'cancelled' | 'out_of_credit';
 
 export class ReplicateError extends Error {
+  /** For the owner's failure diagnostic (lib/failure.ts): the provider's own words, where it failed, which provider/model. */
+  detail?: string;
+  stage?: 'submit' | 'poll' | 'download';
+  provider?: string;
+  model?: string;
   constructor(message: string, readonly kind: ReplicateErrorKind, readonly status?: number) { super(message); }
 }
 

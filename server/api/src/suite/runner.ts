@@ -15,6 +15,7 @@ import { cutRange, frameAt, frameOf, joinClips, segment } from './extendMedia.js
 import { finishPlan, finishTake, TARGET_LUFS } from './finish.js';
 import { pipeline } from 'node:stream/promises';
 import { failureOf } from '../services/replicateVideo.js';
+import { note, providerFailure } from '../lib/failure.js';
 import { beatOnlyAudio } from '../audio/beat.js';
 import { putFile } from '../storage/objects.js';
 import type { JobRow, WaitingJob } from '../gpu/controller.js';
@@ -328,6 +329,8 @@ export class SuiteRunner {
     /** A deploy or restart: step back, the next instance resumes (nothing is failed or cancelled at the provider). */
     const leaving = () => this.stopping;
     let modelName = plan?.modelId ?? 'model';
+    /** Which provider and model the owner's failure diagnostic names (the route it moved to, if it moved). */
+    let diag = { provider: String(plan?.provider ?? 'unknown'), model: (plan?.ref ?? plan?.modelId ?? null) as string | null };
     try {
       if (!plan) throw new Error('the shot plan is missing');
       if (plan.provider === 'byo') await this.suite.byo.ensure(job.studioId, true); // WS5: custom models are per studio
@@ -345,7 +348,7 @@ export class SuiteRunner {
         && (plan.provider !== 'byo') && !x.byo);
       const alt = optedIn ? other : null;
       let moved = false;
-      const moveToAlt = () => { model = alt!; provider = this.suite.providerFor({ provider: alt!.provider }); ref = refFor(alt!, plan.kind, plan.resolution); moved = true; };
+      const moveToAlt = () => { model = alt!; provider = this.suite.providerFor({ provider: alt!.provider }); ref = refFor(alt!, plan.kind, plan.resolution); moved = true; diag = { provider: alt!.provider, model: ref }; };
       // A shot that already moved (its provider refused at its start) resumes on the route it moved to, never back.
       if (alt && live && prior.some(t => t.id && t.provider === alt.provider)) moveToAlt();
       const mock = provider.id === 'mock';
@@ -391,6 +394,7 @@ export class SuiteRunner {
           try {
             ts.id = await provider.start(ref, seeded(input), hooks);
           } catch (e) {
+            if (e && typeof e === 'object') note(e, { stage: 'submit' });
             // The provider refused before anything ran (no credit, bad key, busy, down): skip it for a while and run the
             // same shot on the model's other route at the same resolution (same prompt and references). The quoted price
             // stands (the studio absorbs the difference); the owner sees why in the log. Nothing was charged.
@@ -409,7 +413,7 @@ export class SuiteRunner {
             ctx.log.warn({ job: job.id, from: model.id, to: alt!.id, reason: (e as Error).message }, `${provider.id} refused at start: running the shot on ${alt!.provider}`);
             moveToAlt();
             input = await inputFor();
-            ts.id = await provider.start(ref, seeded(input), hooks);
+            ts.id = await provider.start(ref, seeded(input), hooks).catch(e2 => { throw e2 && typeof e2 === 'object' ? note(e2, { stage: 'submit' }) : e2; });
           }
           ts.provider = provider.id; ts.startedAt = Date.now();
           delete ts.cancelAsked; delete ts.paid; delete ts.result;
@@ -444,7 +448,7 @@ export class SuiteRunner {
           if (ts.cancelAsked) throw new ReplicateError('timed out', 'timeout');
           throw new ReplicateError('the provider cancelled the render', 'failed');
         }
-        if (status.status === 'failed') throw status.error ?? new ReplicateError('the render failed', 'failed');
+        if (status.status === 'failed') throw note(status.error ?? new ReplicateError('the render failed', 'failed'), { stage: 'poll' });
         if (!status.url) throw new ReplicateError('no video came back', 'failed');
         // From here the provider has made (and charged for) the video: it must become a take. Nothing below may fail
         // the job as "not charged"; what can't be finished is skipped, what can't be saved is reported as recoverable.
@@ -483,14 +487,14 @@ export class SuiteRunner {
         ctx.log.error({ job: job.id, take: e.take, kind: e.kind, err: e.why }, 'suite job: provider result paid but not saved');
         await this.saveExtra(job.id, { lost: { take: e.take, kind: e.kind, why: e.why.slice(0, 300), at: Date.now() } }).catch(() => {});
         const f = paidLostFailure(e);
-        await ctx.jobs.fail(job.id, f.message, false, f.code);
+        await ctx.jobs.fail(job.id, f.message, false, f.code, providerFailure(new Error(e.why), { ...diag, stage: e.kind === 'unsaved' ? 'download' : 'poll' }));
         await reportPaidLost(ctx, job, modelName, e, 'suite_runner').catch(err => ctx.log.warn({ err: (err as Error).message }, 'suite: could not record the issue'));
         return;
       }
       const f = failureOf(e);
       ctx.log.warn({ job: job.id, code: f.code, err: (e as Error).message }, 'suite job failed');
       if (f.code === 'provider_out_of_credit' && plan?.provider === 'replicate' && this.suite.mode === 'live') await ctx.engines.outOfCredit(job.studioId, 'replicate', (e as Error).message);
-      await ctx.jobs.fail(job.id, f.message, f.retryable, f.code);
+      await ctx.jobs.fail(job.id, f.message, f.retryable, f.code, providerFailure(e, diag));
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

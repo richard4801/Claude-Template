@@ -21,13 +21,17 @@ const read = { scope: 'edit:read', readOnly: true, idempotent: true } as const;
 export const APP_TOOLS: EditTool[] = [
   {
     name: 'queue_list', title: 'Queue: jobs and queued shots', ...read,
-    description: 'The studio\'s generation jobs (newest first: status, progress, what each is making, its takes when done) and the AI Suite shots queued to run later. Use it to watch progress, find a failed job, or tell the person when something is done.',
+    description: 'The studio\'s generation jobs (newest first: status, progress, what each is making, its takes when done) and the AI Suite shots queued to run later. Use it to watch progress, find a failed job, or tell the person when something is done. For the owner, a failed job also carries `failure`: the provider, model, HTTP status, category (credit, key, validation, content_filter, unreachable, timeout, server, unknown), the provider\'s own message and the stage (submit, poll, download) — never repeat it to a member.',
     inputSchema: obj({ status: str('Only jobs in this state (e.g. running, done, failed)', 20), limit: int('How many jobs (default 20)', 1, 100) }),
     run: async (env, a) => {
       const [jobs, queued] = await Promise.all([appCall(env.ctx, env.user, 'GET', '/v1/jobs'), appCall(env.ctx, env.user, 'GET', '/v1/suite/queue').catch(() => [])]);
       const list = (Array.isArray(jobs) ? jobs : (jobs?.jobs ?? [])) as { status?: string }[];
       const f = typeof a.status === 'string' && a.status ? list.filter(j => j.status === a.status) : list;
-      return slim({ jobs: f.slice(0, lim(a.limit, 20)), total: f.length, queuedShots: queued }, 20);
+      const page = f.slice(0, lim(a.limit, 20));
+      const out = slim({ jobs: page, total: f.length, queuedShots: queued }, 20) as { jobs: Record<string, unknown>[] };
+      // The owner's failure diagnostic (failed jobs only, owner only: GET /v1/jobs adds it) is kept whole (≤300 chars).
+      out.jobs.forEach((j, i) => { const fl = (page[i] as { failure?: unknown } | undefined)?.failure; if (j && typeof j === 'object' && fl) j.failure = fl; });
+      return out;
     },
   },
   {
