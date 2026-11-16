@@ -58,6 +58,12 @@ struct EditSuiteTimeline: View {
                 session.edit { $0.addKeyframesAll() }
             }
             tool("Crop", icon: "crop", help: "Crop and transform", disabled: s.selectedVisual == nil || s.selectedItem?.textItem != nil) { session.view { $0.tab = .video } }
+            if session.templatesAvailable {
+                // Edit templates (plans/edit-templates.md §5): the selection's effect and overlays, kept as a template.
+                tool("Save as template", icon: "stack", help: "Save the selected clip's effect, look and overlays as a template", disabled: !session.canSaveTemplate) {
+                    session.templates.saving = true
+                }
+            }
             divider
             SuiteIconButton(systemName: "arrow-counter-clockwise", label: "Undo (⌘Z)", disabled: !s.canUndo) { EditShortcutRunner.undoRedo(false, session) }
                 .keyboardShortcut("z", modifiers: .command)

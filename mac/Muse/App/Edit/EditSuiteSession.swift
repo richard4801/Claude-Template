@@ -47,6 +47,12 @@ final class EditSuiteSession {
     /// A panel the inspector scrolls to once (the timeline's mask badge asks for "Mask & green screen").
     var reveal: String?
     var binTab: EditSuite.BinTab = .takes { didSet { viewChanged() } }
+    /// The Templates panel (EditSuiteTemplates.swift): the library, the picked template and its settings.
+    var templates = EditTemplatePanel()
+    /// A template previewed on the real edit (its dry run applied to a copy): the player shows it, nothing is saved.
+    private(set) var templatePreview: E.Project?
+    /// "Ask Claude to make it for this cut": the request the Claude panel opens with (the owner sends it).
+    var claudeAsk: String?
     /// The playhead while playing (timeline seconds); `state.playhead` follows it when playback stops or an edit needs it.
     private(set) var playhead: Double = 0
     private(set) var playing = false
@@ -371,6 +377,8 @@ final class EditSuiteSession {
     func redo() { nextChangeLabel = "Redo"; edit { $0.redo() }; nextChangeLabel = nil }
 
     private func projectChanged() {
+        // A real change ends a template preview (it was made from the edit before it).
+        if templatePreview != nil { templatePreview = nil; templates.previewOf = nil }
         viewChanged()
         Task { await ensureFiles(); rebuild(); refreshMedia() }
         if !applyingRemote { liveLocalChange() }
@@ -391,11 +399,18 @@ final class EditSuiteSession {
 
     // MARK: Preview
 
+    /// Shows a template's dry run in the player (nil: back to the edit itself).
+    func setTemplatePreview(_ p: E.Project?) {
+        guard templatePreview != p else { return }
+        templatePreview = p
+        rebuild(immediately: true)
+    }
+
     /// Rebuilds the player item after a change (debounced), keeping the playhead.
     func rebuild(immediately: Bool = false) {
         rebuildCount += 1
         buildTask?.cancel()
-        let p = project
+        let p = templatePreview ?? project
         let wanted = files
         buildTask = Task { [weak self] in
             if !immediately { try? await Task.sleep(nanoseconds: 120_000_000) }
