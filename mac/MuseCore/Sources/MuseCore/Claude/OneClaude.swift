@@ -95,6 +95,11 @@ public struct ClaudeUI: Codable, Hashable, Sendable {
     /// approve_result: the action it answers and how it ended (done, failed, declined).
     public var action: String?
     public var status: String?
+    /// pipeline_update: Claude improved the edit pipeline skill after an edit (`summary` is the line): how many small changes
+    /// applied and how many big ones wait for the owner (Review opens Settings → Claude).
+    public var small: Int?
+    public var big: Int?
+    public var version: Int?
     /// A card (claude/cards.ts): plan, clip, what changed, approve with price lines. Drawn instead of the plain line.
     public var card: ClaudeCardBox?
 

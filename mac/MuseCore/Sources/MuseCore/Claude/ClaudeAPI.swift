@@ -203,11 +203,11 @@ public final class HTTPClaudeAPI: ClaudeAPI, @unchecked Sendable {
         return data
     }
 
-    private func call<T: Decodable>(_ method: String, _ path: String) async throws -> T {
+    func call<T: Decodable>(_ method: String, _ path: String) async throws -> T {
         try decode(try await send(request(method, path)))
     }
 
-    private func call<T: Decodable, B: Encodable>(_ method: String, _ path: String, _ body: B) async throws -> T {
+    func call<T: Decodable, B: Encodable>(_ method: String, _ path: String, _ body: B) async throws -> T {
         try decode(try await send(request(method, path, body: try encoder.encode(body))))
     }
 
