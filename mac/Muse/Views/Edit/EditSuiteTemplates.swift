@@ -17,7 +17,16 @@ struct EditTemplatesPanel: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             if session.templatesAvailable {
                 search
-                EditSeg(options: EditTemplateLibrary.Filter.allCases.map { ($0, $0.label) }, selection: session.templates.filter, small: true) { session.templates.filter = $0 }
+                // Full words, never truncated (review run 700): chips that scroll sideways when the panel is narrow.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Space.s1) {
+                        ForEach(EditTemplateLibrary.Filter.allCases) { f in
+                            let on = session.templates.filter == f
+                            SuiteToolButton(title: f.label, filled: on, plain: !on) { session.templates.filter = f }
+                                .accessibilityAddTraits(on ? .isSelected : [])
+                        }
+                    }
+                }
                 library
             }
             captionStyles
@@ -222,13 +231,18 @@ struct EditTemplateInspector: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.s2) {
+                // The whole name, wrapping to two lines if it must (review run 700: it collapsed to "W…").
                 Text(template.name).font(t.scale.heading.font).foregroundStyle(t.roles.ink).lineLimit(2)
-                Spacer(minLength: 0)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+                    .fitProbe("template title")
                 Menu {
                     Button("Close template") { session.closeTemplate() }
                     Button("Delete template…", role: .destructive) { deleting = true }
-                } label: { Ph("dots-three", 16).foregroundStyle(t.roles.ink2) }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                } label: { Image(nsImage: Ph.menuImage("dots-three", 16)) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                    .frame(width: 28, height: 28)
                     .help("More").accessibilityLabel("More for \(template.name)")
             }
             .padding(.horizontal, Space.s4).padding(.top, Space.s3).padding(.bottom, Space.s2)
@@ -256,6 +270,7 @@ struct EditTemplateInspector: View {
         let target = session.templateTarget
         VStack(alignment: .leading, spacing: Space.s2) {
             Text("Applies to").font(t.scale.label.font).foregroundStyle(t.roles.ink2)
+                .templateFrame("applies to")
             HStack(spacing: Space.s2) {
                 Ph(template.target == "cut" ? "arrows-left-right" : template.target == "edit" ? "film-strip" : "film", 16).foregroundStyle(t.roles.ink2)
                 VStack(alignment: .leading, spacing: 2) {
@@ -349,16 +364,17 @@ struct EditTemplateInspector: View {
         VStack(alignment: .leading, spacing: Space.s1) {
             Text(template.badge ?? "Not ready").font(t.scale.label.font).foregroundStyle(t.roles.ink)
             Text(template.reason ?? "This one isn't built into Edit yet.").font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
-            if template.referenceUpload != nil {
-                Text("The reference clip is the Icon edit's own footage: it shows what the template does and isn't added to your video.")
-                    .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
-            }
         }
         if template.state == "needs_update" {
             Text("Needs the next MUSE update").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
         } else if session.isOwner {
             SuiteToolButton(title: template.target == "cut" ? "Ask Claude to make it for this cut" : "Ask Claude to make it for this clip", accent: true) { session.askClaudeToMake(template) }
                 .help("Claude adapts the template's script to your shots and adds the result as an overlay. It takes Claude a few minutes; nothing is charged.")
+                .templateFrame("ask claude")
+        }
+        if template.referenceUpload != nil {
+            Text("The reference clip is the Icon edit's own footage: it shows what the template does and isn't added to your video.")
+                .font(t.scale.caption.font).foregroundStyle(t.roles.ink2).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -414,5 +430,18 @@ struct EditSaveTemplateSheet: View {
         .background(t.roles.canvas)
         .onAppear { onCut = kind == "transition" }
         .onChange(of: kind) { _, k in onCut = k == "transition" && (mainIndex ?? 0) > 0 }
+    }
+}
+
+extension View {
+    /// Review mode: where this sits in the window (SnapshotRunner+EditTemplates.swift checks it is on screen without scrolling).
+    @ViewBuilder func templateFrame(_ name: String) -> some View {
+        if SnapshotRunner.probing {
+            background(GeometryReader { g in
+                Color.clear
+                    .onAppear { SnapshotRunner.templateFrames[name] = g.frame(in: .global) }
+                    .onChange(of: g.frame(in: .global)) { _, r in SnapshotRunner.templateFrames[name] = r }
+            })
+        } else { self }
     }
 }

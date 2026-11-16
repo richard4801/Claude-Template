@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import MuseCore
+import SwiftUI
 
 // Edit templates on camera (plans/edit-templates.md §5, mockups 1, 2 and 4; Mac integrator, run 694: the review took no
 // shot of the new UI). In review mode, through the real Edit page on a stand-in take, with the demo library
@@ -13,6 +14,9 @@ import MuseCore
 // preview doesn't change the saved project, Apply sends exactly one apply, the Save sheet opens, Ask Claude prepares the
 // request. Fit (fit-check.txt): the inspector's buttons whole at 1000 × 700 (FITS / CUT).
 extension SnapshotRunner {
+    /// Where probed parts of the template inspector sit in the window (EditSuiteTemplates.swift `templateFrame`).
+    static var templateFrames: [String: CGRect] = [:]
+
     static func editTemplatesCheck(_ store: AppStore, dir: URL) async {
         let log = dir.appendingPathComponent("edit-templates-check.txt")
         try? Data().write(to: log)
@@ -31,6 +35,17 @@ extension SnapshotRunner {
             let end = Date().addingTimeInterval(seconds)
             while Date() < end { if ok() { return true }; try? await Task.sleep(for: .milliseconds(200)) }
             return ok()
+        }
+        /// A probed part is on screen without scrolling: inside the window's content (SwiftUI global frames are top-left).
+        func onScreen(_ name: String, _ w: NSWindow) -> (Bool, String) {
+            guard let r = templateFrames[name] else { return (false, "\(name) not drawn") }
+            let h = w.contentView?.bounds.height ?? 0
+            return (r.minY >= 0 && r.maxY <= h, "\(name) at y \(Int(r.minY))–\(Int(r.maxY)) of \(Int(h)) pt")
+        }
+        /// The inspector's title is whole: drawn at ≥ 60 % of its one-line width (it may wrap to two lines).
+        func titleWhole() -> (Bool, String) {
+            guard let p = fitProbes.values.first(where: { $0.name == "template title" }), p.ideal > 0 else { return (false, "title not drawn") }
+            return (p.drawn >= 0.6 * p.ideal, "title \(Int(p.drawn)) of \(Int(p.ideal)) pt")
         }
         var fit: [String] = []
         defer {
@@ -99,7 +114,13 @@ extension SnapshotRunner {
         check("preview_saves_nothing", s.project == saved && s.live?.revision == revision, "project changed \(s.project != saved), revision \(String(describing: revision)) → \(String(describing: s.live?.revision))")
         let target = s.templateTarget
         check("applies_to_the_cut_before_the_selection", target?.target == .cutAfter(s.project.mainClips[0].id), "target \(String(describing: target?.target))")
+        s.notice = nil
+        try? await Task.sleep(for: .milliseconds(500))
         capture(dir.appendingPathComponent("mac_a_edit_template_inspector.png"))
+        let (tw, td) = titleWhole()
+        check("inspector_title_whole", tw, td)
+        let (av, ad) = onScreen("applies to", w)
+        check("applies_to_on_screen_1440x900", av, ad)
         // Fit: the inspector's title, Applies to and the two Apply buttons whole at 1000 × 700 (the media panel folds away).
         for (width, height) in [(1440, 900), (1000, 700)] {
             w.setFrame(NSRect(x: original.minX, y: original.maxY - CGFloat(height), width: CGFloat(width), height: CGFloat(height)), display: true)
@@ -107,6 +128,8 @@ extension SnapshotRunner {
             let label = "edit template inspector \(width)x\(height)"
             let apply = fitProbes.values.filter { $0.name.hasPrefix("Apply to") }
             let cut = truncatedLabels().filter { $0.hasPrefix("Apply") || $0.hasPrefix("segment Box") || $0.hasPrefix("segment Band") || $0.hasPrefix("segment Column") || $0.hasPrefix("segment Slats") }
+            let (whole, why) = titleWhole()
+            if !whole { fit.append("CUT \(label) template title (\(why))") }
             if apply.isEmpty { fit.append("CUT \(label): Apply wasn't drawn") }
             else if cut.isEmpty { fit.append("FITS \(label) (Apply, Apply to every cut, the shape segments)") }
             else { fit.append(contentsOf: cut.map { "CUT \(label) \($0)" }) }
@@ -124,11 +147,40 @@ extension SnapshotRunner {
               "\(sent.count) apply call(s): \(sent.map { "\($0.id) dryRun \($0.req.dryRun)" })")
         check("apply_clears_the_preview", s.templates.previewOf == nil, "still previewing \(String(describing: s.templates.previewOf))")
 
-        // 4. Not ready: the reason and Ask Claude (it prepares the request; the owner sends it).
+        // 4. Save as template: the sheet opens on the selected clip.
+        note("START save")
+        s.notice = nil
+        s.view { $0.selection = second }
+        check("can_save", s.canSaveTemplate, "selection \(String(describing: s.state.selection)), live \(s.live != nil)")
+        s.templates.saving = true
+        try? await Task.sleep(for: .seconds(1.5))
+        check("save_sheet_opens", w.attachedSheet != nil || NSApp.windows.contains { $0.isSheet && $0.isVisible }, "no sheet on the window")
+        // The sheet is its own window (review run 700: the window shot missed it): its content, else the view drawn alone.
+        let shot = dir.appendingPathComponent("mac_a_edit_template_save.png")
+        if let sheet = w.attachedSheet, let v = sheet.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: shot)
+            check("save_sheet_shot", true)
+        } else {
+            let r = ImageRenderer(content: EditSaveTemplateSheet(session: s).environment(\.theme, store.theme))
+            r.scale = 2
+            if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: shot)
+                check("save_sheet_shot", true)
+            } else { check("save_sheet_shot", false, "couldn't draw the sheet") }
+        }
+        capture(dir.appendingPathComponent("mac_a_edit_template_save_window.png"))
+        s.templates.saving = false
+        try? await Task.sleep(for: .seconds(1))
+
+        // 5. Not ready: the reason and Ask Claude (it prepares the request; the owner sends it).
         note("START not_ready")
         if let glass = s.templates.library.templates.first(where: { !$0.isReady }) {
+            s.notice = nil
             s.pickTemplate(glass)
             try? await Task.sleep(for: .seconds(1.5))
+            let (askOn, askWhy) = onScreen("ask claude", w)
+            check("ask_claude_on_screen_1440x900", askOn, askWhy)
             capture(dir.appendingPathComponent("mac_a_edit_template_not_ready.png"))
             // Mockup 2 shows this state in theme B (dark).
             store.themeID = .b
@@ -145,17 +197,6 @@ extension SnapshotRunner {
         } else {
             check("not_ready_template", false, "the demo library has no not-ready template")
         }
-
-        // 5. Save as template: the sheet opens on the selected clip.
-        note("START save")
-        s.view { $0.selection = second }
-        check("can_save", s.canSaveTemplate, "selection \(String(describing: s.state.selection)), live \(s.live != nil)")
-        s.templates.saving = true
-        try? await Task.sleep(for: .seconds(1.5))
-        check("save_sheet_opens", w.attachedSheet != nil || NSApp.windows.contains { $0.isSheet && $0.isVisible }, "no sheet on the window")
-        capture(dir.appendingPathComponent("mac_a_edit_template_save.png"))
-        s.templates.saving = false
-        try? await Task.sleep(for: .seconds(1))
 
         s.binTab = .takes
         w.setFrame(original, display: true)
