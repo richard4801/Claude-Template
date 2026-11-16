@@ -208,7 +208,7 @@ export const ALL_BLEND_MODES: BlendMode[] = ['normal', 'multiply', 'screen', 'ov
  * don't know, so difference/exclusion are refused until builds with them ship (like maxAssets). Flip to true then; the
  * shared fixtures already cover all of ALL_BLEND_MODES once the app parts land.
  */
-export const BLEND_NEXT_LIVE = false;
+export const BLEND_NEXT_LIVE = true;
 /** The blend modes a project may use today. */
 export const BLEND_MODES: BlendMode[] = BLEND_NEXT_LIVE ? ALL_BLEND_MODES : ALL_BLEND_MODES.filter(m => m !== 'difference' && m !== 'exclusion');
 /** Why a blend mode is refused: the gated ones say when they come. */
