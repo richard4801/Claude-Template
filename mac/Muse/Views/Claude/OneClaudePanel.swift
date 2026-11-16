@@ -315,8 +315,10 @@ struct OneClaudePanel: View {
                 Spacer(minLength: 0)
                 RButton("Review", kind: .plain, small: true) { store.oneClaude.pipelineUpdate = nil; store.openSettings(.account) }
                     .help("Open Settings → Claude → Edit pipeline skill")
+                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline chat review") } }
             }
             .padding(.horizontal, Space.s4).padding(.top, Space.s2)
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline chat line") } }
             .accessibilityElement(children: .combine)
         }
         if let m = o.remembered, let text = m.text {

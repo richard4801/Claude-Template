@@ -183,6 +183,9 @@ public final class ClaudeTurnRunner: @unchecked Sendable {
         } catch {
             return .failure(ApiError("io", "Couldn't prepare ~/MUSE/Claude: \(error.localizedDescription)"))
         }
+        // The Edit pipeline skill as a project skill in this turn's own folder (never ~/.claude), so Claude Code's native skill
+        // loading finds it too. The server stays the source of truth; best effort (a member, offline: the MCP tools still work).
+        if let p = api as? any PipelineSkillAPI, let files = try? await p.pipelineSkillFiles() { _ = try? PipelineSkillFolder.write(files, into: dir) }
         return .success((token, config))
     }
 

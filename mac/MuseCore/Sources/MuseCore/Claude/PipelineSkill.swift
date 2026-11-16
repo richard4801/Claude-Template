@@ -93,6 +93,48 @@ public protocol PipelineSkillAPI: Sendable {
     func pipelineRollback(to version: Int) async throws -> PipelineRollback
     func pipelineUndo() async throws -> PipelineRollback
     func pipelineDecide(_ id: String, approve: Bool) async throws -> PipelineProposal
+    /// GET /v1/pipeline-skill/skill-files: the skill as Claude Code skill files (SKILL.md + reference/<page>.md).
+    func pipelineSkillFiles() async throws -> PipelineSkillFiles
+}
+
+public struct PipelineSkillFile: Codable, Hashable, Sendable {
+    public var path: String
+    public var text: String
+    public init(path: String, text: String) { self.path = path; self.text = text }
+}
+public struct PipelineSkillFiles: Codable, Hashable, Sendable {
+    public var version: Int
+    public var files: [PipelineSkillFile]
+    public init(version: Int, files: [PipelineSkillFile]) { self.version = version; self.files = files }
+}
+
+/// Writes the skill into a Claude Code working folder as a project skill, so Claude Code's own skill loading finds it:
+/// `<cwd>/.claude/skills/muse-edit-pipeline/SKILL.md` and `reference/<page>.md`. Only MUSE's own folders (~/MUSE/Claude/<thread>),
+/// never ~/.claude. The folder is replaced each time (a retired page goes away); any other path from the server is skipped.
+public enum PipelineSkillFolder {
+    public static let name = "muse-edit-pipeline"
+
+    /// SKILL.md or reference/<lower-case-dashes>.md, nothing else (no "..", no absolute paths).
+    public static func safe(_ path: String) -> Bool {
+        if path == "SKILL.md" { return true }
+        guard path.hasPrefix("reference/"), path.hasSuffix(".md") else { return false }
+        let slug = path.dropFirst("reference/".count).dropLast(3)
+        return !slug.isEmpty && slug.count <= 48 && slug.allSatisfy { ($0.isASCII && ($0.isLowercase || $0.isNumber)) || $0 == "-" }
+    }
+
+    /// Returns the skill folder it wrote.
+    @discardableResult
+    public static func write(_ skill: PipelineSkillFiles, into cwd: URL) throws -> URL {
+        let fm = FileManager.default
+        let folder = cwd.appendingPathComponent(".claude", isDirectory: true).appendingPathComponent("skills", isDirectory: true)
+            .appendingPathComponent(name, isDirectory: true)
+        let files = skill.files.filter { safe($0.path) }
+        guard files.contains(where: { $0.path == "SKILL.md" }) else { return folder }
+        if fm.fileExists(atPath: folder.path) { try fm.removeItem(at: folder) }
+        try fm.createDirectory(at: folder.appendingPathComponent("reference", isDirectory: true), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        for f in files { try Data(f.text.utf8).write(to: folder.appendingPathComponent(f.path), options: .atomic) }
+        return folder
+    }
 }
 
 extension HTTPClaudeAPI: PipelineSkillAPI {
@@ -110,6 +152,8 @@ extension HTTPClaudeAPI: PipelineSkillAPI {
     /// POST /v1/pipeline-skill/undo: back to the version before the newest.
     public func pipelineUndo() async throws -> PipelineRollback { try await call("POST", "v1/pipeline-skill/undo", NoBody()) }
     /// POST /v1/pipeline-skill/pending/:id/approve | decline
+    /// GET /v1/pipeline-skill/skill-files
+    public func pipelineSkillFiles() async throws -> PipelineSkillFiles { try await call("GET", "v1/pipeline-skill/skill-files") }
     public func pipelineDecide(_ id: String, approve: Bool) async throws -> PipelineProposal {
         try await call("POST", "v1/pipeline-skill/pending/\(try ClaudeIds.check(id))/\(approve ? "approve" : "decline")", NoBody())
     }
@@ -201,4 +245,10 @@ extension FakeClaudeAPI: PipelineSkillAPI {
     public func pipelineRollback(to version: Int) async throws -> PipelineRollback { try FakePipelineSkill.shared.rollback(to: version) }
     public func pipelineUndo() async throws -> PipelineRollback { try FakePipelineSkill.shared.undo() }
     public func pipelineDecide(_ id: String, approve: Bool) async throws -> PipelineProposal { try FakePipelineSkill.shared.decide(id, approve: approve) }
+    public func pipelineSkillFiles() async throws -> PipelineSkillFiles {
+        let s = FakePipelineSkill.shared.state()
+        let index = s.pages.map { "- [\($0.title)](reference/\($0.name).md) (\($0.status))" }.joined(separator: "\n")
+        return PipelineSkillFiles(version: s.version, files: [PipelineSkillFile(path: "SKILL.md", text: "---\nname: muse-edit-pipeline\ndescription: MUSE's edit pipeline (demo).\n---\n\n# MUSE Edit Pipeline (demo)\n\n\(index)\n")]
+            + s.pages.map { PipelineSkillFile(path: "reference/\($0.name).md", text: "# \($0.title)\n") })
+    }
 }

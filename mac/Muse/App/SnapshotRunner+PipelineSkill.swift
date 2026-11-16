@@ -5,7 +5,8 @@ import SwiftUI
 /// Edit pipeline skill in Settings (owner idea 2026-11-16): Settings → Account → Claude scrolled to "Edit pipeline skill"
 /// at 1000 × 700, with the demo skill (FakeClaudeAPI): version 3, a small change in the changelog and a big change waiting
 /// (Approve / Decline, before struck through). Fit check: the heading, the waiting change and its buttons, and each
-/// version's Roll back sit whole inside the window. Shots `mac_<theme>_pipeline_skill_settings.png` (A and C). Writes
+/// version's Roll back sit whole inside the window; then the Claude panel's "Updated the edit pipeline … Review" line, whole.
+/// Shots `mac_<theme>_pipeline_skill_settings.png` and `mac_<theme>_pipeline_chat_line.png` (A and C). Writes
 /// `pipeline-skill-check.txt`; CI fails on any FAIL line or a missing ALL DONE.
 extension SnapshotRunner {
     static func pipelineSkillCheck(_ store: AppStore, dir: URL) async {
@@ -71,6 +72,26 @@ extension SnapshotRunner {
                 }
             }
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_pipeline_skill_settings.png"))
+
+            // The line Claude leaves in the chat after it improved the skill: "Updated the edit pipeline: … · Review".
+            note("START chat line \(theme.rawValue)")
+            store.go(.home)
+            store.oneClaude.open = true
+            store.oneClaude.pipelineUpdate = ClaudeUI(summary: "Updated the edit pipeline: 3 small changes, 1 waiting for you")
+            try? await Task.sleep(for: .seconds(1.5))
+            state.probeTick += 1
+            try? await Task.sleep(for: .seconds(0.5))
+            let chat = state.composerFrames
+            func whole(_ key: String) -> (Bool, String) {
+                guard let f = chat[key] else { return (false, "not drawn") }
+                return (f.width > 10 && f.minX >= 0 && f.maxX <= width && f.minY >= 0 && f.maxY <= height, "at x \(Int(f.minX))–\(Int(f.maxX)), y \(Int(f.minY))–\(Int(f.maxY)) in \(Int(width)) × \(Int(height))")
+            }
+            let line = whole("pipeline chat line"), review = whole("pipeline chat review")
+            check("\(theme.rawValue)_chat_line_shown", line.0, line.1)
+            check("\(theme.rawValue)_chat_review_whole", review.0, review.1)
+            capture(dir.appendingPathComponent("mac_\(theme.rawValue)_pipeline_chat_line.png"))
+            store.oneClaude.pipelineUpdate = nil
+            store.oneClaude.open = false
         }
         note("ALL DONE")
     }
