@@ -15,6 +15,7 @@ import { SYNC_TOOLS } from '../editor/syncHits.js';
 import { ISSUE_TOOLS } from './issues.js';
 import { TEMPLATE_PACK_TOOLS } from '../editor/templatePacks.js';
 import { EDIT_TEMPLATE_TOOLS } from '../editor/editTemplateLibrary.js';
+import { PIPELINE_TOOLS } from '../editor/pipelineSkill.js';
 import { CARD_TOOLS } from './cards.js';
 import { APP_TOOLS } from './appTools.js';
 import { ACTION_TOOLS, SETTINGS_TOOLS } from './actions.js';
@@ -70,6 +71,8 @@ export const CHAT_REGISTRY: ChatTool[] = [
   ...tag(SYNC_TOOLS, ['edit', 'recreate'], () => false),
   // Edit's template library (editor/editTemplateLibrary.ts, plans/edit-templates.md §3): the owner's, like editing with Claude.
   ...tag(EDIT_TEMPLATE_TOOLS, ['edit', 'recreate'], () => false),
+  // The Edit pipeline skill (editor/pipelineSkill.ts): the owner's, read at the start of an edit and improved after it.
+  ...tag(PIPELINE_TOOLS, ['edit'], () => false),
   ...tag(RECREATE_TOOLS, ['recreate'], t => !OWNER_ONLY.has(t.name)),
 ];
 export const registryByName = new Map(CHAT_REGISTRY.map(t => [t.name, t]));
