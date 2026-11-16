@@ -151,7 +151,9 @@ struct StageTimeline: View {
     private static let cells = 12
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+        // Performance: ticks 4 times a second only while the take plays, seeks or loads (it used to tick forever, paused too).
+        TimelineView(.animation(minimumInterval: 0.25, paused: !playback.clockRunning)) { _ in
+            let _ = playback.tick
             let total = playback.duration > 0 ? playback.duration : (length ?? 0)
             let now = min(playback.time, total)
             HStack(spacing: Space.s3) {
@@ -198,7 +200,7 @@ struct StageTimeline: View {
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in
             guard total > 0 else { return }
             let s = max(0, min(total, Double(v.location.x / max(width, 1)) * total))
-            playback.player.seek(to: CMTime(seconds: s, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            playback.scrub(to: s)
         })
         .help("Click or drag to move through the take")
         .accessibilityElement()

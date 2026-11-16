@@ -53,6 +53,9 @@ final class ViewerPlayback {
     /// Over the poster for more than 600 ms while loading: a small ring in the corner.
     private(set) var slowLoad = false
     var transport = ViewerTransport()
+    /// Performance (build 704 "it lags"): bumped when the time or length changes while nothing plays (the item became
+    /// ready, a seek landed), so a paused readout redraws once instead of polling the player 4 times a second.
+    private(set) var tick = 0
     @ObservationIgnored private var url: URL?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var readoutTask: Task<Void, Never>?
@@ -66,6 +69,17 @@ final class ViewerPlayback {
     var time: Double {
         let t = player.currentTime().seconds
         return t.isFinite ? t : 0
+    }
+
+    /// Whether a readout of `time` must keep redrawing: while playing, seeking (the readout shows) or loading. Paused,
+    /// a TimelineView over it stops (`paused: !clockRunning`) and `tick` redraws it when a seek lands.
+    var clockRunning: Bool { _ = tick; return playing || readout != nil || slowLoad }
+
+    /// Moves the playhead (the stage strip's drag) and redraws a paused readout once the seek lands.
+    func scrub(to s: Double) {
+        player.seek(to: CMTime(seconds: s, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor in self?.tick += 1 }
+        }
     }
 
     func load(_ url: URL?, autoplay: Bool, muted: Bool) {
@@ -96,6 +110,7 @@ final class ViewerPlayback {
             if self.player.currentItem?.status != .readyToPlay { self.slowLoad = true }
             while !Task.isCancelled, self.player.currentItem?.status == .unknown { try? await Task.sleep(nanoseconds: 100_000_000) }
             self.slowLoad = false
+            self.tick += 1 // the length is known now
         }
         if autoplay { play() }
     }
@@ -128,6 +143,7 @@ final class ViewerPlayback {
 
     private func looped() {
         player.seek(to: .zero)
+        tick += 1
         if playing { player.rate = transport.shuttle > 0 ? Float(transport.shuttle) : 1 }
     }
 
@@ -140,6 +156,7 @@ final class ViewerPlayback {
         case .frame(let n):
             pause()
             player.currentItem?.step(byCount: n)
+            tick += 1
             show(nil)
         case .toStart: seek(to: 0, delta: nil)
         case .toEnd: seek(to: max(0, duration - 0.05), delta: nil)
@@ -156,7 +173,9 @@ final class ViewerPlayback {
     }
 
     private func seek(to t: Double, delta: Double?) {
-        player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor in self?.tick += 1 }
+        }
         readout = ViewerTransport.readout(delta: delta, time: t, duration: duration)
         hideReadoutSoon()
     }

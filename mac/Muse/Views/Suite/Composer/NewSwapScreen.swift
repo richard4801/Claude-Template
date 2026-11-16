@@ -433,7 +433,8 @@ struct NewSwapTrimmer: View {
                 GeometryReader { g in strip(w, width: g.size.width) }
                     .frame(height: 40)
                 if let playback {
-                    TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                    TimelineView(.animation(minimumInterval: 0.25, paused: !playback.clockRunning)) { _ in
+                        let _ = playback.tick
                         Text("\(Take.clock(min(playback.time, clip.durationSec))) / \(Take.clock(clip.durationSec))")
                             .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
                     }
@@ -491,7 +492,8 @@ struct NewSwapTrimmer: View {
                 .help("Drag to slide the part used")
             // The playhead (where the clip is playing).
             if let playback {
-                TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                TimelineView(.animation(minimumInterval: 0.25, paused: !playback.clockRunning)) { _ in
+                    let _ = playback.tick
                     let x = CGFloat(min(playback.time, dur) / dur) * width
                     Rectangle().fill(t.roles.accent).frame(width: 2, height: 46)
                         .offset(x: max(0, min(width - 2, x - 1)), y: -3)

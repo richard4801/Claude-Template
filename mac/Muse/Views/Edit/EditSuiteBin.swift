@@ -178,6 +178,7 @@ struct EditSuiteBin: View {
     /// The studio's video takes as tiles: "+" puts one into the sequence at the playhead, dragging places it.
     private var takes: some View {
         let list = store.editSuiteTakes
+        let usedIds = Set(session.project.assets.compactMap(\.take)) // once, not a search per tile (build 704)
         return Group {
             if list.isEmpty {
                 Text("No video takes yet").font(t.scale.caption.font).foregroundStyle(t.roles.ink2)
@@ -185,7 +186,7 @@ struct EditSuiteBin: View {
                 LazyVGrid(columns: grid, alignment: .leading, spacing: Space.s3) {
                     ForEach(list) { tk in
                         BinTile(name: tk.title.isEmpty ? "Take" : tk.displayTitle, mark: "film-strip", length: EditSuite.UploadBin.length(tk.durationSec),
-                                  used: session.project.assets.contains { $0.take == tk.id }, drag: BinDrag.take(tk.id),
+                                  used: usedIds.contains(tk.id), drag: BinDrag.take(tk.id),
                                   plusHelp: "Add at the playhead") {
                             session.placeTake(tk)
                         } thumb: {

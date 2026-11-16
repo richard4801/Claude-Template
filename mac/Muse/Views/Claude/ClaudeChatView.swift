@@ -239,10 +239,10 @@ struct ClaudeChatView: View {
 
     private var rows: [ChatRow] {
         let tr = model.transcript
-        return ChatRow.build(tr.items, audience: store.isOwner ? .owner : .member, unwrap: unwrapShown) { item in
+        return ChatRow.build(model.items, audience: store.isOwner ? .owner : .member, unwrap: unwrapShown) { item in
             guard case .user(let id, let text, _) = item else { return [] }
             let stored = tr.attachmentURLs(id)
-            let shownLocal = model.sentLocal[ChatLeakFilter.userText(unwrapShown?(text) ?? text)] ?? []
+            let shownLocal = model.sentLocal[ChatTextCache.userText(unwrapShown?(text) ?? text)] ?? []
             // Videos without a poster on this Mac (from the phone, or after a restart): a "Video" chip each.
             let videos = shownLocal.isEmpty ? Array(repeating: ChatImage(video: true), count: tr.videoCount(id)) : []
             if !stored.isEmpty || !videos.isEmpty { return stored.map { ChatImage(ref: ImageRef(url: $0)) } + videos }

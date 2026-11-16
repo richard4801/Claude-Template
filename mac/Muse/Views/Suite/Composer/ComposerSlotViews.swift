@@ -535,7 +535,9 @@ private struct ToolBrowserPanel: View {
         .background(t.bg)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(t.line, lineWidth: 1))
-        .shadow(color: .black.opacity(0.55), radius: 60, y: 40)
+        // Cast by an opaque shape behind (same picture): a shadow over the scrolling content was worked out again on every
+        // scroll frame (build 704).
+        .background(RoundedRectangle(cornerRadius: 18).fill(t.bg).shadow(color: .black.opacity(0.55), radius: 60, y: 40))
         .onExitCommand { store.suite.browserOpen = false }
     }
 

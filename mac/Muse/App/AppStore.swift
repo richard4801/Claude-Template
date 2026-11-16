@@ -627,12 +627,14 @@ final class AppStore {
             async let t = api.listTakes()
             async let b = api.balance()
             let (mm, oo, jj, tt, bb) = try await (m, o, j, t, b)
-            models = mm
-            outfits = oo
-            jobs = jj
-            takes = tt
-            balance = bb
-            offlineMessage = nil
+            // Performance (build 704): @Observable notifies on every set, even of an equal value, so a catch-up after each
+            // reconnect or wake used to re-render every list screen. Only what changed is set.
+            setIfChanged(\.models, mm)
+            setIfChanged(\.outfits, oo)
+            setIfChanged(\.jobs, jj)
+            setIfChanged(\.takes, tt)
+            setIfChanged(\.balance, bb)
+            if offlineMessage != nil { offlineMessage = nil }
             StartupMetrics.firstContentShown(models: mm.count, takes: tt.count)
             if !models.contains(where: { $0.id == modelId }), let first = models.first(where: { !$0.isDraft }) ?? models.first { modelId = first.id }
             if !models.contains(where: { $0.id == profileModelId }), let first = models.first { profileModelId = first.id }
@@ -652,6 +654,11 @@ final class AppStore {
         }
     }
 
+    /// Sets a stored list only when the new value differs (see reloadNow).
+    func setIfChanged<T: Equatable>(_ key: ReferenceWritableKeyPath<AppStore, T>, _ value: T) {
+        if self[keyPath: key] != value { self[keyPath: key] = value }
+    }
+
     /// Wallet, and for the owner: members, the studio balance, the engines and the image engine. Servers without them (server/mock) are fine.
     func loadStudio() async {
         let api = self.api
@@ -665,17 +672,17 @@ final class AppStore {
         async let ie = attempt(owner) { try await api.imageEngine() }
         async let sm = attempt(owner) { try await api.imageModels() }
         async let ar = attempt(owner) { try await api.listArchivedModels() }
-        wallet = await w
-        studioSettings = await st
+        setIfChanged(\.wallet, await w)
+        setIfChanged(\.studioSettings, await st)
         syncQualityWithServer()
         let (m, b, e, s, a) = await (mem, sb, ie, sm, ar)
         listFreshness.mark("studio")
         guard isOwner else { return }
-        if let m { members = m }
-        studioBalance = b
-        imageEngine = e
-        stepModels = s ?? []
-        archivedModels = a ?? []
+        if let m { setIfChanged(\.members, m) }
+        setIfChanged(\.studioBalance, b)
+        setIfChanged(\.imageEngine, e)
+        setIfChanged(\.stepModels, s ?? [])
+        setIfChanged(\.archivedModels, a ?? [])
         if settingsPrompts { await loadPrompts() }
     }
 
@@ -718,12 +725,14 @@ final class AppStore {
             if streamConnects > 1 { catchUp() }
             return
         }
+        // Build 704: a list an event leaves as it was (a repeated progress tick, an echo of this Mac's own change) is not
+        // set either: each is changed on a copy and stored only when it differs (setIfChanged).
         // Performance pass: with @Observable, passing a list `inout` counts as changing it, so every event (a Claude
         // streaming delta, a camera message, a balance tick) used to re-render every view that reads jobs, takes, posts,
         // accounts and members. Each list is now touched only by the events that can change it.
         let jobBefore = e.job.flatMap { j in jobs.first { $0.id == j.id } }
-        if e.job != nil || e.type == "job" { LiveEvents.applyJobs(&jobs, e) }
-        if e.type == "take" || !e.takes.isEmpty { LiveEvents.applyTakes(&takes, e) }
+        if e.job != nil || e.type == "job" { var l = jobs; LiveEvents.applyJobs(&l, e); setIfChanged(\.jobs, l) }
+        if e.type == "take" || !e.takes.isEmpty { var l = takes; LiveEvents.applyTakes(&l, e); setIfChanged(\.takes, l) }
         if let j = e.job, e.op != "delete" {
             let wasActive = jobBefore.map(\.isActive) ?? true
             if wasActive && j.isDone { jobFinished(j, newTakes: e.takes) }
@@ -740,7 +749,7 @@ final class AppStore {
             accounts[id] = nil
             posts.removeAll { $0.modelId == id && !$0.isOut }
         }
-        if e.type == "post" || e.post != nil { LiveEvents.applyPosts(&posts, e) }
+        if e.type == "post" || e.post != nil { var l = posts; LiveEvents.applyPosts(&l, e); setIfChanged(\.posts, l) }
         // Build step 3: a collection made, changed or deleted, or the queue changed: read them again.
         if e.type == "collection" { Task { await loadCollections() } }
         if e.type == "queue" { Task { await loadQueue() } }
@@ -748,9 +757,9 @@ final class AppStore {
         if e.type == "suiteAssist", let a = e.assist { suiteAssistEvent(a) }
         // Images sent: Claude changed what a page's generation sends (the outfit sheet reads it again).
         if e.type == "sentImages", outfitSheet != nil { outfitSheet?.sentReset = false; Task { await refreshOutfitSent() } }
-        if e.type == "account" { LiveEvents.applyAccounts(&accounts, e) }
+        if e.type == "account" { var l = accounts; LiveEvents.applyAccounts(&l, e); setIfChanged(\.accounts, l) }
         if isOwner {
-            if e.type == "member" { LiveEvents.applyMembers(&members, e) }
+            if e.type == "member" { var l = members; LiveEvents.applyMembers(&l, e); setIfChanged(\.members, l) }
             if e.type == "studio", let sb = e.studioBalance { studioBalance = sb }
             if e.type == "settings", e.settings == nil { Task { [weak self] in await self?.loadStudio() } }
         }
@@ -764,7 +773,7 @@ final class AppStore {
         }
         if let b = e.balance {
             let wasAbove = balance.balance >= 5
-            balance = b
+            setIfChanged(\.balance, b)
             if wasAbove && b.balance < 5 && notifyLowBalance && !isMember {
                 Notifier.shared.post(title: "Balance below $5", body: "You have \(Pricing.money(b.balance)) left · about \(Pricing.videosLeft(b.balance)) Draft videos.")
             }
@@ -778,7 +787,7 @@ final class AppStore {
                 // Archived models vanish from every list and picker.
                 dropArchived(m)
             } else {
-                if let i = models.firstIndex(where: { $0.id == m.id }) { models[i] = m } else { models.append(m) }
+                if let i = models.firstIndex(where: { $0.id == m.id }) { if models[i] != m { models[i] = m } } else { models.append(m) }
                 archivedModels.removeAll { $0.id == m.id }
                 syncDraftSlots(from: m)
             }

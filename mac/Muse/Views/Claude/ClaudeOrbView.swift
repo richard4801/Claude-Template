@@ -11,18 +11,21 @@ import SwiftUI
 struct ClaudeOrbView: View {
     @Environment(\.theme) private var t
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ObservedObject private var service: ClaudeCodeService = .shared
+    @ObservedObject private var box: ClaudeOrbBox = .shared
     @ObservedObject private var visibility: OrbVisibility = .shared
     var size: CGFloat
     /// The tone of what is behind the orb (the glass shows it, darkened); the panel's own surface by default.
     var behind: Color?
+    /// false: drawn as one still frame (the small orbs beside a reply or on a card), so only the header's orb (and the
+    /// overlay's) keeps a clock (build 704).
+    var live = true
 
     private var page: Color { behind ?? t.roles.raised }
 
     var body: some View {
-        let orb = service.orb
+        let orb = box.orb
         let now = Date().timeIntervalSinceReferenceDate
-        let fps = visibility.visible ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
+        let fps = visibility.visible && live ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
         TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
             let time = ctx.date.timeIntervalSinceReferenceDate
             let look = orb.look(at: time, reduceMotion: reduceMotion)
@@ -37,6 +40,8 @@ struct ClaudeOrbView: View {
                                                      .float(Float(u.wobble)), .float(Float(u.pop)), .color(page)))
         }
         .frame(width: size, height: size)
+        // The shader's frames stay in the orb's own small layer instead of making the panel around it composite again.
+        .drawingGroup()
         .allowsHitTesting(false)
         .accessibilityElement()
         .accessibilityLabel(Self.words(orb.state(at: now)))
@@ -51,6 +56,33 @@ struct ClaudeOrbView: View {
         case .error: "Claude ran into a problem"
         }
     }
+}
+
+/// Claude's orb state on its own (build 704): the orbs and the panel's edge watch this, not the whole ClaudeCodeService,
+/// so a service change (a relay state, a setting, a turn count) no longer re-renders them, nor an orb change the rest.
+@MainActor
+final class ClaudeOrbBox: ObservableObject {
+    static let shared = ClaudeOrbBox()
+    @Published private(set) var orb = ClaudeOrb()
+    private var settle: Task<Void, Never>?
+
+    func set(_ o: ClaudeOrb) {
+        guard o != orb else { return }
+        orb = o
+        // An idle orb draws only while a flash fades: redraw once after it so the clock stops again.
+        let now = Date().timeIntervalSinceReferenceDate
+        if o.state(at: now) == .idle, o.pulse(at: now) > 0 {
+            settle?.cancel()
+            settle = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64((ClaudeOrb.flashDecay + 0.05) * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.redraw()
+            }
+        }
+    }
+
+    /// Something time-based ended (an error's hold, a flash): the views work out their frame rate again.
+    func redraw() { objectWillChange.send() }
 }
 
 /// The ribbons' phase, shared by every orb and the panel's edge so they turn together. It only moves forward, at the
@@ -97,14 +129,17 @@ final class OrbVisibility: ObservableObject {
 struct ClaudeLivingEdge: View {
     @Environment(\.theme) private var t
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ObservedObject private var service: ClaudeCodeService = .shared
+    @ObservedObject private var box: ClaudeOrbBox = .shared
     @ObservedObject private var visibility: OrbVisibility = .shared
     var cornerRadius: CGFloat
 
     var body: some View {
-        let orb = service.orb
+        let orb = box.orb
         let now = Date().timeIntervalSinceReferenceDate
-        let fps = visibility.visible ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
+        // Performance (build 704): in idle the edge holds still (its glow is 0.12, the breath on it can't be seen), so an
+        // open panel with nothing happening no longer redraws the whole edge and its 12 pt blur 12 times a second. Any
+        // real activity changes `orb`, which re-runs this body and starts the timeline again.
+        let fps = visibility.visible && orb.state(at: now) != .idle ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
         TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
             let time = ctx.date.timeIntervalSinceReferenceDate
             let look = orb.look(at: time, reduceMotion: reduceMotion)

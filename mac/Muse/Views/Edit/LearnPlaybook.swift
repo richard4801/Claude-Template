@@ -179,7 +179,7 @@ struct LearnPlaybookView: View {
                 .scaled(t.scale.body, t.roles.ink2)
                 .padding(.top, Space.s4)
         } else {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) { // the corrections keep growing (build 704)
                 ForEach(list) { c in
                     let take = store.correctionTake(c.takeId)
                     let row = HStack(alignment: .firstTextBaseline, spacing: Space.s4) {

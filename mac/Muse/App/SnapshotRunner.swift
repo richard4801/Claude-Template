@@ -99,6 +99,7 @@ enum SnapshotRunner {
             await store.loadEngines()   // the owner's models per purpose (WS6)
             await hdrColourCheck(store, dir: dir)   // owner bug 2026-11-12: HDR export colour on every frame, first and on its own
             await streamCloseCheck(store, dir: dir)   // closing a chat mid-reply with a screen change must not freeze (SnapshotRunner+StreamClose.swift)
+            await idleCpuCheck(store, dir: dir)   // build 704 "it lags": idle CPU and main run-loop wake-ups per page, right after the first checks
             let shots: [(String, @MainActor () -> Void)] = [
                 ("home", { store.go(.home) }),
                 ("library", { store.go(.gallery) }),

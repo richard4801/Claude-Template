@@ -205,12 +205,19 @@ struct EditTemplatePreview: View {
     }
 
     private func load() async {
-        guard let id = uploadId, let u = try? await session.templateAPI.editTemplateMediaURL(uploadId: id) else { return }
+        guard let id = uploadId else { return }
+        // Performance (build 704): a tile scrolled back into view shows its still at once instead of reading a frame of the
+        // remote video again.
+        if let hit = TemplateTileStills.cache.object(forKey: id as NSString) { still = hit.image }
+        guard let u = try? await session.templateAPI.editTemplateMediaURL(uploadId: id) else { return }
         url = u
-        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: u))
-        gen.appliesPreferredTrackTransform = true
-        gen.maximumSize = CGSize(width: 480, height: 480)
-        still = try? await gen.image(at: CMTime(seconds: 0.2, preferredTimescale: 600)).image
+        if still == nil {
+            let gen = AVAssetImageGenerator(asset: AVURLAsset(url: u))
+            gen.appliesPreferredTrackTransform = true
+            gen.maximumSize = CGSize(width: 480, height: 480)
+            still = try? await gen.image(at: CMTime(seconds: 0.2, preferredTimescale: 600)).image
+            if let s = still { TemplateTileStills.cache.setObject(TemplateTileStills.Box(s), forKey: id as NSString) }
+        }
         play(playing)
     }
 
@@ -218,6 +225,17 @@ struct EditTemplatePreview: View {
         if on, looper == nil, let url { looper = StageLooper(url: url, muted: true) }
         if !on { looper?.stop(); looper = nil }
     }
+}
+
+/// The templates library's tile stills, by upload id (at most 480 px each, 200 kept).
+@MainActor
+enum TemplateTileStills {
+    final class Box { let image: CGImage; init(_ i: CGImage) { image = i } }
+    static let cache: NSCache<NSString, Box> = {
+        let c = NSCache<NSString, Box>()
+        c.countLimit = 200
+        return c
+    }()
 }
 
 // MARK: - The picked template (inspector)

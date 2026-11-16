@@ -170,3 +170,53 @@ The owner approved re-encoding the bundled previews and hardware renders, as sug
 - **Tests:**
   - The server previews test checks that every path exists and that every loop is under 80 KB.
   - The Android unit and screenshot tests and the Mac CI pass.
+
+## Mac: idle and lag pass (owner report, build 704: "it lags", hot, fan on, stutter everywhere)
+
+Scope: performance only, no behaviour or UI changes. Branch `claude/mac-perf`.
+
+### Baseline (CI run 704, mac.yml)
+
+| Check | Build 704 |
+|---|---|
+| Edit idle, 66-clip edit / 64 s real edit | 0 % / 0 % of one core |
+| Edit paused while Claude's reply streams | **33 %** (single 8 s window; once 74 % against the 60 % limit under load) |
+| Edit playback (real media / big edit) | 96 % / 103 % |
+| App-wide idle per page, window hidden | not measured (new check below) |
+
+### Top offenders found, and fixes
+
+| # | Offender | Fix |
+|---|---|---|
+| 1 | Claude chat streaming: every token changed the transcript (whole `ClaudeChatView` body, `items` rebuilt 2–3×, leak-filter regexes over every message, the streaming reply's markdown re-parsed: O(L²) per reply) and published `ClaudeCodeService.orb` (every view observing the service re-rendered per token). | `ClaudeDeltaCoalescer` (MuseCore): text deltas are joined and applied at most every 80 ms, order kept (any other event lets the text out first). The orb skips a chunk pulse within 0.25 s of the last one while a turn runs (`ClaudeOrb.chunkChangesAnything`; the flash fades over 0.6 s, so nothing visible changes). `ChatTextCache` (MuseCore): leak filter and markdown results kept by text, bounded (`BoundedMemo`); never for the reply still streaming. `ClaudeChatModel.items` built once per transcript change. |
+| 2a | Owner: "once the Claude panel is open it starts to lag immediately". Claude's orb (a Metal shader in a TimelineView) drew 12 fps in idle and 30 working, in the header, the UI overlay, every activity card and beside every streaming reply, each with its own clock; every orb observed the whole `ClaudeCodeService`. | Idle orb: one still frame, no clock (it draws only while a flash fades, then stops). Working: 20 fps (was 30); waiting and error 12. The small orbs beside a reply and on cards are still frames (`live: false`), so only the panel header's orb ever keeps a clock (the operating overlay's is still too). The orb state lives in its own `ClaudeOrbBox`: no longer `@Published` on the service, so neither re-renders the other. The shader draws in its own layer (`drawingGroup`). |
+| 2 | Floating Claude panel open and idle: the living edge (with a 12 pt blur) redrew 12 times a second, and the panel's 32 pt shadow was cast by the whole panel, so it was worked out again on every edge frame and every streamed token. | The edge holds still in the idle state (glow 0.12, the breath on it couldn't be seen); any real activity restarts it. The shadow is cast by a plain shape behind the panel. The 24 pt header orb still runs at its designed 12 fps while visible (owner design, left as is). |
+| 3 | Chat transcript: the scroll-follow bookkeeping (`lastFrame`, `followPending`, `scrollAgain`) was `@State`, written on every layout, so each layout re-ran the transcript body. | Kept in a reference held by `@State` (never drawn). |
+| 4 | Suite Shot stage timeline and New Swap's clock and playhead: `TimelineView(.periodic(by: 0.25))` redrew 4 times a second forever, paused too. | `ViewerPlayback.clockRunning` (playing, seeking or loading) pauses them; `tick` redraws once when a seek lands or the item becomes ready. |
+| 5 | Catch-up after every reconnect or wake (`reloadNow`, `loadStudio`) set every list even when equal; `@Observable` notifies on every set. Live events changed lists through `inout` (counts as a change) even when the event changed nothing. | `setIfChanged`: lists and values are set only when they differ; events apply to a copy. |
+| 6 | `ClaudeCodeService.recheck()` on every app activation wrote 4 `@Published` values even when unchanged. | Only changes are set. |
+| 7 | Recreate's Claude `/state` poll ran every 3 s while its panel was open, on any screen and with the window hidden. | Requests only while Recreate is on screen and the window can be seen; catches up within 3 s on return. |
+| 8 | Recreate lanes: the playhead read the 30 fps clock in the same closure as all five lanes, so every lane was rebuilt 30 times a second while playing. | The playhead is its own view. |
+| 9 | Recreate stills: `NSImage(data:)` decoded full size on the main thread, cached in an unbounded dictionary. | ImageIO downsample (≤ 2048 px, the player frame's cap) off the main thread into an `NSCache` (96 MB, 300 items). |
+| 10 | Suite feed: on every job event, a linear take search per card. | Only while the viewer is open, through one id table. |
+| 11 | Edit templates library: each tile read a remote video frame again every time it scrolled back in. | Stills cached by upload id (200). |
+| 12 | Pickers and the tools browser: a 60 pt shadow over scrolling content, redone on every scroll frame. | Cast by an opaque shape behind (same picture). |
+| 13 | Smaller: Edit bin searched the project's assets per tile on each scrub; Members built a `RelativeDateTimeFormatter` per row per render; Members, Photo presets and Learn history were eager stacks; chat video cards kept their `AVPlayer` forever. | Set built once; one static formatter; lazy stacks; the player is released off screen. |
+
+Checked and fine: heartbeats (Claude Code, Blender relay, 20 s network calls), Edit presence (15 s), Edit's 30 Hz time observer (only fires while playing), the composer's re-pricing (300 ms debounce, cancelled by `.task(id:)`), image loader, lazy Library/Queue/Posts/feeds, the hover player (one at a time, torn down).
+
+### New CI gate: Idle CPU check
+
+`SnapshotRunner+IdleCPU.swift`, run right after sign-in (after the HDR and stream-close checks, which must come first), and the "Idle CPU check" step in `mac.yml` (`snapshots/idle-cpu-check.txt`):
+
+- Home after launch, then Library, Queue, Models, Video suite Shot (demo draft), Photo composer, Edit home, Settings, the Claude panel open, and the window hidden.
+- For each: settle, then the **median of six 2 s windows** of the process's CPU time (`getrusage`, every thread), plus the main run loop's **wake-ups per second** (`CFRunLoopObserver`, `.afterWaiting`).
+- With the panel open, the orb and edge in the working state ("Claude panel open, Claude working", fails above 30 %), then after the turn (5 %). "Claude panel open, idle" fails above 5 %. Edit's big check already streams a real reply over an open edit (33 % in build 704, limit 60 %).
+- Limits: 10 % after launch, 15 % per page, 5 % hidden. A page over its limit gets a 3 s `sample` and its heaviest main-thread frames printed.
+- The Edit CPU gates (big edit, real media) now use the same median of 2 s windows (`cpuMedian`), so one busy moment on a loaded runner no longer fails them.
+
+### Tests
+
+MuseCore on Linux (Swift 6.0.3): 1046 tests, 0 failures (26 skipped). The 7 new ones are in `IdlePerfTests` (coalescer order and equivalence, the orb's chunk gap, the bounded memo, the cache matching the filter and parser).
+
+After numbers: from the first CI run of this branch (filled in by the report to the coordinator).
