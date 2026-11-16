@@ -291,14 +291,16 @@ final class ClaudeRunCodeTests: XCTestCase {
             ("curl -s https://x.example | python3 -", "it uses the network or installs software"),
             ("pip install numpy && python3 -c 'import numpy'", "it uses the network or installs software"),
             ("osascript -e 'tell app \"Finder\" to quit'", "it changes system settings or controls other apps"),
-            ("python3 - <<'EOF'\nopen('/Users/me/Documents/taxes.txt').read()\nEOF", "the code Claude wrote works outside your allowed folders"),
             ("cd /Users/me/Documents && python3 -c 'print(1)'", "it reaches a folder that can't be always allowed (your whole home folder is too wide to always allow)"),
             ("bash <<'EOF'\nrm -rf /tmp/x\nEOF", "it deletes files"),
             ("bash -c 'cp /tmp/a ~/.zshrc'", "it reaches a folder that can't be always allowed (your whole home folder is too wide to always allow)"),
         ] {
             XCTAssertEqual(why(verdict(cmd, runCode: true)), "Always asks: \(reason)", cmd)
         }
-        // Outside the folders but in an allowable one: asks, offering shell commands + that folder.
+        // Outside the folders but in an allowable one (also in a here-document): asks, offering shell commands + that folder.
+        guard case .ask(let d) = verdict("python3 - <<'EOF'\nopen('/Users/me/Documents/taxes.txt').read()\nEOF", runCode: true) else { return XCTFail() }
+        XCTAssertEqual(d.alwaysLabel, "Allow always: shell commands")
+        XCTAssertEqual(d.ruleFolders, ["/Users/me/Documents"])
         guard case .ask(let c) = verdict("python3 -c \"open('/Users/me/Movies/Old/a.txt').read()\"", runCode: true) else { return XCTFail() }
         XCTAssertEqual(c.ruleFolders, ["/Users/me/Movies/Old"])
     }
@@ -347,6 +349,12 @@ final class ClaudeRunCodeTests: XCTestCase {
                 XCTAssertEqual(why(verdict(cmd)), "Always asks: \(ClaudeKindGrants.packagesReason)", cmd)
                 continue
             }
+            // A here-document of code needs the switch even with "shell commands" (coordinator, build 676).
+            if cmd.contains("<<'EOF'") {
+                XCTAssertEqual(why(verdict(cmd)), "Always asks: \(ClaudeKindGrants.codeReason)", cmd)
+                XCTAssertEqual(why(verdict(cmd, shell: nil)), "Always asks: \(ClaudeKindGrants.codeReason)", cmd)
+                continue
+            }
             XCTAssertEqual(verdict(cmd), .allow, cmd)
             guard case .ask(let c) = verdict(cmd, shell: nil) else { return XCTFail("ran with nothing allowed: \(cmd)") }
             XCTAssertEqual(c.alwaysLabel, "Allow always: shell commands", cmd)
@@ -367,5 +375,82 @@ final class ClaudeRunCodeTests: XCTestCase {
         s.askEverything = true
         XCTAssertFalse(s.activeRunCode)
         XCTAssertTrue(s.runsCode)   // kept for when the pause ends
+    }
+}
+
+/// Build 676 (owner, via the coordinator): with "Shell commands · Folders + temp", a command in an allowable project folder
+/// outside the list asked "outside your allowed folders" with no Always. Allow always now offers (and adds) that folder,
+/// for the cd target, relative paths and paths in code alike; ~/MUSE counts as allowed by default.
+final class ClaudeFolderOnCardTests: XCTestCase {
+    let home = "/Users/user"
+    let cwd = "/Users/user/MUSE/Claude/ct_1"
+    func command(_ project: String) -> String {
+        """
+        cd "\(project)" && mkdir -p work/skirt && python3 -I - <<'EOF'
+        import os
+        p = "work/plat/plat2.py"; s = open(p).read()
+        out = os.path.expanduser("\(project.replacingOccurrences(of: home, with: "~"))/work/skirt/skirt.png")
+        open("work/skirt/notes.txt", "w").write(str(len(s)) + out)
+        EOF
+        """
+    }
+    var owner: String { command("/Users/user/MUSE/Gamified GRWM") }
+    var outside: String { command("/Users/user/Movies/Gamified GRWM") }
+
+    func verdict(_ cmd: String, _ s: ClaudeFileSettings) -> ClaudeFileVerdict {
+        let a = ClaudePermissionAsk(id: "perm_1", toolName: "Bash", input: .object(["command": .string(cmd)]), toolUseId: "t")
+        return ClaudeFilePolicy.verdict(a, mode: s.mode, folders: s.activeFolders, cwd: cwd, home: home, rules: s.activeRules, askAll: s.askAll,
+                                        shell: s.activeShell, tools: s.activeTools, runCode: s.activeRunCode,
+                                        isDirectory: { $0.hasSuffix("Gamified GRWM") || $0.hasSuffix("/work/skirt") })
+    }
+    var granted: ClaudeFileSettings { var s = ClaudeFileSettings(); s.allowShell(); return s }
+
+    func testTheOwnersCommandInMUSERunsAndAsksOnlyForItsCode() {
+        // ~/MUSE is in "Folders + temp" by default: with the switch on, no card at all.
+        var on = granted
+        on.runCode = true
+        XCTAssertEqual(verdict(owner, on), .allow)
+        // Switch off: it asks only because of its code (no folder reason, no "outside your allowed folders").
+        guard case .ask(let c) = verdict(owner, granted) else { return XCTFail() }
+        XCTAssertEqual(c.alwaysAsksBecause, "Always asks: \(ClaudeKindGrants.codeReason)")
+        XCTAssertTrue(c.ruleFolders.isEmpty)
+        // A file in ~/MUSE is read without a card under the shell grant too.
+        let read = ClaudePermissionAsk(id: "p", toolName: "Read", input: .object(["file_path": .string("/Users/user/MUSE/Gamified GRWM/work/plat/plat2.py")]), toolUseId: "t")
+        XCTAssertEqual(ClaudeFilePolicy.verdict(read, mode: .ask, folders: [], cwd: cwd, home: home, shell: .folders), .allow)
+    }
+
+    func testTheSameCommandOutsideTheListOffersAllowAlwaysWithTheFolderThenRuns() {
+        var s = granted
+        s.runCode = true
+        guard case .ask(let c) = verdict(outside, s) else { return XCTFail("ran outside the folders") }
+        XCTAssertNil(c.alwaysAsksBecause)
+        XCTAssertEqual(c.alwaysLabel, "Allow always: shell commands")
+        XCTAssertEqual(c.ruleFolders, ["/Users/user/Movies/Gamified GRWM"])
+        XCTAssertEqual(c.alwaysCovers(home: home), "Any command inside your folders; also allows ~/Movies/Gamified GRWM, in every chat")
+        // What ClaudeCodeService.answerFile does with Allow always.
+        s.allowShell()
+        for f in c.ruleFolders { s.allowFolder(f) }
+        XCTAssertEqual(verdict(outside, s), .allow)
+        // The switch off: still only its code.
+        s.runCode = false
+        XCTAssertEqual((verdict(outside, s) == .allow), false)
+        guard case .ask(let off) = verdict(outside, s) else { return XCTFail() }
+        XCTAssertEqual(off.alwaysAsksBecause, "Always asks: \(ClaudeKindGrants.codeReason)")
+    }
+
+    func testRelativePathsAndCodePathsOfferTheirFolderToo() {
+        var s = granted
+        s.runCode = true
+        // A relative path climbing out of the cd target, and an absolute one in code.
+        for (cmd, folder) in [("cd /Users/user/MUSE/x && cp a.png ../../Movies/Set/a.png", "/Users/user/Movies/Set"),
+                              ("python3 -c \"open('/Users/user/Pictures/Shoot/a.png','rb').read()\"", "/Users/user/Pictures/Shoot")] {
+            guard case .ask(let c) = verdict(cmd, s) else { return XCTFail(cmd) }
+            XCTAssertEqual(c.alwaysLabel, "Allow always: shell commands", cmd)
+            XCTAssertEqual(c.ruleFolders, [folder], cmd)
+        }
+        // The home folder itself still has nothing to offer.
+        guard case .ask(let h) = verdict("python3 -c \"import os; print(os.path.expanduser('~'))\"", s) else { return XCTFail() }
+        XCTAssertNil(h.alwaysLabel)
+        XCTAssertEqual(h.alwaysAsksBecause, "Always asks: it works outside your allowed folders")
     }
 }

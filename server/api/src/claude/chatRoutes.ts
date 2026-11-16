@@ -156,6 +156,8 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
   app.get('/v1/claude/permissions', async req => ({ asks: permissionsOf(ctx).pending(req.user) }));
   app.post<P>('/v1/claude/permissions/:id', async (req, reply) => {
     const b = parse(z.object({ allow: z.boolean(), message: z.string().max(500).optional(),
+      // save_to_mac: where the Mac saved the file.
+      saved: z.object({ path: z.string().min(2).max(2048).regex(/^\//, 'an absolute path'), bytes: z.number().int().min(0).max(64 * 1024 ** 3).optional(), name: z.string().max(300).optional() }).strict().optional(),
       result: z.object({ uploadId: z.string().min(1).max(120), kind: z.enum(['image', 'clip', 'audio']), url: z.string().max(2000).optional(), name: z.string().max(200).optional(),
         durationSec: z.number().positive().max(36_000).optional() }).strict().optional() }).strict(), req.body);
     if (b.result) {
@@ -182,8 +184,8 @@ export async function registerChatRoutes(app: FastifyInstance, ctx: Ctx, claude:
 
   /** The Mac says what it does with a question: shows its card, uploads (bytes so far, try n), checks the file. */
   app.post<P>('/v1/claude/permissions/:id/progress', async (req, reply) => {
-    const b = parse(z.object({ phase: z.enum(['asking', 'uploading', 'confirming']), sentBytes: z.number().int().min(0).max(4 * 1024 ** 3).optional(),
-      totalBytes: z.number().int().min(0).max(4 * 1024 ** 3).optional(), attempt: z.number().int().min(1).max(10).optional() }).strict(), req.body);
+    const b = parse(z.object({ phase: z.enum(['asking', 'uploading', 'confirming', 'downloading']), sentBytes: z.number().int().min(0).max(64 * 1024 ** 3).optional(),
+      totalBytes: z.number().int().min(0).max(64 * 1024 ** 3).optional(), attempt: z.number().int().min(1).max(10).optional() }).strict(), req.body);
     permissionsOf(ctx).progress(req.user, req.params.id, b);
     return reply.status(204).send();
   });

@@ -197,3 +197,27 @@ describe('images sent per tool (ci_62c3c2fdcdbf)', () => {
     expect(fine.sentImagesWarning).toBeUndefined();
   });
 });
+
+describe('suite_estimate on Auto and with no character (ci_5bb0ab964dd8)', () => {
+  it('prices a shot with no character as Generate would (no "Pick the model first"), and says what Auto picks', async () => {
+    const id = await newDraft();
+    await run('suite_set_draft', { assistId: id, prompt: 'Waves roll onto an empty pier at dusk' });
+    const e = await run('suite_estimate', { assistId: id });
+    const v = await get(id);
+    const direct = await owner.req('POST', '/v1/suite/shots/estimate', v.request);
+    expect(direct.status, JSON.stringify(direct.body)).toBe(200);
+    expect(e.estimate.estimate).toBe(direct.body.estimate);
+    expect(e.note).toBe('No character picked: priced as a shot without her (suite_set_draft modelId adds her).');
+    expect(e).toMatchObject({ engineChoice: 'auto', autoPicks: e.estimate.engine.label });
+    // With her, on Auto: no warning about the character; still Auto.
+    await run('suite_set_draft', { assistId: id, modelId: model.id });
+    const her = await run('suite_estimate', { assistId: id });
+    expect(her.note).toBeUndefined();
+    expect(her.engineChoice).toBe('auto');
+    // A pinned model: priced on it, no Auto fields.
+    await run('suite_set_draft', { assistId: id, engineModel: 'seedance-2.0' });
+    const pinned = await run('suite_estimate', { assistId: id });
+    expect(pinned.engineChoice).toBeUndefined();
+    expect(pinned.estimate.engine.model).toMatch(/seedance-2\.0/);
+  });
+});

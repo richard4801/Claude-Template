@@ -149,6 +149,29 @@ extension SnapshotRunner {
         check("five_more_across_a_new_chat_ask_nothing", prompts.isEmpty, "\(prompts.count) prompts: \(prompts)")
         for a in service.fileAsks(threadId: newChat) { service.answerFile(a.id, .deny) }
 
+        note("START save_to_mac")
+        // save_to_mac (ci_741e03646382, ci_c62906bcd1c1): the card names the file and the folder; ~/Library is never a save folder.
+        let saveAsk = ask("perm_review_save", "Save", ["folder": .string("~/Downloads/MUSE"), "fileName": .string("mia-living-room-dance-takev1-1.mp4"),
+                                                        "url": .string("/uploads/s/v1.mp4"), "what": .string("the video take_v1 (Mia · Living-room dance)"),
+                                                        "bytes": .number(Double(48 * 1024 * 1024))])
+        _ = service.reviewShowAsk(saveAsk, threadId: tid)
+        let saveCard = card(saveAsk.id)
+        check("save_card", saveCard?.action == "Save mia-living-room-dance-takev1-1.mp4 to ~/Downloads/MUSE" && saveCard?.alwaysLabel == "Allow always",
+              "\(saveCard?.action ?? "none") · \(saveCard?.alwaysLabel ?? "none")")
+        if let saveCard {
+            let r = ImageRenderer(content: ClaudeFileCardView(card: saveCard, id: "shot", answer: { _ in })
+                .frame(width: 300).padding(8).background(Color(nsColor: .windowBackgroundColor)))
+            r.scale = 2
+            if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: dir.appendingPathComponent("mac_a_claude_save_card.png"))
+            } else { note("FAIL card_shot_save: couldn't draw the card") }
+        }
+        let libSave = service.reviewShowAsk(ask("perm_review_save_lib", "Save", ["folder": .string("~/Library/Caches"), "fileName": .string("a.mp4"),
+                                                                                  "url": .string("/uploads/s/v1.mp4")]), threadId: tid)
+        check("save_library_refused", libSave == .deny(ClaudeFilePolicy.saveFolderRefusal), "\(libSave)")
+        for a in service.fileAsks(threadId: tid) where a.id == saveAsk.id { service.answerFile(a.id, .deny) }
+
         note("START run_code")
         // Bundle-24 (owner): the card for code Claude wrote says so (not "controls other apps" for Python's open(p)), and
         // "Let Claude run code it writes" lets it run; the shell's own `open` still flags. The owner's command, verbatim.
@@ -179,6 +202,23 @@ extension SnapshotRunner {
         let runs = service.reviewShowAsk(ask("perm_review_code2", "Bash", ["command": .string(ownerCmd)]), threadId: tid)
         check("code_runs_with_switch", runs == .allow, "\(runs)")
         check("shell_open_still_asks", card(openAsk.id) != nil)
+        // Build 676: a project folder outside the list is offered on the card (Allow always adds it), and ~/MUSE is allowed.
+        let other = URL(fileURLWithPath: home).appendingPathComponent("Movies/MUSE review other", isDirectory: true)
+        try? FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: other) }
+        let projCmd = ["cd \"\(other.path)\" && mkdir -p work && python3 -I - <<'EOF'", "p = \"work/a.txt\"", "open(p, \"w\").write(\"x\")", "EOF"].joined(separator: "\n")
+        let projAsk = ask("perm_review_proj", "Bash", ["command": .string(projCmd)])
+        _ = service.reviewShowAsk(projAsk, threadId: tid)
+        let projCard = card(projAsk.id)
+        check("folder_offered_on_card", projCard?.alwaysLabel == "Allow always: shell commands" && projCard?.ruleFolders == [other.path],
+              "label \(projCard?.alwaysLabel ?? "none"), folders \(projCard?.ruleFolders ?? []), why \(projCard?.alwaysAsksBecause ?? "none")")
+        service.answerFile(projAsk.id, .always)
+        let projAgain = service.reviewShowAsk(ask("perm_review_proj2", "Bash", ["command": .string(projCmd)]), threadId: tid)
+        check("folder_added_then_runs", projAgain == .allow, "\(projAgain)")
+        service.removeAllowedFolder(other.path)
+        let museCmd = ["cd \"\(home)/MUSE/Review Project\" && python3 -I - <<'EOF'", "print(open(\"work/a.txt\").read())", "EOF"].joined(separator: "\n")
+        let museV = service.reviewShowAsk(ask("perm_review_muse", "Bash", ["command": .string(museCmd)]), threadId: tid)
+        check("muse_folder_allowed", museV == .allow, "\(museV)")
         let rmCode = service.reviewShowAsk(ask("perm_review_code_rm", "Bash", ["command": .string("python3 - <<'EOF'\nimport shutil\nshutil.rmtree('/tmp/grwm_match')\nEOF")]), threadId: tid)
         if case .ask(let c) = rmCode { check("risky_code_asks", c.alwaysAsksBecause == "Always asks: the code Claude wrote deletes files", c.alwaysAsksBecause ?? "none") }
         else { check("risky_code_asks", false, "\(rmCode)") }
@@ -186,6 +226,46 @@ extension SnapshotRunner {
         let pausedCode = service.reviewShowAsk(ask("perm_review_code3", "Bash", ["command": .string(ownerCmd)]), threadId: tid)
         if case .ask = pausedCode { check("ask_all_pauses_code", true) } else { check("ask_all_pauses_code", false, "\(pausedCode)") }
         service.setAskEverything(false)
+        for a in service.fileAsks(threadId: tid) { service.answerFile(a.id, .deny) }
+
+        note("START full_access")
+        // Bundle-26 (owner): one switch; everything runs except deleting outside temp, admin and ~/Library; keys refused.
+        func shot<V: View>(_ v: V, _ name: String, width: CGFloat) {
+            let r = ImageRenderer(content: v.frame(width: width).padding(8).background(Color(nsColor: .windowBackgroundColor)))
+            r.scale = 2
+            if let img = r.nsImage, let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: dir.appendingPathComponent(name))
+            } else { note("FAIL shot \(name): couldn't draw it") }
+        }
+        shot(ClaudeFullAccessConfirm(onConfirm: {}, onCancel: {}), "mac_a_claude_full_access_confirm.png", width: 440)
+        service.setFullAccess(true)
+        check("full_access_on", service.fileSettings.hasFullAccess)
+        func fa(_ id: String, _ cmd: String) -> ClaudeFileVerdict { service.reviewShowAsk(ask(id, "Bash", ["command": .string(cmd)]), threadId: tid) }
+        let museProj = ["cd \"\(home)/MUSE/Gamified GRWM\" && mkdir -p work/skirt && python3 -I - <<'EOF'",
+                        "p = \"work/plat/plat2.py\"", "print(p)", "EOF"].joined(separator: "\n")
+        check("full_access_owner_uv_heredoc_runs", fa("perm_fa_1", ownerCmd) == .allow)
+        check("full_access_owner_muse_heredoc_runs", fa("perm_fa_2", museProj) == .allow)
+        check("full_access_curl_runs", fa("perm_fa_3", "curl -sI https://example.com -o /dev/null") == .allow)
+        check("full_access_rm_in_tmp_runs", fa("perm_fa_4", "rm -rf /tmp/muse_review_fa/frames") == .allow)
+        let rmOut = fa("perm_fa_5", "rm '\(out)'")
+        if case .ask(let c) = rmOut {
+            check("full_access_rm_outside_asks", c.alwaysAsksBecause == "Always asks: it deletes files" && c.alwaysLabel == nil,
+                  "why \(c.alwaysAsksBecause ?? "none"), label \(c.alwaysLabel ?? "none")")
+            shot(ClaudeFileCardView(card: c, id: "shot", answer: { _ in }), "mac_a_claude_full_access_delete_card.png", width: 300)
+        } else { check("full_access_rm_outside_asks", false, "\(rmOut)") }
+        let rmtree = fa("perm_fa_6", "python3 - <<'EOF'\nimport shutil\nshutil.rmtree('\(shoot.path)')\nEOF")
+        if case .ask(let c) = rmtree { check("full_access_rmtree_asks", c.alwaysAsksBecause == "Always asks: it deletes files") }
+        else { check("full_access_rmtree_asks", false, "\(rmtree)") }
+        let key = service.reviewShowAsk(ask("perm_fa_7", "Read", ["file_path": .string(home + "/.ssh/id_ed25519")]), threadId: tid)
+        check("full_access_keys_refused", key == .deny(ClaudeFilePolicy.credentialRefusal), "\(key)")
+        service.setAskEverything(true)
+        if case .ask = fa("perm_fa_8", "curl -sI https://example.com") { check("full_access_paused", true) } else { check("full_access_paused", false) }
+        service.setAskEverything(false)
+        service.setFullAccess(false)
+        if case .ask(let c) = fa("perm_fa_9", "curl -sI https://example.com") {
+            check("full_access_off_restores", c.alwaysAsksBecause == "Always asks: it uses the network or installs software", c.alwaysAsksBecause ?? "none")
+        } else { check("full_access_off_restores", false) }
         for a in service.fileAsks(threadId: tid) { service.answerFile(a.id, .deny) }
 
         note("START ask_before_anything")
@@ -228,6 +308,14 @@ extension SnapshotRunner {
         check("settings_shows_always_allowed", heading.0, "the Always allowed heading \(heading.1)")
         check("settings_shows_rule", rule.0, "the Shell commands row \(rule.1); rows drawn \(frames.keys.filter { $0.hasPrefix("settings ") }.sorted())")
         check("settings_shows_tool", toolRow.0, "the suite_add_reference row \(toolRow.1)")
+        // The Full access row, on (the confirmation was answered above): whole and on screen.
+        service.setFullAccess(true)
+        try? await Task.sleep(for: .seconds(0.5))
+        SnapshotRunner.state.probeTick += 1
+        try? await Task.sleep(for: .seconds(0.5))
+        let fullRow = whole("settings full access"), fullRowY = shown("settings full access")
+        check("settings_shows_full_access", fullRow.0 && fullRowY.0, "the Full access row \(fullRow.1), \(fullRowY.1)")
+        capture(dir.appendingPathComponent("mac_a_claude_full_access_setting.png"))
         let runRow = whole("settings run code"), runRowY = shown("settings run code")
         check("settings_shows_run_code", runRow.0 && runRowY.0 && service.fileSettings.runsCode, "the Let Claude run code it writes row \(runRow.1), \(runRowY.1), on \(service.fileSettings.runsCode)")
         capture(dir.appendingPathComponent("mac_a_claude_allow_run_code_setting.png"))
@@ -239,10 +327,11 @@ extension SnapshotRunner {
         SnapshotRunner.state.scrollTo = nil
         service.removeShellCommands()
         service.setRunCode(false)
+        service.setFullAccess(false)
         service.removeAlwaysTool("mcp__muse__suite_add_reference")
         service.removeAllowedFolder(shoot.path)
         check("settings_remove", service.fileSettings.shellScope == nil && service.fileSettings.tools.isEmpty && service.fileSettings.allowedFolders.isEmpty
-              && !service.fileSettings.runsCode)
+              && !service.fileSettings.runsCode && !service.fileSettings.hasFullAccess)
         // Removed: the same command asks again.
         let after = service.reviewShowAsk(ask("perm_review_after", "Bash", ["command": .string("ffmpeg -i '\(clip)' '\(out)'")]), threadId: tid)
         if case .ask = after { check("asks_again_after_remove", true) } else { check("asks_again_after_remove", false, "\(after)") }

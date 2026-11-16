@@ -153,7 +153,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     // The newer Mac app can show file and upload cards (X-Muse-Caps: files); older ones never get asked.
     const caps = req.headers['x-muse-caps'];
     const capList = typeof caps === 'string' ? caps.split(',').map(c => c.trim()) : [];
-    if (capList.includes('files')) permissionsOf(ctx).sawApp(req.user.id, capList.includes('acks'));
+    if (capList.includes('files')) permissionsOf(ctx).sawApp(req.user.id, capList.includes('acks'), capList.includes('save')); // save: save_to_mac
     // A Mac (URLSession) without any caps: an app too old for file cards. Only then do the tools say "update MUSE".
     else if (!capList.length && /CFNetwork|Darwin/.test(String(req.headers['user-agent'] ?? ''))) permissionsOf(ctx).sawOldMac(req.user.id);
     // …and the newer still can operate its own window for Claude (X-Muse-Caps: ui; claude/uiControl.ts).

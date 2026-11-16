@@ -254,7 +254,7 @@ final class ClaudeAlwaysRulesTests: XCTestCase {
             ("import os\nos.remove('x')\n", "the script deletes files", nil),
             ("import subprocess\nsubprocess.run(['ffmpeg', '-i', '/tmp/a.mp4', '\(movies)/b.mp4'])\n", "the script runs other programs", nil),
             ("import requests\nrequests.get('x')\n", "the script uses the network", "the script uses the network"),
-            ("open('/Users/me/Documents/secret.txt').read()\n", "the script works outside your allowed folders", "the script works outside your allowed folders"),
+            ("open('/Users/me/Documents/secret.txt').read()\n", "the script works outside your allowed folders", "offers ~/Documents"),
             ("import os\np = os.path.expanduser('~')\n", "the script works outside your allowed folders", "the script works outside your allowed folders"),
             ("print(open('\(movies)/../../.ssh/id_rsa').read())\n", "the script names keys, passwords or tokens", "the script names keys, passwords or tokens"),
         ]
@@ -262,7 +262,12 @@ final class ClaudeAlwaysRulesTests: XCTestCase {
             let c = check("python3 \(movies)/x.py", script: text)
             XCTAssertEqual(c.why, why, text)
             let v = verdict("python3 \(movies)/x.py", rules: [rule], script: text, shell: .folders)
-            if let kindWhy {
+            if kindWhy == "offers ~/Documents" {
+                // An allowable folder outside the list: the card offers it (build 676), it isn't refused.
+                guard case .ask(let card) = v else { return XCTFail(text) }
+                XCTAssertEqual(card.alwaysLabel, "Allow always: shell commands", text)
+                XCTAssertEqual(card.ruleFolders, ["/Users/me/Documents"], text)
+            } else if let kindWhy {
                 guard case .ask(let card) = v else { return XCTFail(text) }
                 XCTAssertEqual(card.alwaysAsksBecause, "Always asks: \(kindWhy)", text)
             } else {

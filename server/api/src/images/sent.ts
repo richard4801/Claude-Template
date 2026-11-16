@@ -98,16 +98,20 @@ export class SentImages {
     if (typeof x === 'string') {
       const [up] = await this.ctx.db.select().from(uploads).where(and(eq(uploads.id, x), eq(uploads.studioId, studioId)));
       // Not an upload: a take or Library still named by its id (its picture; a video's first frame).
-      if (!up) return this.takeFrame(studioId, x).catch(e => { throw e instanceof ApiError && e.status === 404 ? new ApiError(404, 'not_found', `${x} is neither an upload nor a take of this studio (deleted?) · suite_feed or library lists the ids`) : e; });
+      if (!up) return this.takeFrame(studioId, x).catch(e => { throw e instanceof ApiError && e.status === 404 ? new ApiError(404, 'not_found', /^(s|take|t)_[A-Za-z0-9]+$/.test(x) ? `${x} is a take id, but it is not found in this studio now: that take was deleted (or made in another studio) · suite_feed or library lists the current ids` : `${x} is neither an upload nor a take of this studio (deleted?) · suite_feed or library lists the ids`) : e; });
       if (!/^image\//i.test(up.contentType)) throw badRequest(`${x} is not an image`);
       return { url: this.url(up.storageKey) };
     }
     if ('takeId' in x) return this.takeFrame(studioId, x.takeId, x.at);
     if (x.asset) {
       const { ASSET_KEYS } = await import('./service.js');
-      if (!ASSET_KEYS.includes(x.asset)) throw badRequest(`Unknown image ${x.asset}`);
-      return { asset: x.asset };
+      if (ASSET_KEYS.includes(x.asset)) return { asset: x.asset };
+      // A take or upload id given as {asset} (ci_666286d167a5: {asset: "s_…"} for a photo take read "Unknown image").
+      if (ID.safeParse(x.asset).success) return this.image(studioId, x.asset);
+      throw badRequest(`Unknown image ${x.asset}`);
     }
+    // The same for an id given as {url}.
+    if (x.url && !x.url.includes('/') && ID.safeParse(x.url).success) return this.image(studioId, x.url);
     const key = keyOf(x.url);
     if (!key) throw badRequest('Only images in this studio can be sent (an upload, a take, a character or outfit picture)');
     if (key.startsWith('assets/')) return { url: x.url };
