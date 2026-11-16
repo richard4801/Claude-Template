@@ -34,6 +34,12 @@ extension SnapshotRunner {
         guard let api = ClaudeCodeService.shared.api as? any PipelineSkillAPI else {
             note("FAIL the Claude API has no pipeline skill calls"); note("ALL DONE"); return
         }
+        // The Settings click-through (SnapshotRunner+Walk) presses Undo, Roll back, Approve and Decline on this same demo
+        // skill (run 705: version 6, nothing waiting). Start from the demo's own state, and leave Settings so the section
+        // loads again when it opens.
+        (api as? FakeClaudeAPI)?.pipelineDemoReset()
+        store.go(.home)
+        try? await Task.sleep(for: .seconds(0.5))
         let skill = try? await api.pipelineSkill()
         check("demo_skill", skill?.pending.count == 1 && (skill?.version ?? 0) >= 3, "version \(skill?.version ?? 0), waiting \(skill?.pending.count ?? -1)")
         let versions = (try? await api.pipelineVersions()) ?? []
