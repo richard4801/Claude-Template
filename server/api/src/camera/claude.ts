@@ -414,7 +414,7 @@ export function threadBrief(kind: string, contextId: string) {
   // One Claude (plans/one-claude.md): a chat that follows the person; the Mac passes its chatId to the chat tools.
   if (kind === 'chat') return { prompt: onePrompt(), tools: CHAT_REGISTRY.map(t => t.name), chatId: contextId };
   if (kind === 'recreate') return { prompt: RECREATE_PROMPT, tools: ['get_recipe', 'set_slot_briefs', 'match_slots', 'fill_slot', 'open_edit', 'apply_recipe', 'apply_edit_ops', 'playbook_read', 'playbook_add', 'report_gap'], referenceId: contextId };
-  if (kind === 'edit') return { prompt: EDIT_PROMPT, tools: ['get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame', 'auto_captions', 'remove_background', 'playbook_read'], sessionId: contextId };
+  if (kind === 'edit') return { prompt: EDIT_PROMPT, tools: ['get_edit', 'apply_edit_ops', 'undo_edit', 'get_frame', 'auto_captions', 'remove_background', 'playbook_read', 'pipeline_skill_read', 'pipeline_log', 'pipeline_taste', 'pipeline_propose'], sessionId: contextId };
   if (kind === 'suite') return { prompt: SUITE_PROMPT, tools: ['suite_options', 'suite_get_draft', 'suite_set_draft', 'suite_add_reference', 'suite_estimate', 'suite_request_shot', 'suite_feed', 'suite_cast', 'suite_see'], assistId: contextId };
   return undefined;
 }

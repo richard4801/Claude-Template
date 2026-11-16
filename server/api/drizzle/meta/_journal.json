@@ -274,6 +274,13 @@
       "when": 1794844273220,
       "tag": "0038_edit_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794852236127,
+      "tag": "0039_pipeline_skill",
+      "breakpoints": true
     }
   ]
 }

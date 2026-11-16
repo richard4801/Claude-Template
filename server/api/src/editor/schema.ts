@@ -78,3 +78,5 @@ export const editOps = pgTable('edit_ops', {
 
 // The learning editor (migration 0017).
 export * from './learnSchema.js';
+// The Edit pipeline skill (migration 0039).
+export * from './pipelineSchema.js';

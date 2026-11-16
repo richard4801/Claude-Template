@@ -18,6 +18,7 @@ import { editSessionsOf } from '../editor/sessions.js';
 import { repairSourceMatteVersions } from '../editor/repair.js';
 import { registerLearnRoutes } from '../editor/learnRoutes.js';
 import { registerEditTemplateRoutes } from '../editor/editTemplateLibrary.js';
+import { registerPipelineRoutes } from '../editor/pipelineSkill.js';
 import { EDIT_TOOLS } from '../editor/mcpTools.js';
 import * as mcpTools from '../mcp/tools.js';
 import { checkProject, lutOfUpload } from '../editor/versions.js';
@@ -33,6 +34,7 @@ export async function registerEditorAiRoutes(app: FastifyInstance, ctx: Ctx) {
   registerEditSessionRoutes(app, ctx); // Edit sessions shared with Claude (plans/claude-editing.md A)
   registerLearnRoutes(app, ctx); // the learning editor (workstream 3)
   registerEditTemplateRoutes(app, ctx); // Edit's template library (plans/edit-templates.md §3)
+  registerPipelineRoutes(app, ctx); // the Edit pipeline skill (editor/pipelineSkill.ts)
   // Claude's editing tools on MUSE's MCP server: workstream 2's registry (mcp/tools.ts registerMcpTools) when it exists.
   const register = (mcpTools as { registerMcpTools?: (tools: unknown[]) => void }).registerMcpTools;
   if (register) register(EDIT_TOOLS);
