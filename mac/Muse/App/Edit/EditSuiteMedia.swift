@@ -184,8 +184,12 @@ enum EditSuiteMedia {
             guard reader.canAdd(out) else { return [] }
             reader.add(out)
             guard reader.startReading() else { return [] }
-            var peaks = EditSuite.Peaks()
+            // A long import (up to 60 min): bigger blocks, so the peaks kept stay bounded (≤ 65 536) whatever the length.
+            let rate = CMAudioFormatDescriptionGetStreamBasicDescription(formats[0])?.pointee.mSampleRate ?? 0
+            let seconds = (try? await asset.load(.duration)).map { CMTimeGetSeconds($0) } ?? 0
+            var peaks = EditSuite.Peaks(block: EditSuite.Peaks.block(seconds: seconds, rate: rate))
             while let sb = out.copyNextSampleBuffer() {
+                if Task.isCancelled { reader.cancelReading(); return [] }
                 guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
                 var channels = 1
                 if let fd = CMSampleBufferGetFormatDescription(sb), let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee {

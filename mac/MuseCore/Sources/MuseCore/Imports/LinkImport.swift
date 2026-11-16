@@ -6,11 +6,13 @@ import Foundation
 // imported clip. When the Mac can't fetch it, the server tries. Refusals use Recreate's words (RecreateLinks).
 //
 // Contract (WS12, plans/api.md; every field read leniently):
-//   GET  /v1/links/settings → RecreateLinkSettings; the top-level limits are the imports' (30 s, 150 MB by default)
+//   GET  /v1/links/settings → RecreateLinkSettings; the top-level limits are the imports' (edit footage: 3600 s, 2048 MB
+//        by default, owner 2026-11-16; the Suite's swap/recast take ≤ 30 s and say so when a longer clip is picked there)
 //   POST /v1/links/check {url, purpose:"import"} → {allowed, url, platform, purpose, cached?: Import} | {allowed:false, code, reason}
 //   POST /v1/uploads/presign {kind:"clip", contentType} + PUT (no /confirm) → uploadId
 //   POST /v1/imports {uploadId, sourceUrl?, name?} → Import (a Clip plus its source fields)
-//   POST /v1/imports {url, name?}                   → the server fetches it (fallback, synchronous, up to ~2 min)
+//   POST /v1/imports {url, name?}                   → the server fetches it (fallback, synchronous; a long video can take many minutes)
+//   Files of 100 MB or more go up in resumable parts (MultipartUpload).
 //   Refusals: 400 too_long, 422 link_too_big / link_unsupported / link_private / link_downloads_off, 502 link_blocked.
 
 /// Where an import was started from: it decides what happens with the clip afterwards.
@@ -147,7 +149,7 @@ public enum LinkImport {
     /// The first line under the field while nothing has happened yet.
     public static func hint(strict: Bool, limits: RecreateDeviceFetch.Limits) -> String {
         (strict ? "A public TikTok, Instagram or YouTube video" : "A public video link")
-            + ", up to \(limits.maxSec) s and \(limits.maxMb) MB. It's fetched on this Mac."
+            + ", \(limits.text.replacingOccurrences(of: "Up to", with: "up to")). It's fetched on this Mac."
     }
 
     /// The import's name: the video's title, else the platform's.

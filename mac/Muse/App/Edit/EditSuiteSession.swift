@@ -712,7 +712,14 @@ final class EditSuiteSession {
             throw ApiError("bad_media", MediaSniff.unreadable)
         }
         notice = "Uploading \(p.name)…"
-        let up = try await api.uploadEditorFile(url, contentType: p.verdict.contentType, purpose: nil, progress: nil)
+        // Edit footage can be an hour and 2 GB (resumable parts): the notice shows how far it has got.
+        let name = p.name
+        let up = try await api.uploadEditorFile(url, contentType: p.verdict.contentType, purpose: nil, progress: { f in
+            Task { @MainActor [weak self] in
+                guard let self, self.notice?.hasPrefix("Uploading \(name)") == true else { return }
+                self.notice = "Uploading \(name)… \(Int((min(1, max(0, f)) * 100).rounded()))%"
+            }
+        })
         let id = project.newId("v")
         let sound = !((try? await AVURLAsset(url: url).loadTracks(withMediaType: .audio)) ?? []).isEmpty
         files[id] = url

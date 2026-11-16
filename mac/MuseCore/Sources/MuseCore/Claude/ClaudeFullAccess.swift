@@ -25,7 +25,7 @@ public enum ClaudeFullAccess {
     public static let confirmAllows = "Claude can run any command, script or code it writes, use the internet and install software, and read, change and upload files in any folder, without asking you first."
     public static let confirmStillAsks = "It still asks before commands that delete or overwrite files (rm, trash, git reset and the like). It can't catch every way a program might delete something. It also asks before anything that needs your admin password and before touching ~/Library. It never reads or uploads keys, passwords or tokens, and spending or posting in MUSE still asks as before."
     public static let confirmOff = "You can turn this off at any time in Settings → Claude."
-    public static let rowHint = "On: Claude works in any folder without asking, except deleting files, admin rights and ~/Library. Keys, passwords and tokens stay off limits."
+    public static let rowHint = "On: Claude works in any folder without asking, except deleting or overwriting files, admin rights and ~/Library. Keys, passwords and tokens stay off limits."
 
     /// A string in code, from its opening quote to the same closing quote on that line.
     static let quotedString = try! NSRegularExpression(pattern: #"(["'])([^"'\n]+)\1"#)

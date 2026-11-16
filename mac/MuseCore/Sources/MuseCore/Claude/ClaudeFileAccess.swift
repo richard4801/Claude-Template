@@ -219,7 +219,9 @@ public enum ClaudeFilePolicy {
     public static let uploadAudioTypes: [String: String] = ["mp3": "audio/mpeg", "m4a": "audio/mp4", "aac": "audio/aac", "wav": "audio/wav"]
     /// Sound up to 200 MB (the editor's audio upload limit).
     public static let uploadAudioMaxBytes = 200 * 1024 * 1024
-    public static let uploadRefusal = "Only images (JPEG, PNG, WebP, HEIC, up to 10 MB), videos (MP4, MOV, up to 500 MB) and sound (MP3, M4A, AAC, WAV, up to 200 MB) can be uploaded."
+    /// Videos: edit footage up to 2 GB (owner 2026-11-16; the server's MAX_VIDEO_BYTES), sent in resumable parts.
+    public static let uploadVideoMaxBytes = MultipartUpload.maxBytes
+    public static let uploadRefusal = "Only images (JPEG, PNG, WebP, HEIC, up to 10 MB), videos (MP4, MOV, up to 2 GB) and sound (MP3, M4A, AAC, WAV, up to 200 MB) can be uploaded."
 
     public enum UploadKind: String, Sendable { case image, video, audio }
     public struct UploadType: Equatable, Sendable {

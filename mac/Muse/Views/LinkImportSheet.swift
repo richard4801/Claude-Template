@@ -12,7 +12,7 @@ struct LinkImportSheet: View {
     var body: some View {
         let s = store.linkImport
         let strict = s.settings?.strictLinks ?? true
-        let limits = s.settings.map { RecreateDeviceFetch.Limits($0) } ?? RecreateDeviceFetch.Limits()
+        let limits = s.settings.map { RecreateDeviceFetch.Limits($0, forImport: true) } ?? RecreateDeviceFetch.Limits(forImport: true)
         ZStack {
             Color.black.opacity(0.38).onTapGesture { if !s.fetching { store.closeLinkImport() } }
             VStack(alignment: .leading, spacing: Space.s4) {
