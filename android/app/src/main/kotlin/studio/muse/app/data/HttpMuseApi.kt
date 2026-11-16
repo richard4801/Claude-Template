@@ -163,6 +163,10 @@ interface MuseService {
     @POST("v1/edits") suspend fun createEdit(@Body r: TakeVersionV2Request): Take
     @POST("v1/editor/uploads/presign") suspend fun editorPresign(@Body r: EditorPresignRequest): PresignResponse
     @GET("v1/editor/uploads/{id}") suspend fun editorUpload(@Path("id") id: String): EditorUploadDto
+    @GET("v1/editor/templates") suspend fun editTemplates(): EditTemplateLibrary
+    @POST("v1/editor/templates/{id}/apply") suspend fun applyEditTemplate(@Path("id") id: String, @Body r: EditTemplateApplyRequest): EditTemplateApplyResult
+    @POST("v1/editor/templates") suspend fun saveEditTemplate(@Body r: EditTemplateSaveRequest): EditTemplateSaved
+    @DELETE("v1/editor/templates/{id}") suspend fun deleteEditTemplate(@Path("id") id: String): retrofit2.Response<Unit>
     @GET("v1/editor/content") suspend fun editorContent(): okhttp3.ResponseBody
     // Edit sessions (workstream 3)
     @POST("v1/edit-sessions") suspend fun openEditSession(@Body r: OpenEditSessionRequest): EditSessionDto
@@ -532,6 +536,10 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     }
 
     override suspend fun editorUploadUrl(uploadId: String): String? = call { editorUpload(uploadId) }.url
+    override suspend fun editTemplates() = call { editTemplates() }
+    override suspend fun applyEditTemplate(id: String, req: EditTemplateApplyRequest) = call { applyEditTemplate(id, req) }
+    override suspend fun saveEditTemplate(req: EditTemplateSaveRequest) = call { saveEditTemplate(req) }
+    override suspend fun deleteEditTemplate(id: String) { call { deleteEditTemplate(id) } }
 
     override suspend fun editorContentCatalog(): String? = call { editorContent() }.string()
     override fun editorContentUrl(path: String): String? = "${base}v1/editor/content/files/$path"

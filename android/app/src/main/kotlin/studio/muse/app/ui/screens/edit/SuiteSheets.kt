@@ -144,6 +144,8 @@ data class SuiteHost(
     val soundPlaying: String? = null,
     /** "Your font": opens the system file picker for a .ttf/.otf (null: not offered). */
     val addFont: (() -> Unit)? = null,
+    /** Edit templates: a still of a template's preview clip for its tile (null: none). */
+    val templateStill: suspend (String) -> androidx.compose.ui.graphics.ImageBitmap? = { null },
     /** Style kits: save this edit's style under a name; delete a saved one. */
     val saveKit: (String) -> Unit = {},
     val deleteKit: (String) -> Unit = {},
@@ -181,6 +183,7 @@ fun ColumnScope.PanelBody(ui: EditSuiteUi, panel: Panel, host: SuiteHost, act: (
             Panel.RATIO -> RatioBody(ui, act)
             Panel.EXPORT -> ExportBody(ui, host, act)
             Panel.HISTORY -> HistoryBody(ui, act) // Edit sessions (workstream 3)
+            Panel.TEMPLATES -> TemplatesBody(ui, host, act) // Edit templates (EditTemplatesSheet.kt)
         }
     }
 }

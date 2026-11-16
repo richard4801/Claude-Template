@@ -26,6 +26,9 @@ import studio.muse.app.data.EditPresencePreview
 import studio.muse.app.data.EditRequestAnswer
 import studio.muse.app.data.EditSessionDto
 import studio.muse.app.data.EditUndoRequest
+import studio.muse.app.data.EditTemplateApplyRequest
+import studio.muse.app.data.EditTemplateSaveFrom
+import studio.muse.app.data.EditTemplateSaveRequest
 import studio.muse.app.data.MuseApi
 import studio.muse.app.data.OpenEditSessionRequest
 import studio.muse.core.edit.EditJson
@@ -381,6 +384,126 @@ class EditSessionSync(
             } catch (_: java.io.IOException) {
                 controller.updateSession { it.copy(answering = null) }
             }
+        }
+    }
+
+    // ------------------------------------------------------------------ Edit templates (plans/edit-templates.md §5)
+    private var previewJob: Job? = null
+
+    /** Load, pick (preview on the real edit), settings, apply and Save as template, through the session. */
+    override fun template(a: EditAction) {
+        when (a) {
+            EditAction.LoadTemplates -> scope.launch { loadTemplates() }
+            is EditAction.PickTemplate -> {
+                val lib = controller.ui.value.templates.library
+                val t = a.id?.let { id -> lib?.templates?.firstOrNull { it.id == id } }
+                controller.update { u ->
+                    if (t == null) u.copy(templatePreview = null, templates = u.templates.copy(picked = null, previewOf = null, notes = emptyList(), price = null))
+                    else u.copy(templates = u.templates.copy(picked = t.id, params = EditTemplatesLogic.defaults(t), notes = emptyList(), price = null))
+                }
+                if (t != null) previewTemplate()
+            }
+            is EditAction.TemplateParam -> {
+                controller.update { it.copy(templates = it.templates.copy(params = it.templates.params + (a.key to a.value))) }
+                previewTemplate()
+            }
+            is EditAction.ApplyTemplate -> scope.launch { applyTemplate(a.every) }
+            is EditAction.SaveTemplate -> scope.launch { saveTemplate(a) }
+            else -> {}
+        }
+    }
+
+    private suspend fun loadTemplates() {
+        controller.update { it.copy(templates = it.templates.copy(loading = true, error = null)) }
+        try {
+            val lib = api().editTemplates()
+            controller.update { it.copy(templates = it.templates.copy(loading = false, library = lib)) }
+        } catch (e: ApiException) {
+            controller.update { it.copy(templates = it.templates.copy(loading = false, error = e.message ?: "Templates didn't load")) }
+        } catch (_: java.io.IOException) {
+            controller.update { it.copy(templates = it.templates.copy(loading = false, error = "Check the connection, then try again")) }
+        }
+    }
+
+    /** The server's dry run on this session (after this device's change went up), applied to a copy the player shows. */
+    private fun previewTemplate() {
+        previewJob?.cancel()
+        previewJob = scope.launch {
+            delay(250) // a slider drag settles first
+            val u = controller.ui.value
+            val t = u.templates.pickedTemplate ?: return@launch
+            if (t.state != "ready") { controller.update { it.copy(templatePreview = null) }; return@launch }
+            val target = EditTemplatesLogic.target(t, u.project, u.selectedId, u.playheadSec) ?: return@launch
+            val asked = u.templates.params
+            controller.update { it.copy(templates = it.templates.copy(previewing = true)) }
+            try {
+                val shown = mutex.withLock {
+                    pushLocked()
+                    val sid = sessionId ?: return@withLock null
+                    val r = api().applyEditTemplate(t.id, EditTemplateApplyRequest(sid, target.json, JsonObject(asked), dryRun = true, device = device))
+                    val base = local() ?: return@withLock null
+                    controller.update { it.copy(templates = it.templates.copy(price = r.price, notes = r.notes)) }
+                    parse(JsonPatch.apply(base, EditTemplatesLogic.patchOf(r.patch)))
+                }
+                val now = controller.ui.value.templates
+                if (now.picked == t.id && now.params == asked) controller.update { it.copy(templatePreview = shown, templates = it.templates.copy(previewOf = shown?.let { t.id })) }
+            } catch (e: ApiException) {
+                controller.update { it.copy(templatePreview = null, message = e.message ?: "Couldn't preview ${t.name}") }
+            } catch (_: PatchException) {
+                controller.update { it.copy(templatePreview = null) }
+            } catch (_: java.io.IOException) {
+                controller.update { it.copy(templatePreview = null, message = "Couldn't reach the studio · try again") }
+            } finally {
+                controller.update { it.copy(templates = it.templates.copy(previewing = false)) }
+            }
+        }
+    }
+
+    /** One change on the server (a paid cut-out: the price was on the button, the owner approves it next, as usual). */
+    private suspend fun applyTemplate(every: Boolean) {
+        val u = controller.ui.value
+        val t = u.templates.pickedTemplate ?: return
+        val target = if (every) EditTemplatesLogic.every(t)?.first else EditTemplatesLogic.target(t, u.project, u.selectedId, u.playheadSec)?.json
+        if (target == null && t.target != "edit") return
+        previewJob?.cancel()
+        controller.update { it.copy(templates = it.templates.copy(applying = true)) }
+        try {
+            val r = mutex.withLock {
+                pushLocked()
+                val sid = sessionId ?: return@withLock null
+                val r = api().applyEditTemplate(t.id, EditTemplateApplyRequest(sid, target, JsonObject(u.templates.params), confirm = if (t.paid) true else null, device = device))
+                controller.update { it.copy(templatePreview = null, templates = it.templates.copy(previewOf = null)) }
+                refetchLocked() // the template's change, like any change from the session
+                r
+            } ?: return
+            controller.update { it.copy(message = if (r.waitingForOwner.isNotEmpty()) "Applied ${t.name} · approve the cut-out to finish it" else "Applied ${t.name}", templates = it.templates.copy(notes = r.notes)) }
+        } catch (e: ApiException) {
+            controller.update { it.copy(message = e.message ?: "Couldn't apply ${t.name}") }
+        } catch (_: java.io.IOException) {
+            controller.update { it.copy(message = "Couldn't reach the studio · try again") }
+        } finally {
+            controller.update { it.copy(templates = it.templates.copy(applying = false)) }
+        }
+    }
+
+    private suspend fun saveTemplate(a: EditAction.SaveTemplate) {
+        val u = controller.ui.value
+        val sel = u.selectedId ?: run { controller.update { it.copy(message = "Select a clip first") }; return }
+        val p = u.project ?: return
+        val k = p.mainClips.indexOfFirst { it.id == sel }
+        val cutAt = if (a.cut && k > 0) studio.muse.core.edit.timeline(p)[k].let { it.startSec + it.transitionSec / 2 } else null
+        try {
+            val r = mutex.withLock {
+                pushLocked()
+                val sid = sessionId ?: return@withLock null
+                api().saveEditTemplate(EditTemplateSaveRequest(a.name.trim().take(60), a.kind, if (cutAt != null) "cut" else "clip", EditTemplateSaveFrom(sid, listOf(sel), cutAt)))
+            } ?: return
+            controller.update { it.copy(message = r.saved.ifBlank { "Saved ${r.template.name} as a template" }) }
+            loadTemplates()
+        } catch (e: ApiException) {
+            controller.update { it.copy(message = e.message ?: "Couldn't save the template") }
+        } catch (_: java.io.IOException) {
+            controller.update { it.copy(message = "Couldn't reach the studio · try again") }
         }
     }
 }

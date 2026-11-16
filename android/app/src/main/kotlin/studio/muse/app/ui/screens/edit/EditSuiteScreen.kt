@@ -367,6 +367,7 @@ private fun EditSuiteEditor(takeId: String, resume: studio.muse.core.edit.EditRe
         addPhoto = { photo.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
         reframe = vm::reframe,
         contentUrl = { path -> vm.contentUrl(path) },
+        templateStill = vm::templateStill,
         addContent = vm::addContent,
         previewSound = vm::previewSound,
         soundPlaying = soundPlaying,
@@ -539,7 +540,8 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
                 .collect { if (it != null) savePlace() }
         }
         viewModelScope.launch {
-            controller.ui.map { it.project }.distinctUntilChanged().debounce(500).collect { p ->
+            // A template's dry run (EditTemplatesLogic.kt) plays instead of the edit while it's previewed; nothing is saved.
+            controller.ui.map { it.templatePreview ?: it.project }.distinctUntilChanged().debounce(500).collect { p ->
                 if (p == null) return@collect
                 // A take added while editing (an overlay, or a clip at the end): its file first, so the preview and the
                 // export include it (before, only takes in the project when it opened were fetched).
@@ -1046,6 +1048,20 @@ class EditSuiteViewModel(private val c: AppContainer, private val takeId: String
 
     /** The local file if downloaded, else the server's URL (sticker thumbnails). */
     fun contentUrl(path: String): String? = studio.muse.app.platform.edit.ContentLibrary.file(path)?.absolutePath ?: c.repo.api.editorContentUrl(path)
+
+    /** Edit templates: a still of a template's preview (or reference) clip for its tile, cached; null without one. */
+    private val templateStills = HashMap<String, androidx.compose.ui.graphics.ImageBitmap?>()
+    suspend fun templateStill(uploadId: String): androidx.compose.ui.graphics.ImageBitmap? {
+        if (templateStills.containsKey(uploadId)) return templateStills[uploadId]
+        val url = runCatching { c.repo.api.editorUploadUrl(uploadId) }.getOrNull() ?: return null
+        val still = withContext(Dispatchers.IO) {
+            val r = MediaMetadataRetriever()
+            try { r.setDataSource(url, HashMap()); r.getFrameAtTime(200_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { b -> val k = 360f / maxOf(b.width, b.height, 1); android.graphics.Bitmap.createScaledBitmap(b, maxOf(1, (b.width * k).toInt()), maxOf(1, (b.height * k).toInt()), true) }?.asImageBitmap() }
+            catch (_: Exception) { null } finally { runCatching { r.release() } }
+        }
+        templateStills[uploadId] = still
+        return still
+    }
 
     private val _soundPlaying = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     val soundPlaying: kotlinx.coroutines.flow.StateFlow<String?> = _soundPlaying

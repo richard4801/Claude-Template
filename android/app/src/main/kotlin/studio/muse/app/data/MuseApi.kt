@@ -208,6 +208,11 @@ interface MuseApi {
     fun editorContentUrl(path: String): String? = null
     /** Where an editor upload of the studio can be fetched (an own font, on reopening an edit); null when unknown. */
     suspend fun editorUploadUrl(uploadId: String): String? = null
+    // Edit templates (/v1/editor/templates, plans/edit-templates.md §3): the owner's library of effects and transitions.
+    suspend fun editTemplates(): EditTemplateLibrary = throw ApiException("not_found", "Templates need the studio server")
+    suspend fun applyEditTemplate(id: String, req: EditTemplateApplyRequest): EditTemplateApplyResult = throw ApiException("not_found", "Templates need the studio server")
+    suspend fun saveEditTemplate(req: EditTemplateSaveRequest): EditTemplateSaved = throw ApiException("not_found", "Templates need the studio server")
+    suspend fun deleteEditTemplate(id: String) { throw ApiException("not_found", "Templates need the studio server") }
     /** WS7 (import from link): a phone-fetched video as a clip upload (POST /v1/uploads/presign {kind: "clip"} → PUT, no confirm); returns the upload id. */
     suspend fun uploadClipFile(file: java.io.File, onProgress: (Float) -> Unit = {}): String =
         throw ApiException("unsupported", "Uploading files needs the studio server")
