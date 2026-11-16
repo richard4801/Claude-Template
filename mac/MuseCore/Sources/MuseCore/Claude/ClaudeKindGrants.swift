@@ -161,7 +161,7 @@ public enum ClaudeKindGrants {
         var programs: Set<String> = []
         var codeArgs: [Int: Bool] = [:]          // token index → it is shell code
         var heredocTargets: [String?] = []       // per `<<`, in order: the interpreter it feeds (nil: data, e.g. `cat > x`)
-        var codes: [(String, Bool)] = []         // (code, is shell)
+        var codes: [(String, Bool, Bool)] = []   // (code, is shell, from a here-document)
         var dataHeredocs: [String] = []
         var atStart = true
         var segInterp: String?
@@ -176,7 +176,7 @@ public enum ClaudeKindGrants {
             case .heredoc(let body):
                 let target = heredocIndex < heredocTargets.count ? heredocTargets[heredocIndex] : nil
                 heredocIndex += 1
-                if let target { codes.append((body, isShell(target))) } else { dataHeredocs.append(body) }
+                if let target { codes.append((body, isShell(target), true)) } else { dataHeredocs.append(body) }
             case .word(let w):
                 let name = base(w.text)
                 if atStart {
@@ -188,7 +188,7 @@ public enum ClaudeKindGrants {
                 if segInterp == nil, isInterpreter(name) { segInterp = name }
                 if let interp = segInterp, let pw = prevWord, codeFlags.contains(pw) {
                     codeArgs[idx] = isShell(interp)
-                    codes.append((w.text, isShell(interp)))
+                    codes.append((w.text, isShell(interp), false))
                 }
                 prevWord = w.text
             }
@@ -196,7 +196,7 @@ public enum ClaudeKindGrants {
         // A here-document saved to a file in a command that also runs an interpreter (`cat > a.py <<EOF … EOF; python3 a.py`)
         // is code Claude wrote too.
         if !dataHeredocs.isEmpty, programs.contains(where: isInterpreter) || !functions.isEmpty {
-            codes += dataHeredocs.map { ($0, false) }
+            codes += dataHeredocs.map { ($0, false, true) }
         }
         // The shell itself: every word but the code typed in.
         let shellWords = tokens.enumerated().compactMap { (i, t) -> String? in
@@ -226,14 +226,17 @@ public enum ClaudeKindGrants {
         let uvInstall = (programs.contains("uv") || programs.contains("uvx") || functions.values.contains { _ in lowerWords.contains("uv") })
             && lowerWords.contains { $0 == "--with" || $0.hasPrefix("--with=") || $0.hasPrefix("--with-requirements") || $0.hasPrefix("--with-editable") }
 
-        if scope == .folders, ["expanduser", "path.home", "getenv", "environ"].contains(where: { command.lowercased().contains($0) }) {
+        // Code that reaches the home folder itself (`Path.home()`, `expanduser('~')`, `getenv('HOME')`): no folder to name, so it
+        // asks. A `~/MUSE/…` written in the code is a path like any other (build 676: `expanduser` alone made the owner's
+        // project command ask "outside your allowed folders" with no Always).
+        if scope == .folders, homeMarkers.contains(where: { command.lowercased().contains($0) }) {
             r.why = "it works outside your allowed folders"; return r
         }
 
         // Every path it names.
         let allowed = folders.filter { ClaudeAlwaysRules.tooWide($0, home: home) == nil }
         func inScope(_ p: String) -> Bool {
-            harmless(p) || isTemp(p) || ClaudeFilePolicy.inside(p, cwd) || allowed.contains { ClaudeFilePolicy.inside(p, $0) }
+            harmless(p) || isTemp(p) || ClaudeFilePolicy.inside(p, cwd) || isMuseFolder(p, home: home) || allowed.contains { ClaudeFilePolicy.inside(p, $0) }
         }
         var need: [String] = []
         var runCwd = cwd
@@ -303,14 +306,36 @@ public enum ClaudeKindGrants {
             }
             prevWasCd = isProgram && text == "cd"
         }
-        r.needFolders = need
+        // Paths written in code or a script: like the command's own, a folder outside the allowed ones that can be always
+        // allowed is offered on the card (and added by Allow always), not refused.
+        func scanPaths(_ text: String, base: String) -> String? {
+            let ns = text as NSString
+            let all = NSRange(location: 0, length: ns.length)
+            // Quoted paths whole, spaces and all ("~/Movies/Gamified GRWM/a.png"), then unquoted ones outside them.
+            let quoted = quotedPath.matches(in: text, range: all)
+            for m in quoted {
+                if let why = consider(ClaudeFilePolicy.resolve(ns.substring(with: m.range(at: 2)), cwd: base, home: home)) { return why }
+            }
+            for m in embeddedPath.matches(in: text, range: all) {
+                if quoted.contains(where: { NSLocationInRange(m.range(at: 1).location, $0.range) }) { continue }
+                if text.hasPrefix("#!"), m.range.location < ns.range(of: "\n").location { continue }
+                var p = ns.substring(with: m.range(at: 1))
+                if let d = p.firstIndex(of: "$") { p = String(p[..<d]) }
+                if p.isEmpty { continue }
+                if let why = consider(ClaudeFilePolicy.resolve(p, cwd: base, home: home)) { return why }
+            }
+            return nil
+        }
+        func plain(_ why: String) -> String { why.replacingOccurrences(of: "it ", with: "") }
         // A script it runs: keys, the network and (scoped) its paths, like the command itself.
         for sp in scripts {
             guard let text = readScript(sp) else { continue }
-            if let why = scriptCheck(text, scope: scope, folders: allowed + need, cwd: cwd, home: home) { r.why = "the script \(why.replacingOccurrences(of: "it ", with: ""))"; return r }
+            if scope == .folders, homeMarkers.contains(where: { text.lowercased().contains($0) }) { r.why = "the script works outside your allowed folders"; return r }
+            if let why = scanPaths(text, base: cwd) { r.why = "the script \(plain(why))"; return r }
+            if let why = scriptCheck(text, scope: .anywhere, folders: [], cwd: cwd, home: home) { r.why = "the script \(plain(why))"; return r }
         }
         // Code Claude wrote: shell code is checked like the command; other code for what still asks with the switch on.
-        for (code, shell) in codes {
+        for (code, shell, _) in codes {
             if shell {
                 let inner = shellCheck(code, scope: scope, folders: allowed + need, cwd: runCwd, home: home, runCode: true,
                                        isDirectory: isDirectory, readScript: readScript, depth: depth + 1)
@@ -319,22 +344,34 @@ public enum ClaudeKindGrants {
             } else {
                 let lower = code.lowercased()
                 for (needle, why) in codeRisks where lower.contains(needle) { r.why = "the code Claude wrote \(why)"; return r }
-                if let why = scriptCheck(code, scope: scope, folders: allowed + need, cwd: runCwd, home: home) {
-                    r.why = "the code Claude wrote \(why.replacingOccurrences(of: "it ", with: ""))"; return r
+                if let why = scanPaths(code, base: runCwd) ?? scriptCheck(code, scope: .anywhere, folders: [], cwd: runCwd, home: home) {
+                    r.why = "the code Claude wrote \(plain(why))"; return r
                 }
             }
         }
         r.needFolders = need
         r.code = !codes.isEmpty || uvInstall
-        // Code with none of the risky calls above is part of "shell commands" (as since bundle-22: a `python3 -c` read in
-        // /tmp must not ask again); the switch also lets it run without that grant. Downloading packages (`uv --with`)
-        // needs the switch.
-        if uvInstall, !runCode {
-            r.why = codes.isEmpty ? packagesReason : codeAndPackagesReason
+        // Code typed into the command (`python3 -c …`) with none of the risky calls above is part of "shell commands" (as
+        // since bundle-22: a `python3 -c` read in /tmp must not ask again). A here-document of code and downloading packages
+        // (`uv --with`) need "Let Claude run code it writes" (coordinator, build 676); the switch also lets code run without
+        // the shell grant.
+        let heredocCode = codes.contains { $0.2 }
+        if !runCode, uvInstall || heredocCode {
+            r.why = uvInstall ? (codes.isEmpty ? packagesReason : codeAndPackagesReason) : codeReason
             r.needFolders = []
         }
         return r
     }
+
+    /// A path written as a string in code: from its opening quote to the same closing quote on that line.
+    static let quotedPath = try! NSRegularExpression(pattern: #"(["'])((?:~/|/[A-Za-z])[^"'\n$]*)\1"#)
+
+    /// Code that reaches the home folder itself: no folder to name or always allow.
+    static let homeMarkers = ["path.home(", "homedir(", "expanduser('~')", "expanduser(\"~\")", "getenv('home')", "getenv(\"home\")",
+                              "environ['home']", "environ[\"home\"]", "environ.get('home'", "environ.get(\"home\""]
+
+    /// ~/MUSE, MUSE's own project folder: inside "Folders + temp" by default (coordinator, build 676).
+    public static func isMuseFolder(_ p: String, home: String) -> Bool { ClaudeFilePolicy.inside(p, home + "/MUSE") }
 
     /// Calls in a script that reach the network or need admin rights (deleting inside the folders is the person's own work).
     static let scriptNetwork = ["socket", "requests", "urllib", "http.client", "httpx", "aiohttp", "ftplib", "smtplib", "fetch(", "require('http",
@@ -344,7 +381,7 @@ public enum ClaudeKindGrants {
         if text.utf8.count > 512 * 1024 { return "it is too long to check" }
         let lower = text.lowercased()
         for n in scriptNetwork where lower.contains(n) { return n == "sudo " ? "it needs admin rights" : "it uses the network" }
-        if scope == .folders, ["expanduser", "path.home", "$home", "getenv", "environ"].contains(where: { lower.contains($0) }) {
+        if scope == .folders, (homeMarkers + ["$home"]).contains(where: { lower.contains($0) }) {
             return "it works outside your allowed folders"
         }
         let ns = text as NSString

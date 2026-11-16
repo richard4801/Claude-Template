@@ -202,6 +202,23 @@ extension SnapshotRunner {
         let runs = service.reviewShowAsk(ask("perm_review_code2", "Bash", ["command": .string(ownerCmd)]), threadId: tid)
         check("code_runs_with_switch", runs == .allow, "\(runs)")
         check("shell_open_still_asks", card(openAsk.id) != nil)
+        // Build 676: a project folder outside the list is offered on the card (Allow always adds it), and ~/MUSE is allowed.
+        let other = URL(fileURLWithPath: home).appendingPathComponent("Movies/MUSE review other", isDirectory: true)
+        try? FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: other) }
+        let projCmd = ["cd \"\(other.path)\" && mkdir -p work && python3 -I - <<'EOF'", "p = \"work/a.txt\"", "open(p, \"w\").write(\"x\")", "EOF"].joined(separator: "\n")
+        let projAsk = ask("perm_review_proj", "Bash", ["command": .string(projCmd)])
+        _ = service.reviewShowAsk(projAsk, threadId: tid)
+        let projCard = card(projAsk.id)
+        check("folder_offered_on_card", projCard?.alwaysLabel == "Allow always: shell commands" && projCard?.ruleFolders == [other.path],
+              "label \(projCard?.alwaysLabel ?? "none"), folders \(projCard?.ruleFolders ?? []), why \(projCard?.alwaysAsksBecause ?? "none")")
+        service.answerFile(projAsk.id, .always)
+        let projAgain = service.reviewShowAsk(ask("perm_review_proj2", "Bash", ["command": .string(projCmd)]), threadId: tid)
+        check("folder_added_then_runs", projAgain == .allow, "\(projAgain)")
+        service.removeAllowedFolder(other.path)
+        let museCmd = ["cd \"\(home)/MUSE/Review Project\" && python3 -I - <<'EOF'", "print(open(\"work/a.txt\").read())", "EOF"].joined(separator: "\n")
+        let museV = service.reviewShowAsk(ask("perm_review_muse", "Bash", ["command": .string(museCmd)]), threadId: tid)
+        check("muse_folder_allowed", museV == .allow, "\(museV)")
         let rmCode = service.reviewShowAsk(ask("perm_review_code_rm", "Bash", ["command": .string("python3 - <<'EOF'\nimport shutil\nshutil.rmtree('/tmp/grwm_match')\nEOF")]), threadId: tid)
         if case .ask(let c) = rmCode { check("risky_code_asks", c.alwaysAsksBecause == "Always asks: the code Claude wrote deletes files", c.alwaysAsksBecause ?? "none") }
         else { check("risky_code_asks", false, "\(rmCode)") }

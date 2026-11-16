@@ -349,8 +349,8 @@ public enum ClaudeFilePolicy {
         if folder.isEmpty { folder = "/" }
         let inLibrary = inside(path, home + "/Library")
         if !askAll, !inLibrary, folders.contains(where: { inside(path, $0) }) { return .allow }
-        // Temporary files: shell commands always allowed already reach them, so reading and uploading them doesn't ask either.
-        if !askAll, shell != nil, ClaudeKindGrants.isTemp(path) { return .allow }
+        // Temporary files and ~/MUSE: shell commands always allowed already reach them, so reading and uploading there doesn't ask either.
+        if !askAll, shell != nil, ClaudeKindGrants.isTemp(path) || ClaudeKindGrants.isMuseFolder(path, home: home) { return .allow }
         let action: String
         switch tool {
         case "Read": action = "Read a file"
