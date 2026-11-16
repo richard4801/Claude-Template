@@ -153,7 +153,7 @@ extension SnapshotRunner {
         // save_to_mac (ci_741e03646382, ci_c62906bcd1c1): the card names the file and the folder; ~/Library is never a save folder.
         let saveAsk = ask("perm_review_save", "Save", ["folder": .string("~/Downloads/MUSE"), "fileName": .string("mia-living-room-dance-takev1-1.mp4"),
                                                         "url": .string("/uploads/s/v1.mp4"), "what": .string("the video take_v1 (Mia · Living-room dance)"),
-                                                        "bytes": .number(48 * 1024 * 1024)])
+                                                        "bytes": .number(Double(48 * 1024 * 1024))])
         _ = service.reviewShowAsk(saveAsk, threadId: tid)
         let saveCard = card(saveAsk.id)
         check("save_card", saveCard?.action == "Save mia-living-room-dance-takev1-1.mp4 to ~/Downloads/MUSE" && saveCard?.alwaysLabel == "Allow always",
