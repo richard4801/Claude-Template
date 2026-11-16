@@ -1463,7 +1463,10 @@ extension AppStore {
         recreate.claudeWatch = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.recreate.claudeOpen else { return }
-                if let sid = self.recreate.claudeSessionId, let s = try? await self.api.editSessionState(id: sid) {
+                // Performance (build 704): only while Recreate is on screen and the window can be seen. Away, it waits
+                // (no request); coming back, the next tick (≤ 3 s) catches up on the revision and any waiting ask.
+                let onScreen = self.screen == .edit && self.recreate.open && OrbVisibility.shared.visible
+                if onScreen, let sid = self.recreate.claudeSessionId, let s = try? await self.api.editSessionState(id: sid) {
                     let ask = s.pending.first { $0.status == "waiting" }
                     if ask?.id != self.recreate.claudeAsk?.id { self.recreate.claudeAsk = ask }
                     if let before = self.recreate.claudeRevision, s.revision != before, let ref = self.recreate.reference?.id {

@@ -12,6 +12,19 @@ import UniformTypeIdentifiers
 final class ClaudeChatModel {
     private(set) var thread: ClaudeThread?
     private(set) var transcript = ClaudeTranscript()
+    /// Streamed text joined into one change every 80 ms at most (ClaudeDeltaCoalescer), not one per token.
+    @ObservationIgnored private var deltas = ClaudeDeltaCoalescer()
+    @ObservationIgnored private var deltaFlush: Task<Void, Never>?
+    @ObservationIgnored private var itemsMemo: (ClaudeTranscript, [ClaudeChatItem])?
+
+    /// The transcript's items, built once per change (the view, isEmptyChat and blenderFailed each used to rebuild them).
+    var items: [ClaudeChatItem] {
+        let tr = transcript
+        if let m = itemsMemo, m.0 == tr { return m.1 }
+        let built = tr.items
+        itemsMemo = (tr, built)
+        return built
+    }
     /// A turn queued or running somewhere else (the phone's, before this Mac picks it up, or the API fallback).
     private(set) var remoteTurn: ClaudeTurn?
     var composer = ""
@@ -92,6 +105,7 @@ final class ClaudeChatModel {
             }
         }
         thread = nil
+        dropDeltas()
         transcript = ClaudeTranscript()
         remoteTurn = nil
         loading = true
@@ -144,6 +158,7 @@ final class ClaudeChatModel {
 
     /// A chat on screen: its messages, its turn still running, and remembered as this place's open chat.
     private func show(_ d: ClaudeThreadDetail) {
+        dropDeltas()
         thread = d.thread
         transcript = ClaudeTranscript()
         transcript.load(d.messages)
@@ -180,7 +195,7 @@ final class ClaudeChatModel {
     }
 
     /// The open chat has nothing in it yet (New chat on it again does nothing).
-    var isEmptyChat: Bool { transcript.items.isEmpty && !busy }
+    var isEmptyChat: Bool { items.isEmpty && !busy }
 
     /// New chat: a fresh conversation in this place. The Suite starts a new shared draft for it.
     func newChat() async {
@@ -256,21 +271,50 @@ final class ClaudeChatModel {
         }
     }
 
+    /// One streamed event: text waits up to 80 ms to be joined with the next tokens; anything else lets it out first.
+    private func applyLive(_ e: ClaudeEvent) {
+        for x in deltas.add(e) { applyNow(x) }
+        if !deltas.isEmpty && deltaFlush == nil {
+            deltaFlush = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(ClaudeDeltaCoalescer.window * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.deltaFlush = nil
+                self?.flushDeltas()
+            }
+        }
+    }
+
+    private func applyNow(_ e: ClaudeEvent) {
+        if lastContext?.kind == "chat" { ClaudeCodeService.shared.orbEvent(e) }
+        transcript.apply(e)
+    }
+
+    private func flushDeltas() {
+        deltaFlush?.cancel()
+        deltaFlush = nil
+        if let t = deltas.flush() { applyNow(t) }
+    }
+
+    private func dropDeltas() {
+        deltaFlush?.cancel()
+        deltaFlush = nil
+        deltas.reset()
+    }
+
     private func handle(_ f: ClaudeCodeService.Feed) {
         guard let tid = thread?.id else { return }
         switch f {
         case .local(let t, _, let e) where t == tid:
-            if lastContext?.kind == "chat" { ClaudeCodeService.shared.orbEvent(e) }
-            transcript.apply(e)
+            applyLive(e)
             toolDone(e)
             if case .done = e { scheduleReload(); Task { await refreshThreads() } }
         case .live(.message(let t, let m)) where t == tid:
+            flushDeltas()
             // A "What I changed" card (or its Undo) landed: the orb flashes.
             if lastContext?.kind == "chat", m.tool?.ui?.card?.card.kind == "changes" { ClaudeCodeService.shared.orbChange() }
             transcript.upsert(m)
         case .live(.event(let t, let turnId, let e)) where t == tid:
-            if lastContext?.kind == "chat" { ClaudeCodeService.shared.orbEvent(e) }
-            transcript.apply(e)
+            applyLive(e)
             toolDone(e)
             if case .done = e {
                 if remoteTurn?.id == turnId || turnId == nil { remoteTurn = nil }
@@ -361,7 +405,7 @@ final class ClaudeChatModel {
     /// The last turn ran without Blender's tools: Claude Code reported Blender's server as failed.
     var blenderFailed: Bool {
         guard !busy else { return false }
-        for item in transcript.items.reversed() {
+        for item in items.reversed() {
             if case .user = item { return false }
             if case .tool(ClaudeCommand.Blender.failedChipId, _, _, .error) = item { return true }
         }
@@ -381,7 +425,7 @@ final class ClaudeChatModel {
     /// Try again: the last message, sent again as it was typed.
     func retry() {
         guard !busy else { return }
-        for item in transcript.items.reversed() {
+        for item in items.reversed() {
             if case .user(_, let text, _) = item {
                 deliver(unwrapShown?(text) ?? text)
                 return

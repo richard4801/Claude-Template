@@ -43,18 +43,18 @@ struct ChatRow: Identifiable, Hashable {
         for item in items {
             switch item {
             case .user(let id, let text, let source):
-                let shown = ChatLeakFilter.userText(unwrap?(text) ?? text)
+                let shown = ChatTextCache.userText(unwrap?(text) ?? text)
                 let imgs = images(item)
                 guard !shown.isEmpty || !imgs.isEmpty else { continue }
                 out.append(ChatRow(id: id, kind: .user(text: shown, images: imgs, phone: source == "phone")))
             case .assistant(let id, let text, let streaming):
-                let shown = ChatLeakFilter.reply(text, audience: audience)
+                let shown = ChatTextCache.reply(text, audience: audience, streaming: streaming)
                 guard !shown.isEmpty else { continue }
                 out.append(ChatRow(id: id, kind: .assistant(text: shown, streaming: streaming)))
             case .tool(let id, _, let summary, _) where id.hasPrefix(ClaudeAutoCompact.freshSpacePrefix):
                 out.append(ChatRow(id: id, kind: .note(summary)))
             case .tool(let id, let name, let summary, let status):
-                let line = ChatToolLine(id: id, name: name, summary: ChatLeakFilter.toolSummary(summary, name: name), status: status)
+                let line = ChatToolLine(id: id, name: name, summary: ChatTextCache.toolSummary(summary, name: name), status: status)
                 if case .tools(let list)? = out.last?.kind {
                     out[out.count - 1].kind = .tools(list + [line])
                 } else {
@@ -102,9 +102,10 @@ struct ChatTranscriptView: View {
 
     @State private var pinned = true
     @State private var showJump = false
-    @State private var lastFrame: CGRect = .zero
-    @State private var followPending = false
-    @State private var scrollAgain = false
+    /// Scroll-follow bookkeeping, never drawn: kept in a reference so writing it on every layout doesn't re-run this body
+    /// (performance, build 704: each layout used to cost an extra pass over every row).
+    private final class Follow { var lastFrame: CGRect = .zero; var pending = false; var again = false }
+    @State private var follow_ = Follow()
     private static let endId = "chat_end"
 
     var body: some View {
@@ -170,24 +171,24 @@ struct ChatTranscriptView: View {
     /// The content's frame in the scroll view: its top moves when the reader scrolls, its height when text arrives.
     private func follow(_ f: CGRect, viewport: CGFloat, proxy: ScrollViewProxy) {
         let distance = f.maxY - viewport
-        let moved = abs(f.minY - lastFrame.minY) > 0.5
+        let moved = abs(f.minY - follow_.lastFrame.minY) > 0.5
         // Real growth (new text), or a new width (the rows re-wrapped: a resize): the lazy stack re-estimating rows makes the
         // height wobble both ways at one width, which alone must not scroll (runs 595/604).
-        let grew = f.height > lastFrame.height + 0.5 || abs(f.width - lastFrame.width) > 0.5
-        lastFrame = f
+        let grew = f.height > follow_.lastFrame.height + 0.5 || abs(f.width - follow_.lastFrame.width) > 0.5
+        follow_.lastFrame = f
         if moved {
             let p = distance < 48
             if p != pinned { pinned = p }
-        } else if grew, pinned, distance > 1, followPending {
-            scrollAgain = true
+        } else if grew, pinned, distance > 1, follow_.pending {
+            follow_.again = true
         } else if grew, pinned, distance > 1 {
             // Only when the new text pushed the end out of view, and one scroll at a time (runs 595 and 604: a streaming
             // reply scrolled, re-measured and scrolled again on every frame; the main thread never rested).
-            followPending = true
+            follow_.pending = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 proxy.scrollTo(Self.endId, anchor: .bottom)
-                followPending = false
-                if scrollAgain { scrollAgain = false; scrollToEnd(proxy, animated: false) }
+                follow_.pending = false
+                if follow_.again { follow_.again = false; scrollToEnd(proxy, animated: false) }
             }
         }
         let j = !pinned && distance > 120
@@ -199,17 +200,17 @@ struct ChatTranscriptView: View {
     /// Run 610: a request dropped while one was pending left long chats short of the end (the rows were still being
     /// laid out), so a request during a pending scroll asks for one more after it; still at most ten a second.
     private func scrollToEnd(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard !followPending else { scrollAgain = true; return }
-        followPending = true
+        guard !follow_.pending else { follow_.again = true; return }
+        follow_.pending = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if animated {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.endId, anchor: .bottom) }
             } else {
                 proxy.scrollTo(Self.endId, anchor: .bottom)
             }
-            followPending = false
-            if scrollAgain {
-                scrollAgain = false
+            follow_.pending = false
+            if follow_.again {
+                follow_.again = false
                 scrollToEnd(proxy, animated: false)
             }
         }
@@ -388,12 +389,12 @@ struct ChatAssistantText: View {
     @State private var copied = false
 
     var body: some View {
-        let blocks = ChatMarkdown.parse(text, streaming: streaming)
+        let blocks = ChatTextCache.markdown(text, streaming: streaming)
         VStack(alignment: .leading, spacing: Space.s1) {
             // Claude's orb beside the reply while it is being written (it settles when the reply is done).
             if streaming {
                 HStack(spacing: Space.s1) {
-                    ClaudeOrbView(size: 16)
+                    ClaudeOrbView(size: 16, live: false)
                     Text("Claude").scaled(t.scale.micro, t.roles.ink2)
                 }
                 .accessibilityHidden(true)

@@ -307,7 +307,7 @@ struct MembersView: View {
                     store.loadMembers(force: true)
                 }
             } else {
-                VStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: Space.s4) {
                         Text("Person").frame(maxWidth: .infinity, alignment: .leading)
                         Text("Balance").frame(width: 110, alignment: .leading)
@@ -420,10 +420,15 @@ struct MemberRow: View {
         .onHover { hover = $0 }
     }
 
-    static func ago(_ ms: Int64) -> String {
+    /// One formatter for every row (build 704: one was built per row on every render).
+    private static let relative: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .full
-        return f.localizedString(for: Date(timeIntervalSince1970: Double(ms) / 1000), relativeTo: Date())
+        return f
+    }()
+
+    static func ago(_ ms: Int64) -> String {
+        relative.localizedString(for: Date(timeIntervalSince1970: Double(ms) / 1000), relativeTo: Date())
     }
 }
 

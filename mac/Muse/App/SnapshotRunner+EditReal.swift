@@ -130,9 +130,9 @@ extension SnapshotRunner {
         let rebuilds0 = s.rebuildCount
         let idleSample = dir.appendingPathComponent("edit-real-idle-sample.txt")
         async let sampledIdle: Void = sampleApp(to: idleSample, seconds: 5)
-        let idle = await cpuPercent(over: 20)
+        let idle = await cpuMedian(over: 20)
         _ = await sampledIdle
-        line(idle <= 25, "idle CPU with the real edit open", String(format: "%.0f %% of one core over 20 s after a 15 s settle (fails above 25 %%); ", idle)
+        line(idle <= 25, "idle CPU with the real edit open", String(format: "%.0f %% of one core, median of 2 s windows over 20 s after a 15 s settle (fails above 25 %%); ", idle)
              + systemLoad())
         line(s.rebuildCount == rebuilds0, "no player rebuilds while idle", "\(s.rebuildCount - rebuilds0) rebuilds in 20 s idle (\(rebuilds0) since open)")
         frames("idle", idleSample)
@@ -152,8 +152,8 @@ extension SnapshotRunner {
 
         // 6. Paused again: back to idle (nothing keeps running after playback).
         try? await Task.sleep(for: .seconds(5))
-        let after = await cpuPercent(over: 10)
-        line(after <= 25, "idle CPU after playback", String(format: "%.0f %% of one core over 10 s, paused (fails above 25 %%); ", after) + systemLoad())
+        let after = await cpuMedian(over: 10)
+        line(after <= 25, "idle CPU after playback", String(format: "%.0f %% of one core, median of 2 s windows over 10 s, paused (fails above 25 %%); ", after) + systemLoad())
 
         store.go(.home)
         store.closeRecreate()

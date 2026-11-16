@@ -116,7 +116,8 @@ struct ChatClipCard: View {
             }
         }
         .onAppear { if player == nil, let u = URL(string: url) { player = AVPlayer(url: u) } }
-        .onDisappear { player?.pause() }
+        // Let the player and its decoder go off screen (build 704: every video card kept one for the life of the chat).
+        .onDisappear { player?.pause(); player = nil }
     }
 
     private func seek(_ s: Double) {
@@ -239,7 +240,7 @@ struct ClaudeActivityStrip: View {
         let r = t.roles
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: Space.s2) {
-                ClaudeOrbView(size: 18) // in place of a spinner
+                ClaudeOrbView(size: 18, live: false) // in place of a spinner
                 Text(activity.line.isEmpty ? "Working…" : activity.line).scaled(t.scale.caption, r.ink).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: Space.s2)
                 if let p = activity.percent { Text(p).monospacedDigit().scaled(t.scale.micro, r.ink2) }

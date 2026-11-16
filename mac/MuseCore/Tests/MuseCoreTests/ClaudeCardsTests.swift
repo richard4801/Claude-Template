@@ -159,9 +159,12 @@ final class ClaudeOrbTests: XCTestCase {
         XCTAssertEqual(o.pulse(at: 1, reduceMotion: true), 0)
         XCTAssertFalse(o.animates(at: 1, reduceMotion: true))
         XCTAssertEqual(o.frameRate(at: 1, reduceMotion: true), 0)
-        XCTAssertEqual(o.frameRate(at: 1), 30)
+        XCTAssertEqual(o.frameRate(at: 1), 20)
         o.turnEnded(ok: true, at: 2)
-        XCTAssertEqual(o.frameRate(at: 50), 12) // idle breathes slowly, at a low rate
+        XCTAssertEqual(o.frameRate(at: 50), 0) // idle: one still frame, no clock (build 704)
+        o.changeApplied(at: 60)
+        XCTAssertEqual(o.frameRate(at: 60.1), 20) // a flash in idle draws until it fades
+        XCTAssertEqual(o.frameRate(at: 61), 0)
         o.typing = true
         XCTAssertLessThanOrEqual(o.look(at: 50).edge, 0.15)
         XCTAssertTrue(ClaudeOrb.look(.error).danger)

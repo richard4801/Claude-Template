@@ -127,7 +127,7 @@ private struct ClaudeUiPill: View {
     var body: some View {
         HStack(spacing: 6) {
             // Claude's orb floats here while Claude operates MUSE, the panel open or closed.
-            ClaudeOrbView(size: 22)
+            ClaudeOrbView(size: 22, live: false) // still: only the panel header's orb animates (build 704)
             Text("Claude is using MUSE")
                 .font(.system(size: 12, weight: .medium))
             Text("·").foregroundStyle(.secondary)

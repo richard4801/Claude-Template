@@ -65,6 +65,10 @@ public struct ClaudeOrb: Hashable, Sendable {
     public mutating func turnStarted() { turnRunning = true; errorUntil = nil }
     /// A streamed chunk of Claude's text (or a tool step): a pulse while thinking.
     public mutating func chunk(at now: Double) { turnRunning = true; pulse(now) }
+    /// Performance (build 704): a chunk this soon after the last pulse while a turn already runs changes nothing anyone
+    /// sees (the flash fades over 0.6 s), so the service skips it instead of re-rendering every view that watches it.
+    public static let minChunkGap: Double = 0.25
+    public func chunkChangesAnything(at now: Double) -> Bool { !turnRunning || now - lastPulseAt >= Self.minChunkGap }
     /// The turn ended; a failed one tints the orb for `errorHold` seconds.
     public mutating func turnEnded(ok: Bool, at now: Double) {
         turnRunning = false
@@ -152,10 +156,17 @@ public struct ClaudeOrb: Hashable, Sendable {
         return l.swirl > 0 || l.breath > 0 || l.sweep || pulse(at: now, reduceMotion: reduceMotion) > 0
     }
 
-    /// Frames per second the view should draw at: low in idle, capped at 30.
+    /// Frames per second while Claude works (thinking, operating, a flash).
+    public static let activeFps: Double = 20
+    /// Frames per second the view should draw at. Owner report (build 704, "once the Claude panel is open it starts to
+    /// lag immediately"): idle draws one still frame and stops (0), except while a flash fades; waiting and error move
+    /// slowly at 12; working at 20 (was 30).
     public func frameRate(at now: Double, reduceMotion: Bool = false) -> Double {
         guard animates(at: now, reduceMotion: reduceMotion) else { return 0 }
-        let s = state(at: now)
-        return s == .idle || s == .error ? 12 : 30
+        switch state(at: now) {
+        case .idle: return pulse(at: now, reduceMotion: reduceMotion) > 0 ? Self.activeFps : 0
+        case .waiting, .error: return 12
+        case .thinking, .operating: return Self.activeFps
+        }
     }
 }
