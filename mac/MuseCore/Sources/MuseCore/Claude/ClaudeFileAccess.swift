@@ -310,7 +310,8 @@ public enum ClaudeFilePolicy {
     public static func verdict(_ ask: ClaudePermissionAsk, mode: ClaudeFileMode, folders: [String], cwd: String, home: String,
                                rules: [ClaudeCommandRule] = [], askAll: Bool = false, shell: ClaudeShellScope? = nil, tools: [String] = [],
                                runCode: Bool = false, fullAccess: Bool = false,
-                               isDirectory: (String) -> Bool = { _ in false }, readScript: (String) -> String? = { _ in nil }) -> ClaudeFileVerdict {
+                               isDirectory: (String) -> Bool = { _ in false }, readScript: (String) -> String? = { _ in nil },
+                               fileExists: (String) -> Bool = { _ in false }) -> ClaudeFileVerdict {
         guard mode == .ask else { return .deny(offRefusal) }
         // A folder too wide to always allow (the disk, home, ~/Library) never counts, however it got on the list.
         let folders = folders.filter { ClaudeAlwaysRules.tooWide($0, home: home) == nil }
@@ -324,7 +325,7 @@ public enum ClaudeFilePolicy {
             if askAll { return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: askAllReason)) }
             // "Full access": everything but deleting outside temp, admin rights and ~/Library runs (Allow once / Deny for those).
             if fullAccess {
-                let f = ClaudeFullAccess.check(cmd, cwd: cwd, home: home, readScript: readScript)
+                let f = ClaudeFullAccess.check(cmd, cwd: cwd, home: home, readScript: readScript, fileExists: fileExists, isDirectory: isDirectory)
                 if f.secret { return .deny(credentialRefusal) }
                 if let why = f.why { return .ask(ClaudeFileCard(action: "Run a command", detail: cmd, folder: nil, alwaysAsksBecause: "Always asks: \(why)")) }
                 return .allow

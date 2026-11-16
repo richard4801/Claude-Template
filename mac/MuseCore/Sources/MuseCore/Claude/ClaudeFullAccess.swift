@@ -18,12 +18,12 @@ public enum ClaudeFullAccess {
     /// git reset --hard, truncate, dd of=, `: > f`, AppleScript delete (integrator review, bundle-26).
     public static let wipesReason = "it deletes or overwrites files"
     /// The program is a variable, eval or a substitution: MUSE can't tell what runs.
-    public static let unreadableReason = "it runs a command built from variables, which MUSE can't read"
+    public static let unreadableReason = "it runs a command it builds at run time"
 
     /// What the confirmation says when the switch is turned on, in plain words.
     public static let confirmTitle = "Give Claude full access on this Mac?"
     public static let confirmAllows = "Claude can run any command, script or code it writes, use the internet and install software, and read, change and upload files in any folder, without asking you first."
-    public static let confirmStillAsks = "It still asks before commands that delete or wipe files outside temporary folders (rm, trash, git reset --hard and the like), before commands it can't read, before anything that needs your admin password, and before touching ~/Library. Moving a file, or saving over one, doesn't ask. It never reads or uploads keys, passwords or tokens, and spending or posting in MUSE still asks as before."
+    public static let confirmStillAsks = "It still asks before commands that delete or overwrite files (rm, trash, git reset and the like). It can't catch every way a program might delete something. It also asks before anything that needs your admin password and before touching ~/Library. It never reads or uploads keys, passwords or tokens, and spending or posting in MUSE still asks as before."
     public static let confirmOff = "You can turn this off at any time in Settings → Claude."
     public static let rowHint = "On: Claude works in any folder without asking, except deleting files, admin rights and ~/Library. Keys, passwords and tokens stay off limits."
 
@@ -46,7 +46,9 @@ public enum ClaudeFullAccess {
         return p != root
     }
 
+    /// `fileExists` and `isDirectory` look at the Mac when it asks: mv/cp or `>` onto a file that already exists overwrites it.
     public static func check(_ command: String, cwd: String, home: String, readScript: (String) -> String? = { _ in nil },
+                             fileExists: (String) -> Bool = { _ in false }, isDirectory: (String) -> Bool = { _ in false },
                              depth: Int = 0) -> Check {
         var r = Check()
         guard depth < 4, let tokens = ClaudeAlwaysRules.lex(command) else { r.why = "MUSE can't read this command"; return r }
@@ -127,7 +129,7 @@ public enum ClaudeFullAccess {
             if prog == "source" || prog == "." {
                 guard let f = words.dropFirst().first, !f.contains("$"),
                       let text = readScript(ClaudeFilePolicy.resolve(expand(f), cwd: runCwd, home: home)) else { return Check(why: unreadableReason) }
-                let inner = check(text, cwd: runCwd, home: home, readScript: readScript, depth: depth + 1)
+                let inner = check(text, cwd: runCwd, home: home, readScript: readScript, fileExists: fileExists, isDirectory: isDirectory, depth: depth + 1)
                 return inner.why != nil ? inner : nil
             }
             if segment.contains(where: { adminPrograms.contains(base($0)) }) { return Check(why: adminReason) }
@@ -191,6 +193,22 @@ public enum ClaudeFullAccess {
             if prog == "cp", plain.first == "/dev/null", plain.count >= 2 {
                 return targetsInTemp(Array(plain.dropFirst())) ? nil : Check(why: wipesReason)
             }
+            // mv/cp onto a file that already exists (outside temp) overwrites it; -n / --no-clobber never does.
+            if prog == "mv" || prog == "cp",
+               !args.contains(where: { $0 == "--no-clobber" || ($0.hasPrefix("-") && !$0.hasPrefix("--") && $0.contains("n")) }) {
+                var dest: String?
+                var srcs = plain
+                if let ti = args.firstIndex(of: "-t"), ti + 1 < args.count {
+                    dest = args[ti + 1]; srcs.removeAll { $0 == args[ti + 1] }
+                } else if plain.count >= 2 {
+                    dest = plain.last; srcs = Array(plain.dropLast())
+                }
+                if let d = dest, !d.contains("$") {
+                    let dp = ClaudeFilePolicy.resolve(expand(d), cwd: runCwd, home: home)
+                    let targets = isDirectory(dp) ? srcs.map { dp + "/" + (expand($0) as NSString).lastPathComponent } : [dp]
+                    if targets.contains(where: { fileExists($0) && !deletable($0) }) { return Check(why: wipesReason) }
+                }
+            }
             if prog == "rsync", args.contains(where: { $0.hasPrefix("--delete") || $0 == "--remove-source-files" }) {
                 return targetsInTemp(Array(plain.suffix(1))) ? nil : Check(why: deletesReason)
             }
@@ -198,7 +216,7 @@ public enum ClaudeFullAccess {
             if let interp = interpreterOf(Array(words)) {
                 for (i, w) in args.enumerated() where i > 0 && ClaudeKindGrants.codeFlags.contains(args[i - 1]) {
                     if ClaudeKindGrants.isShell(interp) {
-                        let inner = check(w, cwd: runCwd, home: home, readScript: readScript, depth: depth + 1)
+                        let inner = check(w, cwd: runCwd, home: home, readScript: readScript, fileExists: fileExists, isDirectory: isDirectory, depth: depth + 1)
                         if inner.why != nil { return inner }
                     } else if codeDeletes(w, base: runCwd) { return Check(why: deletesReason) }
                 }
@@ -206,7 +224,7 @@ public enum ClaudeFullAccess {
                 if let script = args.first(where: { !$0.hasPrefix("-") && $0.contains(".") && !$0.contains("$") }),
                    let text = readScript(ClaudeFilePolicy.resolve(expand(script), cwd: runCwd, home: home)) {
                     if ClaudeKindGrants.isShell(interp) {
-                        let inner = check(text, cwd: runCwd, home: home, readScript: readScript, depth: depth + 1)
+                        let inner = check(text, cwd: runCwd, home: home, readScript: readScript, fileExists: fileExists, isDirectory: isDirectory, depth: depth + 1)
                         if inner.why != nil { return inner }
                     } else if codeDeletes(text, base: runCwd) { return Check(why: deletesReason) }
                 }
@@ -220,9 +238,11 @@ public enum ClaudeFullAccess {
             switch t {
             case .word(let w):
                 if truncating {
+                    // A `>` target: emptying a file that exists outside temp overwrites it (a new file is fine).
                     truncating = false
                     let e = expand(w.text)
-                    if !deletable(ClaudeFilePolicy.resolve(e, cwd: runCwd, home: home)) || e.contains("$") { return Check(why: wipesReason) }
+                    let p = ClaudeFilePolicy.resolve(e, cwd: runCwd, home: home)
+                    if !e.contains("$"), !ClaudeKindGrants.harmless(p), fileExists(p), !deletable(p) { return Check(why: wipesReason) }
                     continue
                 }
                 segment.append(w.text)
@@ -232,8 +252,10 @@ public enum ClaudeFullAccess {
                     heredocPrograms.append(segment.first.map(base) ?? "")
                     continue
                 }
-                // `> f` or `: > f` on its own empties the file.
-                if op == ">" || op == ">|", segment.isEmpty || segment == [":"] || segment == ["true"] { truncating = true; continue }
+                // `> f`, `: > f`, `cmd > f`, `2> f`, `&> f` empty f first (`>>` appends, `>&` duplicates).
+                if op == ">" || op == ">|" || op == "&>" || (op.count > 1 && op.hasSuffix(">") && op.dropLast().allSatisfy(\.isNumber)) {
+                    truncating = true; continue
+                }
                 if op.contains(">") || op.contains("<") { continue }
                 if let c = finish() { return c }
             case .heredoc(let body):
@@ -244,7 +266,7 @@ public enum ClaudeFullAccess {
                     return Check(why: wipesReason)
                 }
                 if let target, ClaudeKindGrants.isShell(target) {
-                    let inner = check(body, cwd: runCwd, home: home, readScript: readScript, depth: depth + 1)
+                    let inner = check(body, cwd: runCwd, home: home, readScript: readScript, fileExists: fileExists, isDirectory: isDirectory, depth: depth + 1)
                     if inner.why != nil { return inner }
                 } else if codeDeletes(body, base: runCwd) {
                     // Python/node code, or a file being written that may be run next: deleting outside temp asks.

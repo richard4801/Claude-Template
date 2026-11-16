@@ -474,7 +474,8 @@ final class ClaudeCodeService: ObservableObject {
                                         readScript: { p in
                                             guard let n = (try? FileManager.default.attributesOfItem(atPath: p)[.size] as? NSNumber)?.intValue, n <= 512 * 1024 else { return nil }
                                             return try? String(contentsOfFile: p, encoding: .utf8)
-                                        })
+                                        },
+                                        fileExists: { FileManager.default.fileExists(atPath: $0) })
     }
 
     private static func cwd(_ threadId: String?) -> String {
