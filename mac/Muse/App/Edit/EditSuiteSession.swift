@@ -47,7 +47,7 @@ final class EditSuiteSession {
     /// A panel the inspector scrolls to once (the timeline's mask badge asks for "Mask & green screen").
     var reveal: String?
     var binTab: EditSuite.BinTab = .takes { didSet { viewChanged() } }
-    /// The Templates panel (EditSuiteTemplates.swift): the library, the picked template and its settings.
+    /// The Templates panel (EditSuiteSession+Templates.swift, Views/Edit/EditSuiteTemplates.swift): the library, the picked template and its settings.
     var templates = EditTemplatePanel()
     /// A template previewed on the real edit (its dry run applied to a copy): the player shows it, nothing is saved.
     private(set) var templatePreview: E.Project?
