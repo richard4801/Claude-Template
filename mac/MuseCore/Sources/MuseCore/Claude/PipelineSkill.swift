@@ -85,7 +85,17 @@ public struct PipelineRollback: Codable, Hashable, Sendable {
     public var rolledBackTo: Int
 }
 
-extension HTTPClaudeAPI {
+/// The calls Settings uses. The server's client (HTTPClaudeAPI) and the demo one (FakeClaudeAPI, review screenshots) both have them.
+public protocol PipelineSkillAPI: Sendable {
+    func pipelineSkill() async throws -> PipelineSkillState
+    func pipelineVersions() async throws -> [PipelineVersion]
+    func pipelineDiff(_ version: Int) async throws -> PipelineDiff
+    func pipelineRollback(to version: Int) async throws -> PipelineRollback
+    func pipelineUndo() async throws -> PipelineRollback
+    func pipelineDecide(_ id: String, approve: Bool) async throws -> PipelineProposal
+}
+
+extension HTTPClaudeAPI: PipelineSkillAPI {
     private struct RollbackBody: Encodable { var version: Int }
     private struct NoBody: Encodable {}
 
@@ -103,4 +113,92 @@ extension HTTPClaudeAPI {
     public func pipelineDecide(_ id: String, approve: Bool) async throws -> PipelineProposal {
         try await call("POST", "v1/pipeline-skill/pending/\(try ClaudeIds.check(id))/\(approve ? "approve" : "decline")", NoBody())
     }
+}
+
+// MARK: Demo (review mode): a skill at version 3 with one small change in the changelog and one big change waiting.
+
+final class FakePipelineSkill: @unchecked Sendable {
+    static let shared = FakePipelineSkill()
+    private let lock = NSLock()
+    private struct Snap { var core: [String]; var pages: [PipelinePage]; var style: [PipelineStyleEntry] }
+    private var history: [(PipelineVersion, Snap)] = []
+    private var pending: [PipelineProposal] = []
+
+    private init() {
+        let rules = ["Never time from the picture. A shot starts on a hit. [proven]", "One stage per note: count the notes before choosing panels. [proven]",
+                     "Before building an effect to hide a weak cut, ask whether the shot should be there at all. [trial]"]
+        let pages = [PipelinePage(name: "cutouts", title: "Cut-outs", status: "proven", score: 4, repeatable: nil, uses: 4),
+                     PipelinePage(name: "hits", title: "Hits: flash, negative, colour split, punch-in", status: "trial", score: 1, repeatable: nil, uses: 1)]
+        let style = [PipelineStyleEntry(id: "hs_1", text: "These edits are cut like comics: panels opening over running video.", times: 1)]
+        let v1 = Snap(core: rules, pages: pages, style: style)
+        var v2 = v1; v2.style.append(PipelineStyleEntry(id: "hs_2", text: "Avoid: “too fast” (the intro cuts)", times: 1))
+        var v3 = v2; v3.pages.append(PipelinePage(name: "whip-pan", title: "Whip pan between moving shots", status: "trial", score: 1, repeatable: nil, uses: 1))
+        let t = Date().timeIntervalSince1970 * 1000
+        history = [
+            (PipelineVersion(version: 1, changelog: [PipelineChangelogLine(what: "Version 1 from the Icon edit", why: "first use", editId: nil, kind: "seed")], by: "seed", createdAt: t - 86_400_000 * 2), v1),
+            (PipelineVersion(version: 2, changelog: [PipelineChangelogLine(what: "House style: “Avoid: “too fast” (the intro cuts)”", why: "owner reaction", editId: "es_demo1", kind: "small")], by: "claude", createdAt: t - 86_400_000), v2),
+            (PipelineVersion(version: 3, changelog: [PipelineChangelogLine(what: "New trial technique “Whip pan between moving shots” (whip-pan)", why: "worked in this edit", editId: "es_demo2", kind: "small")], by: "claude", createdAt: t - 3_600_000), v3),
+        ]
+        pending = [PipelineProposal(id: "pp_demo1", op: "core_remove", why: "the owner cut that shot instead of hiding it twice", reason: "changes a core rule", editId: "es_demo2",
+                                    status: "pending", target: "core", before: rules[2], after: "", version: nil)]
+    }
+    private func locked<T>(_ f: () throws -> T) rethrows -> T { lock.lock(); defer { lock.unlock() }; return try f() }
+    private func add(_ snap: Snap, _ line: PipelineChangelogLine, by: String) -> Int {
+        let v = (history.last?.0.version ?? 0) + 1
+        history.append((PipelineVersion(version: v, changelog: [line], by: by, createdAt: Date().timeIntervalSince1970 * 1000), snap))
+        return v
+    }
+    func state() -> PipelineSkillState {
+        locked {
+            let (v, s) = history.last!
+            return PipelineSkillState(version: v.version, coreChars: 4497 - (3 - s.core.count) * 90, coreBudget: 6000, pages: s.pages, houseStyle: s.style,
+                                      pending: pending, templateHints: [])
+        }
+    }
+    func versions() -> [PipelineVersion] { locked { Array(history.map(\.0).reversed()) } }
+    func diff(_ version: Int) throws -> PipelineDiff {
+        try locked {
+            guard let i = history.firstIndex(where: { $0.0.version == version }) else { throw ApiError("not_found", "Skill version not found") }
+            let b = history[i].1, a: Snap? = i > 0 ? history[i - 1].1 : nil
+            var out: [PipelineDiffChange] = []
+            if a?.core != b.core { out.append(PipelineDiffChange(section: "core", name: "core", before: (a?.core ?? []).joined(separator: "\n"), after: b.core.joined(separator: "\n"))) }
+            for p in b.pages where !(a?.pages.contains(p) ?? false) { out.append(PipelineDiffChange(section: "page", name: p.name, before: "", after: p.title)) }
+            for e in b.style where !(a?.style.contains(e) ?? false) { out.append(PipelineDiffChange(section: "house style", name: e.id, before: "", after: e.text)) }
+            return PipelineDiff(version: version, changes: out)
+        }
+    }
+    func rollback(to version: Int) throws -> PipelineRollback {
+        try locked {
+            guard let target = history.first(where: { $0.0.version == version }) else { throw ApiError("not_found", "Skill version not found") }
+            let v = add(target.1, PipelineChangelogLine(what: "Rolled back to version \(version)", why: "the owner rolled back", editId: nil, kind: "rollback"), by: "owner")
+            return PipelineRollback(version: v, rolledBackTo: version)
+        }
+    }
+    func undo() throws -> PipelineRollback {
+        let cur = locked { history.last!.0.version }
+        guard cur > 1 else { throw ApiError("bad_request", "Nothing to undo") }
+        return try rollback(to: cur - 1)
+    }
+    func decide(_ id: String, approve: Bool) throws -> PipelineProposal {
+        try locked {
+            guard let i = pending.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Proposal not found") }
+            var p = pending.remove(at: i)
+            p.status = approve ? "approved" : "declined"
+            if approve {
+                var s = history.last!.1
+                s.core.removeAll { $0 == p.before }
+                p.version = add(s, PipelineChangelogLine(what: "Core: removed “\(p.before)”", why: "\(p.why) (approved by the owner)", editId: p.editId, kind: "big"), by: "owner")
+            }
+            return p
+        }
+    }
+}
+
+extension FakeClaudeAPI: PipelineSkillAPI {
+    public func pipelineSkill() async throws -> PipelineSkillState { FakePipelineSkill.shared.state() }
+    public func pipelineVersions() async throws -> [PipelineVersion] { FakePipelineSkill.shared.versions() }
+    public func pipelineDiff(_ version: Int) async throws -> PipelineDiff { try FakePipelineSkill.shared.diff(version) }
+    public func pipelineRollback(to version: Int) async throws -> PipelineRollback { try FakePipelineSkill.shared.rollback(to: version) }
+    public func pipelineUndo() async throws -> PipelineRollback { try FakePipelineSkill.shared.undo() }
+    public func pipelineDecide(_ id: String, approve: Bool) async throws -> PipelineProposal { try FakePipelineSkill.shared.decide(id, approve: approve) }
 }
