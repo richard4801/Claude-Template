@@ -117,12 +117,19 @@ extension AppStore {
     }
     func outfitFacesEstimate(_ o: Outfit) -> Double { Double(3 - o.madeFaces) * photoPricing.perEdit }
 
-    /// Redo one of its 7 pictures (0–3 angles, 4–6 faces).
-    func redoOutfitPicture(_ o: Outfit, _ k: Int) {
+    /// Redo one of its 7 pictures (0–3 angles, 4–6 faces), any time (made or missing). `note`: one-off words for it
+    /// ("sneakers on", "use the reference's hair"), sent as an extra line. The old picture stays until the new one arrives.
+    func redoOutfitPicture(_ o: Outfit, _ k: Int, note: String = "") {
         guard OutfitPictures.keys.indices.contains(k) else { return }
+        let n = note.trimmingCharacters(in: .whitespacesAndNewlines)
         remake(o, [k]) { [self] in
-            try await api.redoOutfit(id: o.id, picture: OutfitPictures.keys[k], imageModel: enginePick(.outfit)?.model)
+            try await api.redoOutfit(id: o.id, picture: OutfitPictures.keys[k], imageModel: enginePick(.outfit)?.model, note: n.isEmpty ? nil : n)
         }
+    }
+    /// The server's price for redoing one picture (dryRun); the local estimate when it can't be asked.
+    func outfitRedoPrice(_ o: Outfit, _ k: Int) async -> Double {
+        guard OutfitPictures.keys.indices.contains(k) else { return 0 }
+        return (try? await api.redoOutfitPrice(id: o.id, picture: OutfitPictures.keys[k], imageModel: enginePick(.outfit)?.model)) ?? outfitRedoEstimate(k)
     }
     /// Move a picture to another of its 7 slots (owner 2026-11-12: "the picture in Side is actually the back"): the two
     /// swap, so nothing is lost. Free; the owner or the outfit's maker (the server checks too).

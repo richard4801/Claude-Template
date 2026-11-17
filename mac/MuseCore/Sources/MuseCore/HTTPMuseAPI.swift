@@ -289,10 +289,16 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
     public func addOutfitFaces(id: String, imageModel: String?) async throws -> OutfitFill {
         try await call("POST", "v1/outfits/\(Self.pathKey(id))/faces", OutfitFillBody(imageModel: imageModel))
     }
-    public func redoOutfit(id: String, picture: String, imageModel: String?) async throws -> OutfitFill {
-        try await call("POST", "v1/outfits/\(Self.pathKey(id))/redo", OutfitRedoBody(angle: picture, imageModel: imageModel))
+    public func redoOutfit(id: String, picture: String, imageModel: String?, note: String?) async throws -> OutfitFill {
+        let n = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await call("POST", "v1/outfits/\(Self.pathKey(id))/redo", OutfitRedoBody(angle: picture, imageModel: imageModel, note: n?.isEmpty == false ? n : nil))
     }
-    private struct OutfitRedoBody: Encodable { var angle: String; var imageModel: String? }
+    public func redoOutfitPrice(id: String, picture: String, imageModel: String?) async throws -> Double {
+        let r: OutfitRedoPrice = try await call("POST", "v1/outfits/\(Self.pathKey(id))/redo", OutfitRedoBody(angle: picture, imageModel: imageModel, dryRun: true))
+        return r.cost
+    }
+    private struct OutfitRedoBody: Encodable { var angle: String; var imageModel: String?; var note: String? = nil; var dryRun: Bool? = nil }
+    private struct OutfitRedoPrice: Decodable { var cost: Double }
     public func reorderOutfit(id: String, moves: [OutfitMove]) async throws -> OutfitReorder {
         var r: OutfitReorder = try await call("POST", "v1/outfits/\(Self.pathKey(id))/reorder", OutfitReorderBody(moves: moves))
         r.outfit = absolutize(r.outfit)
