@@ -1,11 +1,12 @@
 import AppKit
 import MuseCore
+import Observation
 import SwiftUI
 
 // Claude's orb (owner, 2026-11-12, Option C2 "alive"; plans/design/claude-panel/orb-alive-*.png, orb-alive-preview.mp4):
 // a glass ball with luminous 3D smoke inside, the glass wobbling, breathing and turning a little with it. Drawn on the GPU
 // by ClaudeOrb.metal (SwiftUI colorEffect), with uniforms from MuseCore's ClaudeOrb (real events only) and
-// ClaudeOrbShader. OrbClock redraws it at the orb's own rate (one still frame in idle, 20 fps while Claude works) and stops when
+// ClaudeOrbShader. OrbTicker redraws it at the orb's own rate (one still frame in idle, 20 fps while Claude works) and stops when
 // nothing moves (Reduce Motion) or the window is hidden.
 
 struct ClaudeOrbView: View {
@@ -19,16 +20,14 @@ struct ClaudeOrbView: View {
     /// false: drawn as one still frame (the small orbs beside a reply or on a card), so only the header's orb (and the
     /// overlay's) keeps a clock (build 704).
     var live = true
-    /// The orb's clock (OrbClock): bumped `fps` times a second while it animates.
-    @State private var tick = 0
 
     private var page: Color { behind ?? t.roles.raised }
 
     var body: some View {
         let orb = box.orb
         let now = Date().timeIntervalSinceReferenceDate
-        let fps = visibility.visible && live ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
-        let _ = tick // each tick of the clock below redraws
+        // A live orb redraws on each tick of the shared clock (OrbTicker); a still one never reads it, so never redraws for it.
+        let _ = live ? OrbTicker.shared.frame : 0
         Group {
             let _ = SnapshotRunner.noteOrbFrame() // review mode only: the idle check counts the frames drawn
             let time = Date().timeIntervalSinceReferenceDate
@@ -44,7 +43,6 @@ struct ClaudeOrbView: View {
                                                      .float(Float(u.wobble)), .float(Float(u.pop)), .color(page)))
         }
         .frame(width: size, height: size)
-        .task(id: fps) { await OrbClock.run(fps: fps) { tick &+= 1 } }
         // The shader's frames stay in the orb's own small layer instead of making the panel around it composite again.
         .drawingGroup()
         .allowsHitTesting(false)
@@ -74,6 +72,7 @@ final class ClaudeOrbBox: ObservableObject {
     func set(_ o: ClaudeOrb) {
         guard o != orb else { return }
         orb = o
+        OrbTicker.shared.update()
         // An idle orb draws only while a flash fades: redraw once after it so the clock stops again.
         let now = Date().timeIntervalSinceReferenceDate
         if o.state(at: now) == .idle, o.pulse(at: now) > 0 {
@@ -87,23 +86,42 @@ final class ClaudeOrbBox: ObservableObject {
     }
 
     /// Something time-based ended (an error's hold, a flash): the views work out their frame rate again.
-    func redraw() { objectWillChange.send() }
+    func redraw() {
+        objectWillChange.send()
+        OrbTicker.shared.update()
+    }
 }
 
-/// The orb's and the edge's clock: calls `tick` `fps` times a second until the view's task is cancelled (the frame rate
-/// changed, or the view went away); at 0 it returns at once, so the view stays one still frame. Build 704, runs 718 and
-/// 722: TimelineView ticked neither with `.animation` nor with a custom timer schedule on the headless runner (1 frame in
-/// 12 s while "thinking"), so the working orb was never measured; a main-actor task that changes view state redraws the
-/// way every other view update does.
-@MainActor
-enum OrbClock {
-    static func run(fps: Double, tick: () -> Void) async {
-        guard fps > 0 else { return }
-        let step = UInt64(1_000_000_000 / fps)
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: step)
-            if Task.isCancelled { return }
-            tick()
+/// The one clock for Claude's orb and the panel's edge (build 704): `frame` goes up at the orb's own rate (0 in idle, 12 waiting
+/// or error, 20 working) while the window can be seen, and the clock stops when nothing moves. Runs 718, 722 and 728:
+/// TimelineView (both schedules) and a per-view `.task` bumping @State drew 1 frame in 12 s on the headless runner, while
+/// the orb's state changes (published by ClaudeOrbBox) did redraw it; this is the same path. @Observable, so only the
+/// views that read `frame` (the live orb and the edge) redraw, never the still orbs beside replies.
+@MainActor @Observable
+final class OrbTicker {
+    static let shared = OrbTicker()
+    private(set) var frame = 0
+    @ObservationIgnored private var clock: Task<Void, Never>?
+    @ObservationIgnored private var fps: Double = 0
+
+    /// The orb's state, the window's visibility or Reduce Motion may have changed: start, re-pace or stop the clock.
+    func update() {
+        let now = Date().timeIntervalSinceReferenceDate
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let want = OrbVisibility.shared.visible ? ClaudeOrbBox.shared.orb.frameRate(at: now, reduceMotion: reduce) : 0
+        guard want != fps else { return }
+        fps = want
+        clock?.cancel()
+        clock = nil
+        guard want > 0 else { return }
+        let step = UInt64(1_000_000_000 / want)
+        clock = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: step)
+                guard let self, !Task.isCancelled else { return }
+                self.frame &+= 1
+                self.update() // a flash faded, an error's hold ended: slower or stopped
+            }
         }
     }
 }
@@ -135,7 +153,9 @@ final class OrbVisibility: ObservableObject {
         let nc = NotificationCenter.default
         for name in [NSApplication.didChangeOcclusionStateNotification, NSApplication.didHideNotification, NSApplication.didUnhideNotification,
                      NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification, NSWindow.didChangeOcclusionStateNotification] {
-            observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.update() } })
+            observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.update(); OrbTicker.shared.update() } // the orb's clock stops while the window can't be seen
+            })
         }
         update()
     }
@@ -146,6 +166,7 @@ final class OrbVisibility: ObservableObject {
     func force(_ on: Bool) {
         forced = on
         update()
+        OrbTicker.shared.update()
     }
 
     private func update() {
@@ -164,16 +185,12 @@ struct ClaudeLivingEdge: View {
     @ObservedObject private var box: ClaudeOrbBox = .shared
     @ObservedObject private var visibility: OrbVisibility = .shared
     var cornerRadius: CGFloat
-    @State private var tick = 0
 
     var body: some View {
         let orb = box.orb
         let now = Date().timeIntervalSinceReferenceDate
-        // Performance (build 704): in idle the edge holds still (its glow is 0.12, the breath on it can't be seen), so an
-        // open panel with nothing happening no longer redraws the whole edge and its 12 pt blur 12 times a second. Any
-        // real activity changes `orb`, which re-runs this body and starts the timeline again.
-        let fps = visibility.visible && orb.state(at: now) != .idle ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
-        let _ = tick
+        // In idle the edge holds still (build 704): the shared clock doesn't run then (the orb's idle rate is 0).
+        let _ = OrbTicker.shared.frame
         Group {
             let time = Date().timeIntervalSinceReferenceDate
             let look = orb.look(at: time, reduceMotion: reduceMotion)
@@ -190,7 +207,6 @@ struct ClaudeLivingEdge: View {
                 shape.stroke(flow, lineWidth: 8).blur(radius: 12).opacity(0.7 * e)
             }
         }
-        .task(id: fps) { await OrbClock.run(fps: fps) { tick &+= 1 } }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

@@ -375,26 +375,26 @@ struct TimelineCanvas: View {
         }
     }
 
-    /// The main clips' own sound, under each clip.
+    /// The main clips' own sound, under each clip. Build 704 (run 728): one Equatable Canvas for the whole lane instead of a
+    /// view per clip (66 on the owner's edit), so a change elsewhere neither re-lays it out nor redraws it. Same drawing.
     private func soundLane(_ trackId: String, width: CGFloat) -> some View {
         let h = Self.laneHeight(.sound(trackId: trackId)) - 12
         let muted = session.project.track(trackId)?.muted == true
+        let track = session.project.track(trackId)
+        let items: [TimelineSoundLane.Clip] = s.blocks(trackId).compactMap { b in
+            guard let id = b.itemId, let c = track?.item(id)?.videoClip else { return nil }
+            return TimelineSoundLane.Clip(x: CGFloat(EditSuite.finiteSeconds(b.startSec)) * z,
+                                          width: max(4, CGFloat(EditSuite.finiteSeconds(b.endSec - b.startSec)) * z),
+                                          peaks: session.waves[c.asset] ?? [], inSec: c.inSec, outSec: c.outSec,
+                                          durationSec: session.project.asset(c.asset)?.durationSec)
+        }
         return ZStack(alignment: .topLeading) {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture { loc in session.scrub(to: Double(loc.x / z), trackId: trackId) }
-            ForEach(s.blocks(trackId)) { b in
-                if let id = b.itemId, let c = session.project.track(trackId)?.item(id)?.videoClip {
-                    let x = CGFloat(EditSuite.finiteSeconds(b.startSec)) * z
-                    let w = max(4, CGFloat(EditSuite.finiteSeconds(b.endSec - b.startSec)) * z)
-                    wave(asset: c.asset, inSec: c.inSec, outSec: c.outSec, width: max(1, w - 12), height: h, kind: .main)
-                        .padding(.horizontal, 6)
-                        .frame(width: w, height: h)
-                        .background(RoundedRectangle(cornerRadius: min(t.radii.control, 8), style: .continuous).fill(t.roles.field))
-                        .offset(x: x, y: 6)
-                        .allowsHitTesting(false)
-                }
-            }
+            TimelineSoundLane(clips: items, height: h, fill: t.roles.field, tint: t.roles.ink2.opacity(0.7), radius: min(t.radii.control, 8))
+                .equatable()
+                .allowsHitTesting(false)
         }
         .opacity(muted ? 0.4 : 1)
         .accessibilityElement(children: .ignore)
@@ -741,17 +741,50 @@ struct TimelineClipWave: View, Equatable {
 
     var body: some View {
         Canvas { ctx, size in
-            guard !peaks.isEmpty else { return }
-            let bars = EditSuite.tileCount(width: Double(size.width), tileWidth: 3)
-            for k in 0..<bars {
-                let src = inSec + (Double(k) + 0.5) / Double(bars) * (outSec - inSec)
-                guard let i = EditSuite.frameIndex(source: src, durationSec: durationSec, fallbackSec: outSec, count: peaks.count) else { return }
-                let pk = Double(peaks[i])
-                let v = CGFloat(pk.isFinite ? min(1, max(0, pk)) : 0) * max(0, size.height - 4)
-                let x = CGFloat(k) * 3 + 1
-                ctx.fill(Path(CGRect(x: x, y: (size.height - v) / 2, width: 2, height: max(1, v))), with: .color(tint))
-            }
+            Self.drawPeaks(ctx, in: CGRect(origin: .zero, size: size), peaks: peaks, inSec: inSec, outSec: outSec, durationSec: durationSec, tint: tint)
         }
         .frame(width: width, height: height)
+    }
+
+    /// Bars every 3 pt across `rect`, each the peak at that point of the source between in and out.
+    static func drawPeaks(_ ctx: GraphicsContext, in rect: CGRect, peaks: [Float], inSec: Double, outSec: Double, durationSec: Double?, tint: Color) {
+        guard !peaks.isEmpty else { return }
+        let bars = EditSuite.tileCount(width: Double(rect.width), tileWidth: 3)
+        for k in 0..<bars {
+            let src = inSec + (Double(k) + 0.5) / Double(bars) * (outSec - inSec)
+            guard let i = EditSuite.frameIndex(source: src, durationSec: durationSec, fallbackSec: outSec, count: peaks.count) else { return }
+            let pk = Double(peaks[i])
+            let v = CGFloat(pk.isFinite ? min(1, max(0, pk)) : 0) * max(0, rect.height - 4)
+            let x = rect.minX + CGFloat(k) * 3 + 1
+            ctx.fill(Path(CGRect(x: x, y: rect.minY + (rect.height - v) / 2, width: 2, height: max(1, v))), with: .color(tint))
+        }
+    }
+}
+
+/// The Sound lane in one Canvas: each main clip's rounded field with its waveform inset 6 pt (as the per-clip views drew it).
+struct TimelineSoundLane: View, Equatable {
+    struct Clip: Equatable {
+        let x: CGFloat
+        let width: CGFloat
+        let peaks: [Float]
+        let inSec: Double
+        let outSec: Double
+        let durationSec: Double?
+    }
+    let clips: [Clip]
+    let height: CGFloat
+    let fill: Color
+    let tint: Color
+    let radius: CGFloat
+
+    var body: some View {
+        Canvas { ctx, _ in
+            for c in clips {
+                let box = CGRect(x: c.x, y: 6, width: c.width, height: height)
+                ctx.fill(RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: box), with: .color(fill))
+                let inner = CGRect(x: c.x + 6, y: 6, width: max(1, c.width - 12), height: height)
+                TimelineClipWave.drawPeaks(ctx, in: inner, peaks: c.peaks, inSec: c.inSec, outSec: c.outSec, durationSec: c.durationSec, tint: tint)
+            }
+        }
     }
 }
