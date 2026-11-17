@@ -200,12 +200,16 @@ struct SuiteResultPane: View {
                     .padding(12)
                     .background(t.surface.opacity(0.92)) }
                     if let j, j.secondsLeft > 0 {
+                        // Wraps at the progress bar's width (run 728: on one line it was wider than a portrait stage card and pushed
+                        // the whole Video suite page 38 pt past a 1000 pt window, cutting Generate).
                         Text("About \(Job.aboutTime(j.secondsLeft)) left · you can leave this screen").font(t.body(11.5)).foregroundStyle(.white.opacity(0.9))
+                            .multilineTextAlignment(.center).lineLimit(2).frame(maxWidth: 180)
                     }
                 } else {
                     Text(state.queueLine).font(t.scale.label.font).foregroundStyle(.white)
                         .padding(.horizontal, 10).frame(height: 24).background(Color.black.opacity(0.8))
                     Text("Leaving is safe · we'll tell you when it's ready").font(t.body(11.5)).foregroundStyle(.white.opacity(0.9))
+                        .multilineTextAlignment(.center).lineLimit(2).frame(maxWidth: 180) // as the line above (run 728)
                 }
             }
             .padding(16)
