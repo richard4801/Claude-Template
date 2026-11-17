@@ -134,6 +134,7 @@ struct OutfitOpenView: View {
                             .keyboardShortcut(store.openOutfitViewing == nil && !editing ? .cancelAction : nil)
                     }
                     // Body angles, then its face close-ups under the first three columns (grouped by space, no boxes).
+                    VStack(alignment: .leading, spacing: Space.s5) {
                     ForEach([Array(0..<4), Array(4..<7)], id: \.self) { row in
                         HStack(alignment: .top, spacing: Space.s4) {
                             ForEach(row, id: \.self) { k in
@@ -145,6 +146,16 @@ struct OutfitOpenView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             if row.count < 4 { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
+                        }
+                    }
+                    }
+                    // Review screenshots only: a popover is its own window (the capture misses it), so the asked tile's
+                    // Redo box is drawn over the grid, above every tile.
+                    .overlay(alignment: .bottomLeading) {
+                        if SnapshotRunner.state.overlay == "outfit_redo", let k = store.outfitRedoAsk, OutfitPictures.keys.indices.contains(k) {
+                            OutfitRedoBox(title: OutfitRedoBox.title(k), estimate: "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))",
+                                          price: { await store.outfitRedoPrice(o, k) }, onCancel: { store.outfitRedoAsk = nil }, onRedo: { _ in })
+                                .background(t.roles.raised).museFloat(t).fixedSize()
                         }
                     }
                     let remaking = store.remakingOutfit[o.id] != nil
@@ -298,8 +309,6 @@ struct OutfitPictureTile: View {
     var onRedo: (String) -> Void
     @Environment(\.theme) private var t
     @State private var hover = false
-    @State private var note = ""
-    @State private var cost: Double?
 
     var body: some View {
         withDrag(Button(action: open) { MediaFrame(ref: ref, ratio: 0.75).opacity(redoing ? 0.45 : 1) }
@@ -312,17 +321,12 @@ struct OutfitPictureTile: View {
                     ProgressView().controlSize(.small).frame(width: 28, height: 28).padding(Space.s2)
                 } else if let redo, hover || asking {
                     RIconButton(systemName: "arrow.clockwise", help: redo) { ask() }.padding(Space.s2)
-                        .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) { redoBox }
+                        .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) {
+                            OutfitRedoBox(title: OutfitRedoBox.title(OutfitPictures.viewerLabels.firstIndex(of: label) ?? 0), estimate: redo,
+                                          price: price, onCancel: { asking = false }, onRedo: go)
+                        }
                 }
             }
-            // Review screenshots only: a popover is its own window, so the snapshot draws the same box under the tile.
-            .overlay(alignment: .bottom) {
-                if asking && inlineBox {
-                    redoBox.background(t.roles.raised).museFloat(t).fixedSize()
-                        .alignmentGuide(.bottom) { d in d[.top] - Space.s2 }
-                }
-            }
-            .zIndex(asking ? 1 : 0)
             .onHover { hover = $0 }
             .contextMenu {
                 if let redo { Button(redo) { ask() } }
@@ -334,36 +338,52 @@ struct OutfitPictureTile: View {
             })
     }
 
-    /// The snapshot runner's review shot of the Redo box (drawn inline, not as a popover window).
+    /// The snapshot runner's review shot of the Redo box (drawn over the grid by OutfitOpenView, not as a popover window).
     private var inlineBox: Bool { SnapshotRunner.state.overlay == "outfit_redo" }
-    private func ask() {
-        note = ""
-        cost = nil
-        asking = true
-    }
-    private func go() {
+    private func ask() { asking = true }
+    private func go(_ note: String) {
         asking = false
         onRedo(note)
     }
-    /// The Redo box: its price (the server's), an optional note for this picture only, and Redo.
-    private var redoBox: some View {
+
+    @ViewBuilder private func withDrag<V: View>(_ v: V) -> some View {
+        if let dragPayload { v.draggable(dragPayload) { MediaFrame(ref: ref, ratio: 0.75).frame(width: 90) } } else { v }
+    }
+}
+
+/// The Redo box of one outfit picture: its title, an optional note for this picture only, Cancel and "Redo · $x" (the
+/// local estimate until the server's dryRun price arrives).
+struct OutfitRedoBox: View {
+    var title: String
+    /// "Redo · $0.03": the local estimate, shown until the server answers.
+    var estimate: String
+    var price: () async -> Double
+    var onCancel: () -> Void
+    var onRedo: (String) -> Void
+    @Environment(\.theme) private var t
+    @State private var note = ""
+    @State private var cost: Double?
+
+    /// "Redo ¾ view", "Redo front view", "Redo face ¾" (the tile captions, sentence case).
+    static func title(_ k: Int) -> String {
+        let c = OutfitPictures.captions.indices.contains(k) ? OutfitPictures.captions[k] : ""
+        let words = c.prefix(1).lowercased() + c.dropFirst()
+        return k < 4 ? "Redo \(words) view" : "Redo \(words)"
+    }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            Text("Redo \(label.lowercased())").scaled(t.scale.body, t.roles.ink)
-            RTextField(placeholder: "Note for this picture (optional), e.g. sneakers on", text: $note, onSubmit: go)
-                .frame(width: 280)
+            Text(title).scaled(t.scale.body, t.roles.ink)
+            RTextField(placeholder: "Note for this picture (optional), e.g. sneakers on", text: $note, onSubmit: { onRedo(note) })
+                .frame(width: 320)
             HStack(spacing: Space.s2) {
                 Spacer()
-                RButton("Cancel", small: true) { asking = false }
-                // The server's price once it answers; the local estimate ("Redo · $0.03") until then.
-                RButton(cost.map { "Redo · \(Pricing.money($0))" } ?? (redo ?? "Redo"), kind: .action, small: true) { go() }
+                RButton("Cancel", small: true, action: onCancel)
+                RButton(cost.map { "Redo · \(Pricing.money($0))" } ?? estimate, kind: .action, small: true) { onRedo(note) }
                     .keyboardShortcut(.defaultAction)
             }
         }
         .padding(Space.s3)
         .task { cost = await price() }
-    }
-
-    @ViewBuilder private func withDrag<V: View>(_ v: V) -> some View {
-        if let dragPayload { v.draggable(dragPayload) { MediaFrame(ref: ref, ratio: 0.75).frame(width: 90) } } else { v }
     }
 }
