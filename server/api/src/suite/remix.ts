@@ -143,6 +143,14 @@ const usable = (m: ModelSpec, o: PickOpts) => {
   if (!o.providers.has(m.provider)) return `${m.provider} not set up`;
   return null;
 };
+/** Character is her and the model can't take a single picture of her (frames from the clip / words only): the result
+ *  would be the person in the clip, never her (owner 2026-11-17: a paid "swap" that sent only the clip's frames). */
+const cantCast = (m: ModelSpec, x: RemixToggles) => {
+  if (x.character?.kind !== 'model') return null;
+  const route = routeOf(m);
+  if (route === 'edit') return null;
+  return route === 'text' || pictureRoom(m, route) === 0 ? 'can’t put her in: it takes no pictures of her' : null;
+};
 const ROUTE_RANK: Record<RemixRoute, number> = { edit: 0, reference: 1, frames: 2, text: 3 };
 
 /**
@@ -156,7 +164,7 @@ export function remixModels(x: RemixToggles, o: PickOpts): (RemixCandidate & { u
   const order = autoOrder(x);
   const rank = (m: ModelSpec) => { const i = order.indexOf(m.id); return i >= 0 ? i : 100 + ROUTE_RANK[routeOf(m)] * 100 + (m.byo ? 50 : 0); };
   return all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i)
-    .map(({ m }) => ({ model: m, support: remixSupport(m, x), unavailable: usable(m, o) }));
+    .map(({ m }) => ({ model: m, support: remixSupport(m, x), unavailable: usable(m, o) ?? cantCast(m, x) }));
 }
 
 export type RemixPick = { model: ModelSpec; support: RemixSupport; why: string | null; tried: { model: string; why: string }[] };
@@ -168,6 +176,8 @@ export function pickRemix(x: RemixToggles, o: PickOpts): RemixPick | { error: st
     if (!m) return { error: 'unknown_model', message: 'That model isn’t in MUSE', tried };
     const off = usable(m, o);
     if (off) return { error: 'engine_unavailable', message: `${name(m)} can’t run right now: ${off}`, tried };
+    const cast = cantCast(m, x);
+    if (cast) return { error: 'engine_unavailable', message: `${name(m)} ${cast} · pick a model that edits the clip, or turn Character off`, tried };
     return { model: m, support: remixSupport(m, x), why: null, tried };
   }
   for (const id of autoOrder(x)) {
