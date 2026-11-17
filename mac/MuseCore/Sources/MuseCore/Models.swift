@@ -258,6 +258,10 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
     /// A set that came out partly (some pictures failed while making it; owner 2026-11-12): "5 of 7 made · Redo the missing
     /// ones", and which of the seven are missing (OutfitPictures.keys names). Nil when it's complete or still being made.
     public var partial: OutfitPartial?
+    /// Pictures the person put in by hand (Upload picture; owner 2026-11-17), by slot key: ["side": "upload"]. Others are generated.
+    public var sources: [String: String]?
+    /// The pictures those uploads replaced, newest last; sending one back with `setOutfitPicture` puts it back.
+    public var replaced: [OutfitReplaced]?
 
     public init(id: String, modelId: String, name: String, mode: String = "describe", description: String = "", angles: [ImageRef?] = [nil, nil, nil, nil],
                 state: String = "ready", prompt: String = "", faces: [ImageRef?]? = nil, createdAt: Int64? = nil, createdBy: String? = nil) {
@@ -274,7 +278,7 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
         self.prompt = prompt
     }
 
-    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces, createdAt, createdBy, partial }
+    enum CodingKeys: String, CodingKey { case id, modelId, name, mode, description, angles, state, prompt, faces, createdAt, createdBy, partial, sources, replaced }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -289,6 +293,8 @@ public struct Outfit: Codable, Hashable, Sendable, Identifiable {
         createdAt = c.o(.createdAt)
         createdBy = c.o(.createdBy)
         partial = c.o(.partial)
+        sources = c.o(.sources)
+        replaced = c.o(.replaced)
     }
 
     public var front: ImageRef? { angles.first ?? nil }

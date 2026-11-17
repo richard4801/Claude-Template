@@ -71,4 +71,38 @@ final class OutfitPagesTests: XCTestCase {
         XCTAssertNil(whole.partial)
         XCTAssertFalse(whole.isMissing(2))
     }
+
+    /// Upload picture (owner 2026-11-17): the outfit's upload marks and replaced pictures decode; the menu's words.
+    func testUploadedPictureDecodesWithPreviousAndWords() throws {
+        let json = #"{"id":"o1","angles":[{"asset":"f"},{"asset":"t"},{"url":"https://x/uploads/u/outfit_1.jpg"},{"asset":"b"}],"sources":{"side":"upload"},"replaced":[{"slot":"side","image":{"asset":"s"},"source":"generated","at":1,"by":"u1"}]}"#
+        let o = try JSONDecoder().decode(Outfit.self, from: Data(json.utf8))
+        XCTAssertTrue(OutfitPictures.isUpload(o, 2))
+        XCTAssertFalse(OutfitPictures.isUpload(o, 0))
+        XCTAssertEqual(OutfitPictures.previous(o, 2), .asset("s"))
+        XCTAssertNil(OutfitPictures.previous(o, 3))
+        XCTAssertEqual(OutfitPictures.replaceQuestion(5), "Replace the Face ¾ picture?")
+        XCTAssertEqual(OutfitPictures.uploadTitle, "Upload picture…", "free: no price on it")
+        let older = try JSONDecoder().decode(Outfit.self, from: Data(#"{"id":"o2","angles":[null,null,null,null]}"#.utf8))
+        XCTAssertNil(older.sources)
+        XCTAssertNil(OutfitPictures.previous(older, 0))
+    }
+
+    /// The demo backend: an upload into a filled slot keeps the old one; putting it back restores it and its mark goes.
+    func testFakeSetOutfitPictureReplacesAndPutsBack() async throws {
+        let api: any MuseAPI = FakeMuseAPI(speed: 0)
+        let o = try await api.listOutfits()[0]
+        let mine = ImageRef(url: "https://x/uploads/u/outfit_9.jpg")
+        let r = try await api.setOutfitPicture(id: o.id, picture: "side", image: mine)
+        XCTAssertEqual(r.replaced, .asset("g_side"))
+        XCTAssertEqual(r.outfit.angles[2], mine)
+        XCTAssertTrue(OutfitPictures.isUpload(r.outfit, 2))
+        XCTAssertEqual(OutfitPictures.previous(r.outfit, 2), .asset("g_side"))
+        let back = try await api.setOutfitPicture(id: o.id, picture: "side", image: .asset("g_side"))
+        XCTAssertEqual(back.outfit.angles[2], .asset("g_side"))
+        XCTAssertFalse(OutfitPictures.isUpload(back.outfit, 2))
+        XCTAssertEqual(OutfitPictures.previous(back.outfit, 2), mine)
+        let face = try await api.setOutfitPicture(id: o.id, picture: "faceTq", image: mine)
+        XCTAssertEqual(face.outfit.faces?.map { $0 != nil }, [false, true, false])
+        XCTAssertNil(face.replaced)
+    }
 }

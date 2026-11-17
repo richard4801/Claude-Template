@@ -180,6 +180,21 @@ public enum OutfitPictures {
         return pics.indices.filter { $0 != from }.map { k in (k, pics[k] == nil ? "Move to \(captions[k])" : "Swap with \(captions[k])") }
     }
 
+    /// The picture in slot `k` was put in by hand (Upload picture), not generated.
+    public static func isUpload(_ o: Outfit, _ k: Int) -> Bool { keys.indices.contains(k) && o.sources?[keys[k]] == "upload" }
+    /// The picture an upload most recently replaced in slot `k` (put it back with `setOutfitPicture`), if any.
+    public static func previous(_ o: Outfit, _ k: Int) -> ImageRef? {
+        guard keys.indices.contains(k) else { return nil }
+        let now = refs(o)[k]
+        return o.replaced?.last { $0.slot == keys[k] && $0.image != now }?.image
+    }
+    /// Asked before an upload replaces a picture: "Replace the Side picture?" (the picture it replaces is kept to put back).
+    public static func replaceQuestion(_ k: Int) -> String { "Replace the \(captions[k]) picture?" }
+    public static let replaceDetail = "The current picture is kept, so you can put it back from the picture's menu."
+    /// Its action titles: free, so no price.
+    public static let uploadTitle = "Upload picture…"
+    public static let putBackTitle = "Put back previous picture"
+
     /// The ones with a picture, in order, with their index (0–6) and viewer label.
     public static func shown(_ o: Outfit) -> [(index: Int, label: String, ref: ImageRef)] {
         refs(o).enumerated().compactMap { i, r in r.map { (i, viewerLabels[i], $0) } }
@@ -196,4 +211,24 @@ public struct OutfitReorder: Codable, Sendable {
     public var outfit: Outfit
     public var changed: [String]
     public init(outfit: Outfit, changed: [String]) { self.outfit = outfit; self.changed = changed }
+}
+
+/// A picture an upload replaced (the outfit's `replaced`, newest last): its slot key, the picture, whether it was an
+/// upload or generated, when and by whom.
+public struct OutfitReplaced: Codable, Hashable, Sendable {
+    public var slot: String
+    public var image: ImageRef
+    public var source: String
+    public var at: Int64?
+    public var by: String?
+    public init(slot: String, image: ImageRef, source: String = "generated", at: Int64? = nil, by: String? = nil) {
+        self.slot = slot; self.image = image; self.source = source; self.at = at; self.by = by
+    }
+}
+/// `POST /v1/outfits/{id}/slot`: the outfit after the picture went in, and the one it replaced (nil for an empty slot).
+public struct OutfitSlotSet: Codable, Sendable {
+    public var outfit: Outfit
+    public var slot: String
+    public var replaced: ImageRef?
+    public init(outfit: Outfit, slot: String, replaced: ImageRef?) { self.outfit = outfit; self.slot = slot; self.replaced = replaced }
 }

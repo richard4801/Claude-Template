@@ -84,6 +84,9 @@ public protocol MuseAPI: AnyObject, Sendable {
     func redoOutfitPrice(id: String, picture: String, imageModel: String?) async throws -> Double
     /// Move pictures between its 7 slots (each move swaps `from` and `to`; free; owner or maker).
     func reorderOutfit(id: String, moves: [OutfitMove]) async throws -> OutfitReorder
+    /// Put a picture she already has (an upload, or one it replaced earlier) in one of its 7 slots (`OutfitPictures.keys`),
+    /// empty or filled. Free (owner 2026-11-17).
+    func setOutfitPicture(id: String, picture: String, image: ImageRef) async throws -> OutfitSlotSet
 
     // Uploads (HTTP: presign → PUT → confirm, falling back to a multipart upload). `progress` reports 0…1.
     func uploadImage(name: String, data: Data, mime: String, progress: UploadProgress?) async throws -> ImageRef

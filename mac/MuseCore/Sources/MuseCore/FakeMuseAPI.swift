@@ -724,6 +724,29 @@ public actor FakeMuseAPI: MuseAPI {
         return OutfitReorder(outfit: outfits[i], changed: changed)
     }
 
+    public func setOutfitPicture(id: String, picture: String, image: ImageRef) throws -> OutfitSlotSet {
+        guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+        guard let k = OutfitPictures.keys.firstIndex(of: picture) else { throw ApiError("bad_request", "slot: front, tq, side, back, face, faceTq or profile") }
+        var pics = OutfitPictures.refs(outfits[i])
+        let old = pics[k]
+        var replaced = outfits[i].replaced ?? []
+        let back = replaced.lastIndex { $0.image == image }
+        let source = back.map { replaced[$0].source } ?? "upload"
+        replaced.removeAll { $0.image == image }
+        if let old, old != image {
+            replaced.append(OutfitReplaced(slot: picture, image: old, source: outfits[i].sources?[picture] ?? "generated", at: Int64(Date().timeIntervalSince1970 * 1000), by: "u_me"))
+        }
+        pics[k] = image
+        outfits[i].angles = Array(pics.prefix(4))
+        if k >= 4 || outfits[i].faces != nil { outfits[i].faces = Array(pics.suffix(3)) }
+        var sources = outfits[i].sources ?? [:]
+        sources[picture] = source == "upload" ? "upload" : nil
+        outfits[i].sources = sources.isEmpty ? nil : sources
+        outfits[i].replaced = replaced.isEmpty ? nil : Array(replaced.suffix(30))
+        hub.emit(ApiEvent(type: "outfit", outfit: outfits[i]))
+        return OutfitSlotSet(outfit: outfits[i], slot: picture, replaced: old)
+    }
+
     public func redoOutfitPrice(id: String, picture: String, imageModel: String?) throws -> Double {
         guard outfits.contains(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
         guard OutfitPictures.keys.contains(picture) else { throw ApiError("bad_request", "angle: front, tq, side, back, face, faceTq or profile") }

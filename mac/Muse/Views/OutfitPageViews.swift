@@ -1,6 +1,7 @@
 import AppKit
 import MuseCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Her outfits on the character page (plans/outfit-head-looks.md §4): one folder per outfit (its front, name and date),
 /// 8 per page in four columns that fill the width, newest first, and "‹ 1 of 3 ›" under the grid. ← / → turn the page
@@ -140,7 +141,8 @@ struct OutfitOpenView: View {
                             ForEach(row, id: \.self) { k in
                                 VStack(alignment: .leading, spacing: Space.s2) {
                                     picture(o, k, items: items, filling: filling)
-                                        .dropDestination(for: String.self) { got, _ in dropped(o, on: k, got) }
+                                        // Another of its pictures (a swap) or a photo file from Finder (Upload picture).
+                                        .onDrop(of: [.fileURL, .utf8PlainText], isTargeted: nil) { dropped(o, on: k, $0) }
                                     Text(OutfitPictures.captions[k]).scaled(t.scale.caption, t.roles.ink2)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -240,7 +242,9 @@ struct OutfitOpenView: View {
         let ref = OutfitPictures.refs(o)[k]
         let label = OutfitPictures.viewerLabels[k]
         let redoing = store.remakingOutfit[o.id]?.contains(k) == true
-        let busy = (redoing && ref == nil) || (filling && k < 4 && ref == nil)
+        let uploading = store.uploadingOutfit[o.id]?.contains(k) == true
+        let canUpload = store.canUploadOutfitPicture(o)
+        let busy = ((redoing || uploading) && ref == nil) || (filling && k < 4 && ref == nil)
         if busy {
             SkeletonBlock(ratio: 0.75, radius: t.radii.container)
         } else if let ref, let at = items.firstIndex(where: { $0.ref == ref && $0.label == label }) {
@@ -252,31 +256,72 @@ struct OutfitOpenView: View {
                               dragPayload: free ? Self.payload(o.id, k) : nil,
                               onMove: { store.moveOutfitPicture(o, from: k, to: $0) },
                               redoing: redoing,
+                              uploading: uploading,
+                              uploaded: OutfitPictures.isUpload(o, k),
+                              onUpload: canUpload ? { store.uploadOutfitPicture(o, k) } : nil,
+                              onPutBack: canUpload && OutfitPictures.previous(o, k) != nil ? { store.putBackOutfitPicture(o, k) } : nil,
                               asking: Binding(get: { store.outfitRedoAsk == k }, set: { store.outfitRedoAsk = $0 ? k : nil }),
                               price: { await store.outfitRedoPrice(o, k) },
                               open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
                               onRedo: { store.redoOutfitPicture(o, k, note: $0) })
         } else if o.isMissing(k) && store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil {
-            // Missing from a set that came out partly: Redo it, priced (the rest of the set was kept and charged).
-            Color.clear.aspectRatio(0.75, contentMode: .fit)
-                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
-                .overlay {
-                    RButton("Redo · \(Pricing.money(store.outfitRedoEstimate(k)))", small: true) { store.redoOutfitPicture(o, k) }
+            // Missing from a set that came out partly: Redo it, priced (the rest of the set was kept and charged), or
+            // upload a picture she already has (free, so no price).
+            emptySlot(label) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Space.s2) { redoButton(o, k); uploadButton(o, k) }
+                    VStack(spacing: Space.s2) { redoButton(o, k); uploadButton(o, k) }
                 }
-                .accessibilityLabel("\(label) missing")
+            }
+            .contextMenu { emptyMenu(o, k) }
+        } else if canUpload {
+            emptySlot(label) { uploadButton(o, k) }
+                .contextMenu { emptyMenu(o, k) }
         } else {
-            Color.clear.aspectRatio(0.75, contentMode: .fit)
-                .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
-                .accessibilityLabel("\(label) missing")
+            emptySlot(label) { EmptyView() }
         }
+    }
+
+    private func emptySlot<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
+        Color.clear.aspectRatio(0.75, contentMode: .fit)
+            .background(RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(t.roles.field))
+            .overlay { content() }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("\(label) missing")
+    }
+    private func redoButton(_ o: Outfit, _ k: Int) -> some View {
+        RButton("Redo · \(Pricing.money(store.outfitRedoEstimate(k)))", small: true) { store.redoOutfitPicture(o, k) }
+    }
+    private func uploadButton(_ o: Outfit, _ k: Int) -> some View {
+        RButton("Upload", small: true) { store.uploadOutfitPicture(o, k) }
+            .help("Upload a picture you already have (free). You can also drop a photo here.")
+    }
+    @ViewBuilder private func emptyMenu(_ o: Outfit, _ k: Int) -> some View {
+        Button(OutfitPictures.uploadTitle) { store.uploadOutfitPicture(o, k) }
+        if OutfitPictures.previous(o, k) != nil { Button(OutfitPictures.putBackTitle) { store.putBackOutfitPicture(o, k) } }
     }
 
     /// Drag and drop between slots: the dragged picture is "<outfit id>#<slot index>"; dropping it on another slot swaps them.
     static func payload(_ outfitId: String, _ k: Int) -> String { "\(outfitId)#\(k)" }
-    private func dropped(_ o: Outfit, on k: Int, _ got: [String]) -> Bool {
-        guard let s = got.first, let hash = s.lastIndex(of: "#"), String(s[..<hash]) == o.id,
-              let from = Int(s[s.index(after: hash)...]), from != k, store.canChange(o) else { return false }
-        store.moveOutfitPicture(o, from: from, to: k)
+    /// A photo file dropped from Finder goes into the slot (Upload picture; replacing a picture asks first); a dragged
+    /// picture of this outfit swaps.
+    private func dropped(_ o: Outfit, on k: Int, _ providers: [NSItemProvider]) -> Bool {
+        if let p = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) {
+            let st = store
+            guard st.canUploadOutfitPicture(o) else { return false }
+            _ = p.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in st.uploadOutfitPicture(o, k, file: url) }
+            }
+            return true
+        }
+        let st = store
+        guard st.canChange(o), let p = providers.first(where: { $0.canLoadObject(ofClass: String.self) }) else { return false }
+        _ = p.loadObject(ofClass: String.self) { got, _ in
+            guard let s = got, let hash = s.lastIndex(of: "#"), String(s[..<hash]) == o.id,
+                  let from = Int(s[s.index(after: hash)...]), from != k else { return }
+            Task { @MainActor in st.moveOutfitPicture(o, from: from, to: k) }
+        }
         return true
     }
 
@@ -293,8 +338,9 @@ struct OutfitMoveTarget: Hashable {
     var title: String
 }
 
-/// One outfit picture: the image, a Redo button on hover (owner or maker; its price in the tooltip), and in its menu Redo
-/// and "Move to…" (the other 6 slots). Drag it onto another slot to swap them.
+/// One outfit picture: the image, Upload picture (free, anyone) and Redo (owner or maker; its price in the tooltip) on
+/// hover, and in its menu Redo, Upload picture…, Put back previous picture and "Move to…" (the other 6 slots). Drag it
+/// onto another slot to swap them; drop a photo file on it to upload into that slot (it asks before replacing).
 struct OutfitPictureTile: View {
     var ref: ImageRef
     var label: String
@@ -306,6 +352,14 @@ struct OutfitPictureTile: View {
     var onMove: (Int) -> Void = { _ in }
     /// Being made again: the old picture stays, dimmed, until the new one arrives.
     var redoing = false
+    /// A new picture is uploading into this slot: the old one stays, dimmed, until it's in.
+    var uploading = false
+    /// Put in by hand (Upload picture), said in its accessibility label.
+    var uploaded = false
+    /// Upload picture (free; anyone in the studio), nil while the outfit is busy.
+    var onUpload: (() -> Void)?
+    /// Put back the picture an upload replaced here, when there is one.
+    var onPutBack: (() -> Void)?
     /// Its Redo box is open (the store holds which one, so one box at a time).
     @Binding var asking: Bool
     /// The server's price for a redo (dryRun), asked when the Redo box opens.
@@ -317,31 +371,43 @@ struct OutfitPictureTile: View {
     @State private var hover = false
 
     var body: some View {
-        withDrag(Button(action: open) { MediaFrame(ref: ref, ratio: 0.75).opacity(redoing ? 0.45 : 1) }
+        withDrag(Button(action: open) { MediaFrame(ref: ref, ratio: 0.75).opacity(redoing || uploading ? 0.45 : 1) }
             .buttonStyle(.plain)
-            .help(redoing ? "Making \(label.lowercased()) again" : "View \(label.lowercased()) full size")
-            .accessibilityLabel(redoing ? "Making \(label.lowercased()) again" : "View \(label.lowercased()) full size")
+            .help(busyWords ?? "View \(label.lowercased()) full size")
+            .accessibilityLabel(busyWords ?? "View \(label.lowercased()) full size\(uploaded ? ", uploaded" : "")")
             .overlay(alignment: .topTrailing) {
-                // Being redone: the old picture, dimmed, with a small progress mark where Redo sits.
-                if redoing {
+                // Being redone or uploaded: the old picture, dimmed, with a small progress mark where the buttons sit.
+                if redoing || uploading {
                     ProgressView().controlSize(.small).frame(width: 28, height: 28).padding(Space.s2)
-                } else if let redo, hover || asking {
-                    RIconButton(systemName: "arrow.clockwise", help: redo) { ask() }.padding(Space.s2)
-                        .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) {
-                            OutfitRedoBox(title: OutfitRedoBox.title(OutfitPictures.viewerLabels.firstIndex(of: label) ?? 0), estimate: redo,
-                                          price: price, onCancel: { asking = false }, onRedo: go)
+                } else if hover || asking, redo != nil || onUpload != nil {
+                    HStack(spacing: Space.s1) {
+                        if let onUpload { RIconButton(systemName: "square.and.arrow.up", help: "Upload picture (free)") { onUpload() } }
+                        if let redo {
+                            RIconButton(systemName: "arrow.clockwise", help: redo) { ask() }
+                                .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) {
+                                    OutfitRedoBox(title: OutfitRedoBox.title(OutfitPictures.viewerLabels.firstIndex(of: label) ?? 0), estimate: redo,
+                                                  price: price, onCancel: { asking = false }, onRedo: go)
+                                }
                         }
+                    }
+                    .padding(Space.s2)
                 }
             }
             .onHover { hover = $0 }
             .contextMenu {
                 if let redo { Button(redo) { ask() } }
+                if let onUpload { Button(OutfitPictures.uploadTitle) { onUpload() } }
+                if let onPutBack { Button(OutfitPictures.putBackTitle) { onPutBack() } }
                 if !moves.isEmpty {
                     Menu("Move to…") {
                         ForEach(moves, id: \.self) { m in Button(m.title) { onMove(m.index) } }
                     }
                 }
             })
+    }
+
+    private var busyWords: String? {
+        redoing ? "Making \(label.lowercased()) again" : uploading ? "Uploading \(label.lowercased())" : nil
     }
 
     /// The snapshot runner's review shot of the Redo box (drawn over the grid by OutfitOpenView, not as a popover window).
