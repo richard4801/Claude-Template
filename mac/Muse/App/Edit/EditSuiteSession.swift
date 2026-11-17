@@ -168,6 +168,10 @@ final class EditSuiteSession {
     @ObservationIgnored var liveTasks: [Task<Void, Never>] = []
     @ObservationIgnored var flushTask: Task<Void, Never>?
     @ObservationIgnored var applyingRemote = false
+    /// Changes from the live session arriving close together: the newest waits for the end of the throttle's gap (build 704).
+    @ObservationIgnored var remoteThrottle = RemoteChangeThrottle()
+    @ObservationIgnored var remotePending: (project: E.Project, entry: EditHistoryEntry?)?
+    @ObservationIgnored var remoteTask: Task<Void, Never>?
     @ObservationIgnored var nextChangeLabel: String?
     /// This Mac's edits not on the server yet, per take (never dropped silently).
     @ObservationIgnored let drafts = EditSessionDrafts.standard
@@ -306,6 +310,8 @@ final class EditSuiteSession {
     }
 
     func close() {
+        remoteTask?.cancel()
+        remotePending = nil
         closed = true
         saveViewNow()
         viewTracking = false
@@ -327,6 +333,7 @@ final class EditSuiteSession {
     @discardableResult
     func edit(_ f: (inout EditSuiteState) -> Bool) -> Bool {
         guard isReady, !busy else { return false }
+        showPendingRemote() // a held change from Claude goes first, so this edit lands on top of it, never under it
         if !playing { state.playhead = playhead }
         let before = state.project
         // The closure works on a copy (owner crash 2026-11-08): `f(&state)` held exclusive access to the session's state for
@@ -345,6 +352,7 @@ final class EditSuiteSession {
     /// A timeline drag (trim, move): one undo step for the whole gesture; the preview follows (debounced).
     func beginGesture() {
         guard isReady, !busy else { return }
+        showPendingRemote()
         if !playing { state.playhead = playhead }
         state.beginGesture()
     }

@@ -236,3 +236,12 @@ MuseCore on Linux (Swift 6.0.3): 1046 tests, 0 failures (26 skipped). The 7 new 
 ### Edit while Claude patches (second commit)
 
 Static read of the path: a patch from the live session lands in `showRemote` → `state.applyRemote` → `projectChanged`. That rebuilds the player item 120 ms later (debounced, keeping the playhead), and makes filmstrips and waveforms only for assets that have none yet (cached by asset id, so a patch doesn't regenerate them). The big edit check gains step 7, "Claude patches into the big edit": 20 patches at 2 a second (text changes and main-shot framing, alternately, through the fake session as `apply_edit_ops` sends them). Each must show within 2 s. The step logs the CPU median (fails above 80 %), the preview rebuilds it caused, the main thread's heaviest frames, and the idle CPU afterwards (fails above 25 %). Fixes on this path wait for those numbers.
+
+### Run 718 (bundle 31): Claude's patches failed the new step, and the orb didn't tick on CI
+
+- **Step 7 failed:** 20 patches at 2/s ran at a 91 % CPU median (windows 75 77 97 93 91), the slowest took 2.63 s to show, and there were 20 preview rebuilds. In the main-thread sample, about 2,990 of 3,185 samples were in SwiftUI's graph update. That means the whole editor was re-diffed per patch: one `EditSuiteState` value carries the project, so every view reading it updates. Smaller costs: `History.adoptRemote` re-encoded and diffed both projects through `JSONValue`, and `mirrorLive` reset the History list on every update.
+- **Fixes:**
+  - `RemoteChangeThrottle` (MuseCore): a change from the live session shows at once after a quiet moment. While changes keep coming, the newest is shown at most once a second; each carries the whole project, so nothing is lost. A held change is shown before any local edit or drag starts, so a local edit always lands on top of it.
+  - `adoptRemote` skips the diff when there are no local undo or redo steps to carry over.
+  - `liveHistory` is set only when it changes.
+- **Orb:** run 718 logged state thinking, wants 20 fps, window visible, but only 1 frame drawn in 12 s. The `.animation` TimelineView schedule follows the display's refresh, which the headless runner doesn't have, so the 0.0 % for the working orb measured nothing. The orb and the edge now run on `OrbSchedule`, a plain timer (one frame and stop at 0 fps; at most 4 fps in the system's low-frequency mode), so CI measures the real cost.
