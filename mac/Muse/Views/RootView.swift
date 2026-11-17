@@ -229,7 +229,7 @@ struct TitleBar: View {
                 if let p = store.uploadProgress {
                     HStack(spacing: 8) {
                         Text("Uploading \(Int((p * 100).rounded()))%").font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
-                        RProgress(value: p).frame(width: 60)
+                        RProgress(value: p).frame(minWidth: 16, idealWidth: 60, maxWidth: 60) // gives way in narrow windows (as below)
                     }
                     .padding(.horizontal, Space.s2)
                     .frame(height: 28)
@@ -241,7 +241,9 @@ struct TitleBar: View {
                         HStack(spacing: Space.s2) {
                             Text(r.isWaiting ? (r.queuePosition.map { $0 <= 1 ? "Waiting to start" : "#\($0) in line" } ?? "Waiting to start") : "Rendering \(Int(r.progress.rounded()))%")
                                 .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
-                            RProgress(value: r.progress / 100).frame(width: 60)
+                            // Gives way in narrow windows (run 728/735: at a fixed 60 pt, with a render running, theme C's title bar
+                            // needed more than 1000 pt and pushed the whole window's content past its right edge, cutting Generate).
+                            RProgress(value: r.progress / 100).frame(minWidth: 16, idealWidth: 60, maxWidth: 60)
                         }
                         .padding(.horizontal, Space.s2)
                         .frame(height: 28)
