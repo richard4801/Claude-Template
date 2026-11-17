@@ -85,8 +85,8 @@ describe('prompt library (unit)', () => {
       'outfit.face': 'FACE {angle}', 'video.replicate.summary': 'RSUM', 'video.edit.detailed': 'EDET {outfit}', 'lora.variation': 'VAR {variation}', 'lora.variations': 'one\ntwo',
       'template.locked': 'LOCKED {name}' };
     expect(E.characterSheetShot(id, E.SHEET_ANGLES[0], t).text).toContain(`SHEET face · front\nStyle: CAM, HOUSE.\n${DEFAULT_TEXTS['sheet.realism']}\nNever add: rings, aliens, hats.`);
-    expect(E.outfitEditPrompt(E.OUTFIT_ANGLES[3], t)).toBe(`EDIT full body back view\n${E.outfitFigure('the first image')}`);
-    expect(E.outfitFacePrompt(1, t)).toBe('FACE face close-up from three-quarter view');
+    expect(E.outfitEditPrompt(E.OUTFIT_ANGLES[3], t)).toBe(`EDIT full body back view\n${E.outfitFigure('the first image')}\n${DEFAULT_TEXTS['sheet.realism']}`);
+    expect(E.outfitFacePrompt(1, t)).toBe(`FACE face close-up from three-quarter view ${DEFAULT_TEXTS['sheet.realism']}`);
     expect(E.replicateSwap({ identity: id, referenceLabels: ['face, front'] }, t).text).toContain('summary:\nRSUM\n');
     expect(E.videoSwap({ identity: id, outfit: { name: 'Knit' } }, t).detailedDescription).toBe("EDET knit <Subject 2>'s mouth follows <Video 1> and is in sync with <Audio 1>'s speech.");
     expect(exampleFor(PROMPT_DEFS.find(p => p.key === 'lora.variation')!, t)).toMatch(/VAR one$/);
@@ -271,10 +271,10 @@ describe('shoot references and prompt library (API, fake Replicate)', () => {
     // The owner's text, then the body-angle line (her own body photo of that angle goes with each edit).
     const body = ' The last image shows her figure from this angle: match her body shape and proportions only, not its clothes or background.';
     // Then her figure (owner 2026-11-16), from that last image.
-    const figure = `\n${DEFAULT_TEXTS['outfit.figure']!.replace('{body}', 'the last image')}`;
+    const figure = `\n${DEFAULT_TEXTS['outfit.figure']!.replace('{body}', 'the last image')}\n${DEFAULT_TEXTS['sheet.realism']}`;
     expect(set.slice(1, 4).map(p => p.input.prompt)).toEqual(['OUTFIT EDIT full body three-quarter view.', 'OUTFIT EDIT full body side view.', 'OUTFIT EDIT full body back view.'].map(t => t + body + figure));
     // Then its three face close-ups (owner 2026-11-11), each an edit of her base face photo of that angle.
-    expect(set.slice(4).map(p => p.input.prompt)).toEqual(['OUTFIT FACE face close-up from the front.', 'OUTFIT FACE face close-up from three-quarter view.', 'OUTFIT FACE face close-up in profile (side view).']);
+    expect(set.slice(4).map(p => p.input.prompt)).toEqual(['OUTFIT FACE face close-up from the front.', 'OUTFIT FACE face close-up from three-quarter view.', 'OUTFIT FACE face close-up in profile (side view).'].map(f => `${f} ${DEFAULT_TEXTS['sheet.realism']}`));
     // Enhance.
     const n2 = fake.state.creates.length;
     const en = (await tess.req('POST', `/v1/models/${modelId}/enhance`, { realism: 'subtle', upscale: 'off', slots: ['face'] })).body;

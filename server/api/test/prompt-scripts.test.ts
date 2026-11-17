@@ -41,10 +41,10 @@ describe('defaults reproduce the pre-script prompts exactly', () => {
         // The same lines, plus her figure after the task (owner 2026-11-16).
         const was = E.outfitAngle(demo, outfit, a, 421337), now = B.outfitAngle(demo, outfit, a, 421337);
         const figure = B.outfitFigure(B.FIGURE_DEFAULT);
-        expect(now.text).toBe(was.text.replace(/^(Task: .*)$/m, `$1\n${figure}`));
-        expect(now.slots.filter(x => x.layer !== 'figure')).toEqual(was.slots);
+        expect(now.text).toBe(was.text.replace(/^(Task: .*)$/m, `$1\n${figure}`).replace(/^(Style: .*)$/m, `$1\n${DEFAULT_TEXTS['sheet.realism']}`));
+        expect(now.slots.filter(x => x.layer !== 'figure' && (x.layer as string) !== 'realism')).toEqual(was.slots);
       }
-    for (const a of E.OUTFIT_ANGLES) expect(B.outfitEditPrompt(a)).toBe(`${E.outfitEditPrompt(a)}\n${B.outfitFigure('the first image')}`);
+    for (const a of E.OUTFIT_ANGLES) expect(B.outfitEditPrompt(a)).toBe(`${E.outfitEditPrompt(a)}\n${B.outfitFigure('the first image')}\n${DEFAULT_TEXTS['sheet.realism']}`);
     expect(B.loraCandidate(demo, E.SHEET_ANGLES[0], 13).text).toBe(`${E.characterSheetShot(demo, E.SHEET_ANGLES[0]).text}\nVariation: studio softbox, looking over shoulder.`);
     expect(B.enhancePrompt()).toBe(DEFAULT_TEXTS['enhance.prompt']);
   });
@@ -73,8 +73,8 @@ describe('defaults reproduce the pre-script prompts exactly', () => {
     expect(Live.collageLine).toBe(B.collageLine);
   });
   it('outfit face close-ups: front, ¾ and side fill the angle words into outfit.face', () => {
-    expect(Live.outfitFacePrompt(0)).toBe(DEFAULT_TEXTS['outfit.face']!.replace('{angle}', 'face close-up from the front'));
-    expect(Live.outfitFacePrompt(2, { ...DEFAULT_TEXTS, 'outfit.face': 'FACE {angle}' })).toBe('FACE face close-up in profile (side view)');
+    expect(Live.outfitFacePrompt(0)).toBe(`${DEFAULT_TEXTS['outfit.face']!.replace('{angle}', 'face close-up from the front')} ${DEFAULT_TEXTS['sheet.realism']}`);
+    expect(Live.outfitFacePrompt(2, { ...DEFAULT_TEXTS, 'outfit.face': 'FACE {angle}', 'sheet.realism': '' })).toBe('FACE face close-up in profile (side view)');
   });
   it('video swaps (speaking): the details gain the speaking mouth line; the user section moved out of the details', () => {
     const labels = ['face, front', 'face, profile', 'body, front', 'body, ¾', 'body, back', 'outfit, front'];

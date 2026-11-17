@@ -211,7 +211,9 @@ export const outfitKeepAngle = (k: OutfitKeep, t: PromptTexts = DEFAULT_TEXTS) =
 /** The outfit's face close-ups, in the order stored on the outfit (`outfit.faces`): front, ¾, side. */
 export const OUTFIT_FACES = [{ key: 'face', label: 'Face · front', words: 'face close-up from the front' }, { key: 'faceTq', label: 'Face · ¾', words: 'face close-up from three-quarter view' },
   { key: 'profile', label: 'Face · side', words: 'face close-up in profile (side view)' }] as const;
-export const outfitFacePrompt = (i: number, t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.face']!, { angle: OUTFIT_FACES[i]!.words });
+/** An outfit face close-up: the owner's text, then the real-skin line (sheet.realism, owner 2026-11-17). */
+export const outfitFacePrompt = (i: number, t: PromptTexts = DEFAULT_TEXTS) =>
+  [fill(t['outfit.face']!, { angle: OUTFIT_FACES[i]!.words }), (t['sheet.realism'] ?? '').trim()].filter(Boolean).join(' ');
 
 /** The four angles. `bodies[i]`: which image shows her figure for angle i ("her body photo (image 3)"); default her body photos.
  *  `photos[i]`: which image shows the outfit photo for angle i ("image 5"), for an outfit made from a photo. */

@@ -2963,6 +2963,12 @@
      "pick": "first"
     },
     {
+     "id": "realism",
+     "label": "Realism",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
      "id": "negative",
      "label": "Never add",
      "kind": "system",
@@ -3008,6 +3014,10 @@
     {
      "id": "style",
      "label": "Style"
+    },
+    {
+     "id": "realism",
+     "label": "Realism"
     },
     {
      "id": "negative",
@@ -3092,6 +3102,7 @@
     "outfit.task",
     "outfit.figure",
     "shoot.style",
+    "sheet.realism",
     "shoot.never",
     "outfit.seed"
    ],
@@ -3233,6 +3244,14 @@
      "block": "shoot.style"
     },
     {
+     "id": "realism",
+     "label": "Sheet realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "sheet.realism",
+     "locked": true
+    },
+    {
      "id": "never",
      "label": "Never add",
      "target": "negative",
@@ -3385,6 +3404,14 @@
      "block": "shoot.style"
     },
     {
+     "id": "realism",
+     "label": "Sheet realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "sheet.realism",
+     "locked": true
+    },
+    {
      "id": "never",
      "label": "Never add",
      "target": "negative",
@@ -3424,6 +3451,12 @@
      "label": "Figure",
      "kind": "system",
      "pick": "first"
+    },
+    {
+     "id": "realism",
+     "label": "Realism",
+     "kind": "system",
+     "pick": "first"
     }
    ],
    "values": [],
@@ -3435,6 +3468,10 @@
     {
      "id": "figure",
      "label": "Figure"
+    },
+    {
+     "id": "realism",
+     "label": "Realism"
     }
    ],
    "vars": [
@@ -3451,7 +3488,8 @@
    ],
    "blocks": [
     "outfit.edit",
-    "outfit.figure"
+    "outfit.figure",
+    "sheet.realism"
    ],
    "variants": [],
    "rules": [
@@ -3469,6 +3507,14 @@
      "when": [],
      "block": "outfit.figure",
      "locked": true
+    },
+    {
+     "id": "realism",
+     "label": "Sheet realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "sheet.realism",
+     "locked": true
     }
    ],
    "defaultRules": [
@@ -3485,6 +3531,14 @@
      "target": "figure",
      "when": [],
      "block": "outfit.figure",
+     "locked": true
+    },
+    {
+     "id": "realism",
+     "label": "Sheet realism (always)",
+     "target": "realism",
+     "when": [],
+     "block": "sheet.realism",
      "locked": true
     }
    ],

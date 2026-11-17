@@ -26,7 +26,7 @@ describe('the figure line', () => {
   });
   it('the edits of the front (¾, side, back) and the pieces kept from her base end with it', () => {
     expect(E.outfitEditPrompt(E.OUTFIT_ANGLES[2], DEFAULT_TEXTS, 'the last image', 'NOTE.')).toBe(
-      `${DEFAULT_TEXTS['outfit.edit']!.replace('{angle}', 'full body side view')} NOTE.\n${FIGURE('the last image')}`);
+      `${DEFAULT_TEXTS['outfit.edit']!.replace('{angle}', 'full body side view')} NOTE.\n${FIGURE('the last image')}\n${DEFAULT_TEXTS['sheet.realism']}`);
     const keep = { keep: { top: true } };
     expect(E.outfitKeepFront(keep, 'a red skirt')).toMatch(new RegExp(`\\n${FIGURE('the first image').replace(/[().]/g, '\\$&')}$`));
     // The face close-ups are face only: they never carry a body line.
