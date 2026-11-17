@@ -5,6 +5,7 @@ import type { EditTool } from '../editor/mcpTools.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
 import { appCall, slim } from './appCall.js';
 import { assistOf } from '../suite/assist.js';
+import { JOB_SENT_MEDIA } from './sentMedia.js';
 
 const str = (d: string, max?: number) => ({ type: 'string', description: d, ...(max ? { maxLength: max } : {}) });
 const int = (d: string, min: number, max: number) => ({ type: 'integer', description: d, minimum: min, maximum: max });
@@ -331,4 +332,6 @@ export const APP_TOOLS: EditTool[] = [
     inputSchema: obj({}),
     run: async env => slim({ sessions: await appCall(env.ctx, env.user, 'GET', '/v1/camera-sessions') }, 40),
   },
+  // Owner only (registry OWNER_ONLY; the tool refuses members itself too): the files a job sent to the provider.
+  JOB_SENT_MEDIA,
 ];

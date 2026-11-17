@@ -29,6 +29,33 @@ export async function cutRange(ffmpeg: string, src: string, out: string, from: n
   await run(ffmpeg, ['-y', '-ss', a.toFixed(3), '-i', src, '-t', d.toFixed(3), ...ENC(), ...(info.audioCodec ? AENC : ['-an']), '-movflags', '+faststart', out]);
 }
 
+/**
+ * The size a source must be scaled up to so its short side is at least `minPx` (aspect kept, even sizes, never
+ * smaller than it is), or null when it is already big enough. 540×960 with 720 → 720×1280.
+ */
+export function upscaleSize(width: number, height: number, minPx: number): { width: number; height: number } | null {
+  if (!(width > 0 && height > 0 && minPx > 0) || Math.min(width, height) >= minPx) return null;
+  const k = minPx / Math.min(width, height);
+  const even = (v: number) => Math.ceil(v / 2) * 2;
+  const short = even(minPx), long = Math.max(short, even(Math.max(width, height) * k - 1e-6));
+  return height >= width ? { width: short, height: long } : { width: long, height: short };
+}
+
+/**
+ * `src` scaled up (lanczos) so its short side is at least `minPx`, for an edit model's floor (Kling O1: 720). Frame
+ * rate, length and sound are kept (sound copied); the picture is re-encoded at high quality (CRF 18), never resampled
+ * in time. Returns false (and writes nothing) when the source is already big enough.
+ */
+export async function upscaleTo(ffmpeg: string, src: string, out: string, info: MediaInfo, minPx: number) {
+  const size = upscaleSize(info.width, info.height, minPx);
+  if (!size) return false;
+  // Sized from the frame ffmpeg actually decodes (after a phone's rotation flag is applied), so a rotated clip isn't squashed.
+  const s = Math.min(size.width, size.height);
+  await run(ffmpeg, ['-y', '-i', src, '-vf', `scale='if(lt(iw,ih),${s},-2)':'if(lt(iw,ih),-2,${s})':flags=lanczos,setsar=1`, ...ENC(),
+    ...(info.audioCodec ? ['-c:a', 'copy'] : ['-an']), '-movflags', '+faststart', out]);
+  return true;
+}
+
 /** One frame of `src` at `at` seconds, as a JPEG (New Swap's frames for models that can't take a video). */
 export async function frameAt(ffmpeg: string, src: string, out: string, at: number) {
   await run(ffmpeg, ['-y', '-ss', Math.max(0, at).toFixed(3), '-i', src, '-frames:v', '1', '-q:v', '2', out]);

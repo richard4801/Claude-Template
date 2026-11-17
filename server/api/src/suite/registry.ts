@@ -93,7 +93,9 @@ export type ModelSpec = {
 export type EditDo = 'yes' | 'prompt' | 'no';
 export type EditToggle = 'background' | 'outfit' | 'character' | 'look' | 'face';
 export type EditCaps = { sourceSeconds: [number, number]; maxImages: number; keepsAudio: boolean; tested: boolean; defaultResolution: string;
-  does: Record<EditToggle, EditDo>; needsCharacter?: boolean; prompt?: boolean };
+  does: Record<EditToggle, EditDo>; needsCharacter?: boolean; prompt?: boolean;
+  /** The smallest the source video's SHORT side may be (px): a smaller clip is scaled up (lanczos, aspect kept) before sending. */
+  minSourcePx?: number };
 /** An owner-added model: whose it is, how its inputs are filled and what it costs (cost basis before priceScale). */
 export type ByoSpec = { studioId: string; providerId: string; providerKind: string; providerRef: string; version: string | null; displayName: string;
   members: boolean; analysis: import('../byo/classify.js').Analysis; fixed: Record<string, unknown>; perRunUsd: number; perSecUsd: number; priceScale: number };
@@ -352,8 +354,9 @@ export const MODELS: ModelSpec[] = [
     audio: 'none', negativePrompt: false, seed: true, camera: { vocab: 'wan', refStyle: 'angle', referenceVideo: true }, lora: false,
     licence: hosted('Wan (hosted)'), status: 'active', notes: 'Instruction video edit: background, light, colour, clothes. Keeps the clip’s sound.' },
   // Kling O1 edit: the source as base video plus up to 4 reference images; mapped by the prompt (⚠ people limit unverified).
+  // Its reference video must be at least 720 px in both dimensions (provider error E006, prod 2026-11-17: "Got 540x960").
   { id: 'kling-o1', name: 'Kling O1 Edit', provider: 'replicate', ref: 'kwaivgi/kling-o1', adapter: 'kling-o1',
-    edit: { sourceSeconds: [3, 10], maxImages: 4, keepsAudio: true, tested: true, defaultResolution: '720p', does: { background: 'yes', outfit: 'yes', character: 'yes', look: 'yes', face: 'prompt' } },
+    edit: { sourceSeconds: [3, 10], maxImages: 4, keepsAudio: true, tested: true, defaultResolution: '720p', minSourcePx: 720, does: { background: 'yes', outfit: 'yes', character: 'yes', look: 'yes', face: 'prompt' } },
     modes: { text: false, image: false, reference: false, recast: true }, frames: { start: false, end: false, middle: 0, withRefs: true },
     refs: { images: 4, videos: 1, audios: 0, videoSecondsMin: 3, videoSecondsMax: 10 }, duration: { min: 3, max: 10 },
     recast: { maxPeople: 2, keepsCuts: false, keepsAudio: true, refsPerPerson: 2, totalImages: 4, faceCrops: true, sourceSeconds: [3, 10] },

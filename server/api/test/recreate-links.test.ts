@@ -8,7 +8,7 @@ import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { recreateReferences } from '../src/recreate/schema.js';
-import { assertPublicHost, BASE_ARGS, checkInfo, errorFor, failureOf, FALLBACK, linkFor, normalizeLink, tiktokDownloadsOff, ytDlp } from '../src/recreate/links.js';
+import { assertPublicHost, BASE_ARGS, checkInfo, FORMAT_ARGS, errorFor, failureOf, FALLBACK, linkFor, normalizeLink, tiktokDownloadsOff, ytDlp } from '../src/recreate/links.js';
 import { putObject } from '../src/storage/objects.js';
 import { recreateOf } from '../src/recreate/references.js';
 import { makeApp, people, until, type Client } from './helpers.js';
@@ -59,6 +59,12 @@ describe('Links (unit)', () => {
     expect(BASE_ARGS.indexOf('--no-js-runtimes')).toBeLessThan(js);
     expect(BASE_ARGS[js + 1]).toBe(`node:${process.execPath}`);
     expect(BASE_ARGS).toContain('--no-remote-components');
+  });
+
+  it('downloads the sharpest rendition up to 1080 on the SHORT side (a vertical 720×1280 original is never swapped for 540×960)', () => {
+    // Prod 2026-11-17: `height<=1080` excluded vertical originals (height 1280/1920) and fetched the 540×960 preview.
+    expect(FORMAT_ARGS.join(' ')).not.toMatch(/height<=/);
+    expect(FORMAT_ARGS).toEqual(['-f', 'bv*+ba/b', '-S', 'res:1080,ext:mp4:m4a']); // `res` = the smaller dimension
   });
 });
 

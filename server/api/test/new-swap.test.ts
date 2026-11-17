@@ -9,7 +9,8 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { pipeline } from 'node:stream/promises';
-import { clips, takes, users } from '../src/db/schema.js';
+import { clips, jobs, takes, users } from '../src/db/schema.js';
+import { JOB_SENT_MEDIA } from '../src/claude/sentMedia.js';
 import { DEFAULT_TEXTS } from '../src/prompt/library.js';
 import { scriptDef } from '../src/prompt/scripts/defs.js';
 import { validateRules } from '../src/prompt/scripts/run.js';
@@ -20,6 +21,7 @@ import { buildInput } from '../src/suite/inputs.js';
 import { RemixSchema, ShotRequestSchema, type Character, type RemixToggles } from '../src/suite/plan.js';
 import { buildRemixPlan, fillImages, pickRemix, remixIncomplete, remixSpan, remixSupport, togglesOn } from '../src/suite/remix.js';
 import { MODELS, modelById } from '../src/suite/registry.js';
+import { upscaleSize } from '../src/suite/extendMedia.js';
 import { demoModel, makeApp, people, until, type Client } from './helpers.js';
 import '../src/suite/prompts.js';
 
@@ -40,6 +42,19 @@ const planOn = (id: string, x: RemixToggles, o: { seconds?: number; range?: [num
     { model: m, support: remixSupport(m, x), why: null, tried: [] }, { her: x.character?.kind === 'model' ? her(o.outfit) : null, outfitOnly: null },
     { key: 'clips/c1.mp4', seconds: o.seconds ?? 10 }, {});
 };
+
+describe('New Swap · an edit model’s source size floor (unit)', () => {
+  it('scales the short side up to the floor, aspect kept, even sizes; leaves a big enough source alone', () => {
+    expect(upscaleSize(540, 960, 720)).toEqual({ width: 720, height: 1280 }); // the prod clip
+    expect(upscaleSize(960, 540, 720)).toEqual({ width: 1280, height: 720 });
+    expect(upscaleSize(180, 320, 720)).toEqual({ width: 720, height: 1280 });
+    expect(upscaleSize(500, 500, 720)).toEqual({ width: 720, height: 720 });
+    expect(upscaleSize(541, 961, 720)).toEqual({ width: 720, height: 1280 }); // odd sizes come out even
+    expect(upscaleSize(720, 1280, 720)).toBeNull();
+    expect(upscaleSize(1080, 1920, 720)).toBeNull();
+    expect(upscaleSize(0, 0, 720)).toBeNull();
+  });
+});
 
 describe('New Swap · registry and Auto (unit)', () => {
   it('Wan 2.7 Edit is in the registry as an edit-only model; every edit model’s default resolution exists', () => {
@@ -256,6 +271,45 @@ describe.skipIf(!hasFfmpeg)('New Swap · API and Claude on the mock provider', (
     expect((await owner.req('GET', '/v1/clips/c_nope')).status).toBe(404);
     const [row] = await a.ctx.db.select().from(clips).where(eq(clips.id, c.body.id));
     expect(row!.storageKey).not.toBe(trow!.mediaKey);
+  });
+
+  it('Kling O1: a source under 720 px is scaled up to its floor (aspect, frame rate and length kept) before it is sent', async () => {
+    // Prod 2026-11-17: Kling O1 refused a 540×960 clip (E006, ≥ 720 px on both sides). c_six is 180×320 at 24 fps.
+    const before = a.ctx.suite.mock.calls.length;
+    const r = (await owner.req('POST', '/v1/suite/shots', { mode: 'remix', clipId: 'c_six', remix: { outfit: { kind: 'words', words: 'a red dress' } }, engineModel: 'kling-o1', range: [0, 4] })).body;
+    const j = await done(r.id);
+    expect(j.state, JSON.stringify(j.error ?? j)).toBe('done');
+    const call = a.ctx.suite.mock.calls.slice(before)[0]!;
+    expect(call.ref).toBe('kwaivgi/kling-o1');
+    const key = /s\/[^?#]*source_upscaled\.mp4/.exec(String(call.input.reference_video))?.[0];
+    expect(key, String(call.input.reference_video)).toBeTruthy();
+    const obj = await a.ctx.storage.get(key!);
+    const f = path.join(dir, 'kling_src.mp4');
+    await pipeline(obj!.body, fs.createWriteStream(f));
+    const [w, h, fps, dur] = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=width,height,avg_frame_rate:format=duration', '-of', 'csv=p=0:s=,', f]).toString().trim().split(/[\n,]/);
+    expect([Number(w), Number(h), fps]).toEqual([720, 1280, '24/1']);
+    expect(Math.abs(Number(dur) - 4)).toBeLessThan(0.2);
+    expect(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', f]).toString()).toMatch(/audio/);
+    // A model without a floor gets the clip as it is (Wan 2.7 Edit's run above: source_part.mp4, never upscaled).
+    expect(modelById('kling-o1')!.edit!.minSourcePx).toBe(720);
+    expect(modelById('wan-2.7-edit')!.edit!.minSourcePx).toBeUndefined();
+
+    // job_sent_media (owner only): the recorded source video, with its facts and a link; a member gets 403.
+    const [o] = await a.ctx.db.select().from(users).where(eq(users.id, owner.id));
+    const ownerU = { id: o!.id, studioId, email: o!.email, role: 'owner', studioName: 'Test Studio', sessionId: null } as any;
+    const sent = await JOB_SENT_MEDIA.run({ ctx: a.ctx, user: ownerU, source: 'chat' } as any, { jobId: r.id }) as any;
+    expect(sent.media[0]).toMatchObject({ kind: 'video', role: 'source video', key, recorded: true, exists: true, video: { width: 720, height: 1280, fps: 24 } });
+    expect(sent.media[0].video.bitrateKbps).toBeGreaterThan(0);
+    expect(String(sent.media[0].url)).toContain('source_upscaled.mp4');
+    await expect(JOB_SENT_MEDIA.run({ ctx: a.ctx, user: { ...ownerU, role: 'member' }, source: 'chat' } as any, { jobId: r.id })).rejects.toMatchObject({ status: 403 });
+    await expect(JOB_SENT_MEDIA.run({ ctx: a.ctx, user: ownerU, source: 'chat' } as any, { jobId: 'jl_nothere' })).rejects.toMatchObject({ status: 404 });
+    // A job from before the record: rebuilt from the files written under its id.
+    const [jrow] = await a.ctx.db.select().from(jobs).where(eq(jobs.id, r.id));
+    const st = jrow!.stats as any;
+    await a.ctx.db.update(jobs).set({ stats: { ...st, suite: { ...st.suite, sent: undefined } } }).where(eq(jobs.id, r.id));
+    const old = await JOB_SENT_MEDIA.run({ ctx: a.ctx, user: ownerU, source: 'chat' } as any, { jobId: r.id }) as any;
+    expect(old.media[0]).toMatchObject({ key, recorded: false, exists: true, video: { width: 720, height: 1280 } });
+    expect(old.media.some((m: any) => m.key === `s/${r.id}/source_part.mp4`)).toBe(true);
   });
 
   it('the model pill: every video-editing model with support, limits and the price for this clip; Auto marked', async () => {

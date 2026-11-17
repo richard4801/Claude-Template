@@ -159,6 +159,13 @@ export const baseArgs = (node = process.execPath) => ['--ignore-config', '--no-c
   '--socket-timeout', '20', '--no-js-runtimes', '--js-runtimes', `node:${node}`, '--no-remote-components'];
 export const BASE_ARGS = baseArgs();
 
+/**
+ * Which rendition yt-dlp fetches: the sharpest one up to 1080 on the SHORT side (`res` is the smaller dimension), MP4
+ * preferred. A `height<=1080` filter excluded every vertical original (720×1280 and 1080×1920 are taller than 1080)
+ * and fell back to the platform's 540×960 preview rendition, which edit models such as Kling O1 refuse (prod 2026-11-17).
+ */
+export const FORMAT_ARGS = ['-f', 'bv*+ba/b', '-S', 'res:1080,ext:mp4:m4a'];
+
 export type Resolver = {
   /** The video's metadata (one request to the platform). */
   info(url: string): Promise<LinkInfo>;
@@ -188,7 +195,7 @@ export function ytDlp(bin: string): Resolver {
     },
     async download(infoFile, dir, o) {
       await run(bin, [...BASE_ARGS, '--no-part', '--no-mtime', '--max-filesize', String(o.maxBytes), '--ffmpeg-location', o.ffmpeg,
-        '-f', 'b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b[height<=1080]/b', '--merge-output-format', 'mp4',
+        ...FORMAT_ARGS, '--merge-output-format', 'mp4',
         '-o', path.join(dir, 'video.%(ext)s'), '--load-info-json', infoFile], o.timeoutMs ?? 180_000);
       const f = fs.readdirSync(dir).find(n => n.startsWith('video.') && !n.endsWith('.json'));
       if (!f) throw linkError('link_blocked', FALLBACK);

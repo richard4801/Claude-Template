@@ -11,7 +11,7 @@ import { ApiError, badRequest, notFound } from '../errors.js';
 import { PaidLost, paidLostFailure, reportPaidLost, sleep } from '../services/paidLost.js';
 import { ReplicateError } from '../replicate/client.js';
 import { mediaToolsAvailable, probe, restoreAudio, stripAudio, thumbnail, type MediaInfo } from '../replicate/media.js';
-import { cutRange, frameAt, frameOf, joinClips, segment } from './extendMedia.js';
+import { cutRange, frameAt, frameOf, joinClips, segment, upscaleSize, upscaleTo } from './extendMedia.js';
 import { finishPlan, finishTake, TARGET_LUFS } from './finish.js';
 import { pipeline } from 'node:stream/promises';
 import { failureOf } from '../services/replicateVideo.js';
@@ -38,6 +38,22 @@ type TakeState = { id?: string; provider?: string; done?: boolean; key?: string;
   /** The provider finished: it is paid for from here on, whatever happens on our side. */ paid?: boolean; result?: { url: string; billedSeconds?: number | null; at: number } };
 type Running = { cancelled: boolean; ids: Set<string>; done: Promise<void> };
 type Prepared = { urls: MediaUrls; prompt: string; separationCost: number; source?: { file: string; info: MediaInfo } };
+
+/** One file sent to the provider: its storage key (or the outside https link it was sent as). */
+export type SentItem = { kind: 'video' | 'image' | 'audio'; role: string; key: string | null; url?: string };
+/** What a run sent, in input order: the videos (the first is the source), the frames, the pictures, the audio. */
+export function sentMedia(u: MediaUrls, keys: Map<string, string>): SentItem[] {
+  const one = (kind: SentItem['kind'], role: string, url: string | undefined): SentItem[] => {
+    if (!url) return [];
+    const key = keys.get(url) ?? null;
+    return [key ? { kind, role, key } : { kind, role, key: null, url: url.slice(0, 500) }];
+  };
+  return [
+    ...u.videos.flatMap((x, i) => one('video', i === 0 ? 'source video' : `video ${i + 1}`, x)),
+    ...one('image', 'start frame', u.start), ...u.middle.flatMap((x, i) => one('image', `middle frame ${i + 1}`, x)), ...one('image', 'end frame', u.end),
+    ...u.refs.flatMap((x, i) => one('image', `picture ${i + 1}`, x)), ...one('audio', 'audio', u.audio),
+  ];
+}
 
 export class SuiteRunner {
   private running = new Map<string, Running>();
@@ -178,15 +194,15 @@ export class SuiteRunner {
   storageKeyOf(v: VideoRef) { return v.key ?? (v.url ? /\/uploads\/([A-Za-z0-9][A-Za-z0-9._\/-]*)$/.exec(v.url)?.[1] : undefined); }
 
   /** A signed URL an outside service can fetch for an image. */
-  private async imageUrl(ref: ImageRef | undefined, studioId: string): Promise<string | undefined> {
+  private async imageUrl(ref: ImageRef | undefined, studioId: string, keys?: Map<string, string>): Promise<string | undefined> {
     if (!ref) return undefined;
     const ttl = this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC;
     const key = await this.ctx.images.storedKey(ref, studioId);
-    if (key) return this.ctx.storage.presignGet(key, ttl);
+    if (key) { const u = await this.ctx.storage.presignGet(key, ttl); keys?.set(u, key); return u; }
     if (ref.url && /^https:\/\//.test(ref.url)) return ref.url;
     throw new ReplicateError('an image could not be signed', 'failed');
   }
-  private async videoUrl(v: VideoRef, studioId: string): Promise<string> {
+  private async videoUrl(v: VideoRef, studioId: string, keys?: Map<string, string>): Promise<string> {
     const ttl = this.ctx.config.REPLICATE_INPUT_URL_TTL_SEC;
     const key = v.key ?? (v.url ? /\/uploads\/([A-Za-z0-9][A-Za-z0-9._\/-]*)$/.exec(v.url)?.[1] : undefined);
     if (key) {
@@ -194,7 +210,9 @@ export class SuiteRunner {
       const clip = row ? null : (await this.ctx.db.select({ id: clips.id }).from(clips).where(and(eq(clips.storageKey, key), eq(clips.studioId, studioId))))[0];
       const take = row || clip ? null : (await this.ctx.db.select({ id: takes.id }).from(takes).where(and(eq(takes.mediaKey, key), eq(takes.studioId, studioId))))[0];
       if (!row && !clip && !take && !key.startsWith('assets/')) throw new ReplicateError('a video is not in this studio', 'failed');
-      return this.ctx.storage.presignGet(key, ttl);
+      const u = await this.ctx.storage.presignGet(key, ttl);
+      keys?.set(u, key);
+      return u;
     }
     if (v.url && /^https:\/\//.test(v.url)) return v.url;
     throw new ReplicateError('a video could not be signed', 'failed');
@@ -206,11 +224,14 @@ export class SuiteRunner {
    */
   private async prepare(job: JobRow, plan: ShotPlan, mock: boolean, tmp: string, report: (i: number, f: number, label: string) => Promise<boolean>, cancelled: () => boolean): Promise<Prepared> {
     const ctx = this.ctx, c = ctx.config;
+    // Each signed URL's storage key, so what was sent is recorded (job_sent_media) after the URLs have expired.
+    const keys = new Map<string, string>();
+    const sign = async (key: string) => { const u = await ctx.storage.presignGet(key, c.REPLICATE_INPUT_URL_TTL_SEC); keys.set(u, key); return u; };
     const urls: MediaUrls = {
-      start: await this.imageUrl(plan.images.start, job.studioId), end: await this.imageUrl(plan.images.end, job.studioId),
-      middle: await Promise.all(plan.images.middle.map(x => this.imageUrl(x, job.studioId).then(u => u!))),
-      refs: await Promise.all(plan.images.refs.map(x => this.imageUrl(x.image, job.studioId).then(u => u!))),
-      videos: await Promise.all(plan.videos.map(v => this.videoUrl(v.video, job.studioId))),
+      start: await this.imageUrl(plan.images.start, job.studioId, keys), end: await this.imageUrl(plan.images.end, job.studioId, keys),
+      middle: await Promise.all(plan.images.middle.map(x => this.imageUrl(x, job.studioId, keys).then(u => u!))),
+      refs: await Promise.all(plan.images.refs.map(x => this.imageUrl(x.image, job.studioId, keys).then(u => u!))),
+      videos: await Promise.all(plan.videos.map(v => this.videoUrl(v.video, job.studioId, keys))),
     };
     // Audio: speech is sent as is. Not speaking: only a real instrumental (vocals removed once per job, billed with
     // it). When nothing was separated (the separator is off, or this is a test render) NO audio is sent and the
@@ -236,12 +257,12 @@ export class SuiteRunner {
         }
         separationCost = sep.costUsd ?? 0;
         if (sep.separated && sep.instrumentalKey) {
-          urls.audio = await ctx.storage.presignGet(sep.instrumentalKey, c.REPLICATE_INPUT_URL_TTL_SEC);
+          urls.audio = await sign(sep.instrumentalKey);
         } else if (plan.promptNoAudio) {
           prompt = plan.promptNoAudio;
           await ctx.db.update(jobs).set({ prompt }).where(eq(jobs.id, job.id));
         }
-      } else urls.audio = await this.videoUrl(plan.audioRef.ref, job.studioId);
+      } else urls.audio = await this.videoUrl(plan.audioRef.ref, job.studioId, keys);
     }
     // Extend: the part of the source the model continues from, or the bridge frame (the source itself stays whole for the join).
     let source: { file: string; info: MediaInfo } | undefined;
@@ -256,7 +277,7 @@ export class SuiteRunner {
       const put = async (name: string, f: string, contentType: string) => {
         const key = `s/${job.id}/${name}`;
         await putFile(ctx, { key, file: f, studioId: job.studioId, kind: 'output', userId: job.userId, contentType });
-        return ctx.storage.presignGet(key, c.REPLICATE_INPUT_URL_TTL_SEC);
+        return sign(key);
       };
       if (ex.method === 'frame') {
         const f = path.join(tmp, 'bridge.jpg');
@@ -279,7 +300,7 @@ export class SuiteRunner {
       const put = async (name: string, f: string, contentType: string) => {
         const key = `s/${job.id}/${name}`;
         await putFile(ctx, { key, file: f, studioId: job.studioId, kind: 'output', userId: job.userId, contentType });
-        return ctx.storage.presignGet(key, c.REPLICATE_INPUT_URL_TTL_SEC);
+        return sign(key);
       };
       if (rx.range && plan.videos.length) urls.videos = [await put('source_part.mp4', part, 'video/mp4')];
       if (rx.frames || rx.personStill) {
@@ -292,6 +313,24 @@ export class SuiteRunner {
         if (rx.personStill) urls.refs.push(await grab('person.jpg', D / 2));
       }
     }
+    // An edit model's size floor (Kling O1: 720 px on both sides). A smaller source (e.g. a 540×960 clip) is scaled up
+    // (lanczos, aspect, frame rate and sound kept) instead of being refused by the provider (E006, prod 2026-11-17).
+    const minPx = modelById(plan.modelId)?.edit?.minSourcePx;
+    const sendsSource = !!(plan.remix?.sourceKey ?? plan.videos[0]?.video.key) && (plan.mode === 'recast' || (!!rx && rx.route === 'edit'));
+    if (minPx && sendsSource) {
+      // A test render may run on a placeholder clip: nothing to scale there.
+      const part = await this.remixSource(job.studioId, plan, tmp).catch(e => { if (mock) return null; throw e; });
+      const info = part ? await probe(c.FFPROBE_PATH, part).catch(() => null) : null;
+      if (part && info && upscaleSize(info.width, info.height, minPx)) {
+        await report(1, 0.02, 'Preparing the clip');
+        const big = path.join(tmp, 'source_upscaled.mp4');
+        await upscaleTo(c.FFMPEG_PATH, part, big, info, minPx);
+        const key = `s/${job.id}/source_upscaled.mp4`;
+        await putFile(ctx, { key, file: big, studioId: job.studioId, kind: 'output', userId: job.userId, contentType: 'video/mp4' });
+        urls.videos = [await sign(key), ...urls.videos.slice(1)];
+      }
+    }
+    await this.saveExtra(job.id, { sent: sentMedia(urls, keys) });
     return { urls, prompt, separationCost, source };
   }
 
