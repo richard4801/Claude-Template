@@ -3,7 +3,9 @@
 // user's jobs FIFO and stops IDLE_SHUTDOWN_SECONDS after its last job. Two implementations share that logic (pool.ts):
 //  - SimulatedGpu: virtual pods; jobs run in-process like the mock (SPEED× real time), no GPU and no cost.
 //  - RunpodGpu: real pods through the RunPod GraphQL API; workers pull jobs over the worker protocol (routes/worker.ts).
+//  - OffGpu: MUSE's own GPU is switched off (GPU_MODE=off, or runpod without a key; plans/gpu-off.md). No pod, no RunPod call.
 import type { Config } from '../config.js';
+import { ApiError } from '../errors.js';
 import type { jobs, pods } from '../db/schema.js';
 
 export type JobRow = typeof jobs.$inferSelect;
@@ -12,8 +14,15 @@ export type PodRow = typeof pods.$inferSelect;
 export type WaitingJob = Omit<JobRow, 'draft' | 'outputs' | 'stats' | 'prompt' | 'thumb'>;
 export type WorkKind = 'h3' | 'viggle' | 'lora-train' | 'upscale';
 
+export type GpuMode = 'simulated' | 'runpod' | 'off';
+/** What every feature that needs our GPU answers while it is switched off (plans/gpu-off.md). */
+export const GPU_OFF_MESSAGE = "This needs MUSE's own GPU, which is switched off · pick a hosted model";
+export const GPU_OFF_REASON = 'RunPod is switched off';
+/** Refused up front, before any hold or charge. `engine_unavailable` like any engine that can't run now. */
+export const gpuOffError = () => new ApiError(400, 'engine_unavailable', GPU_OFF_MESSAGE);
+
 export interface GpuController {
-  readonly mode: 'simulated' | 'runpod';
+  readonly mode: GpuMode;
   /**
    * Waiting jobs that may start (FIFO, not paused). Assign or start pods for their users. `active`: the active pods the
    * caller just read (saves a read). Returns the active pods afterwards, or null when they may have changed underneath.

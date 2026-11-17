@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { ApiError, badRequest, notFound } from '../errors.js';
+import { gpuOffError } from '../gpu/controller.js';
 import { compact, uid } from '../lib/util.js';
 import { parse } from '../camera/validate.js';
 import type { EditTool } from '../editor/mcpTools.js';
@@ -394,6 +395,7 @@ export const ACTION_TOOLS: GatedTool[] = [
     description: 'Turns the warm GPU on, or keeps it warm longer (extend: true), as on the Warm GPU screen. Owner only. Charged per hour until it turns off (it turns itself off when idle). Without confirm it gives the rate.',
     props: { extend: { type: 'boolean', description: 'Keep it warm longer instead of turning it on' } }, required: [],
     plan: async (env, a) => {
+      if (env.ctx.gpu.mode === 'off') throw gpuOffError(); // plans/gpu-off.md: refused before any Approve card
       const w = await appCall(env.ctx, env.user, 'GET', '/v1/gpu/warm') as { ratePerHour?: number; idleMinutes?: number; maxMinutes?: number };
       const rate = typeof w.ratePerHour === 'number' ? ` at $${w.ratePerHour.toFixed(2)}/hour` : '';
       return { summary: a.extend === true ? `Keep the warm GPU on longer${rate}` : `Turn on a warm GPU${rate} (off by itself after ${w.idleMinutes ?? '?'} idle minutes, at most ${w.maxMinutes ?? '?'} minutes)`,

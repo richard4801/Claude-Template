@@ -9,7 +9,7 @@ import { sameDatabase } from './db/copy.js';
 import { ApiError } from './errors.js';
 import { EventHub } from './events.js';
 import { RunpodApi } from './gpu/runpodApi.js';
-import { RunpodGpu, SimulatedGpu } from './gpu/pool.js';
+import { OffGpu, RunpodGpu, SimulatedGpu } from './gpu/pool.js';
 import { ImageService } from './images/service.js';
 import { Money } from './money/money.js';
 import { bindAppCaller, grantUser } from './claude/appCall.js';
@@ -111,7 +111,14 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   ctx.warm = new WarmService(ctx);
   ctx.boot = { startedAt: Date.now(), build: (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.KOYEB_GIT_SHA ?? process.env.GIT_SHA ?? '').slice(0, 12) || null,
     migrations: await schemaState(ctx.db) };
-  ctx.gpu = config.GPU_MODE === 'runpod' ? new RunpodGpu(ctx, ctx.runpod) : new SimulatedGpu(ctx);
+  // GPU_MODE=off, or runpod without a RunPod key: MUSE's own GPU is switched off (plans/gpu-off.md). No RunPod call ever.
+  const gpuOff = config.GPU_MODE === 'off' || (config.GPU_MODE === 'runpod' && !ctx.runpod.configured);
+  ctx.gpu = gpuOff ? new OffGpu(ctx) : config.GPU_MODE === 'runpod' ? new RunpodGpu(ctx, ctx.runpod) : new SimulatedGpu(ctx);
+  if (gpuOff) {
+    if (config.GPU_MODE === 'runpod') app.log.warn('GPU_MODE=runpod without RUNPOD_API_KEY: MUSE\'s own GPU is off (hosted models only)');
+    // GPU jobs left in the line from before are failed with their hold given back; old pods are marked stopped.
+    try { ctx.boot.gpuOff = await (ctx.gpu as OffGpu).retire(); } catch (e) { app.log.error({ err: (e as Error).message }, 'retiring GPU work failed'); }
+  }
 
   app.log.info({ config: describeConfig(config) }, 'MUSE API configuration');
   if (config.NODE_ENV === 'production' && config.storage === 'local' && !config.DEV_MODE) {

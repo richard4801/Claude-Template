@@ -17,7 +17,7 @@ import * as P from '../pricing.js';
 import { loraToken } from '../prompt/engine.js';
 import { replicateSwap, videoSwap } from '../prompt/scripts/builders.js';
 import { resolveSpeaking } from '../audio/service.js';
-import { gpuCanRun, type JobRow, type PodRow, type WaitingJob } from '../gpu/controller.js';
+import { gpuCanRun, gpuOffError, type JobRow, type PodRow, type WaitingJob } from '../gpu/controller.js';
 import { pods } from '../db/schema.js';
 import { resultsOf } from '../claude/results.js';
 import { shotPromptFor } from '../templates/service.js';
@@ -181,6 +181,7 @@ export class JobService {
     if (archived?.at) throw new ApiError(409, 'model_archived', 'This model is archived · restore her in Settings → Archived models');
     r.takes = Math.min(P.TAKES_MAX, Math.max(1, r.takes));
     const replicate = r.engine === 'replicate';
+    if (!replicate && this.ctx.gpu.mode === 'off') throw gpuOffError(); // plans/gpu-off.md: before any hold
     if (replicate) {
       if (!this.ctx.replicate.configured) throw new ApiError(400, 'engine_unavailable', "Draft, Standard and HD aren't available right now · try Edit");
       if (r.lipSync) throw badRequest('Lip sync is only on Edit');
@@ -203,7 +204,7 @@ export class JobService {
     if (r.background === 'photo' && replicate && !(r.backgroundImage?.asset || r.backgroundImage?.url)) throw badRequest('Background “New photo”: add the background picture');
     if (r.engine === 'h3' && (r.steps < P.STEPS_MIN || r.steps > P.STEPS_MAX)) throw badRequest('Steps must be 4–30');
     if (replicate && !clip?.storageKey) throw badRequest('Upload the clip file first');
-    if (!replicate && this.ctx.gpu.mode === 'runpod' && !clip?.storageKey) throw badRequest('Upload the clip file first');
+    if (!replicate && this.ctx.gpu.mode !== 'simulated' && !clip?.storageKey) throw badRequest('Upload the clip file first');
     // Over 30 s (imports go up to 60 min, for edits): never sent to a swap engine; the person trims or picks the part.
     const long = suiteSourceTooLong(clip?.durationSec, 'Swap');
     if (long) throw long;
@@ -216,7 +217,7 @@ export class JobService {
     const [l] = await this.ctx.db.select().from(loras).where(eq(loras.modelId, m.id));
     const lora = l && l.version > 0 && l.use ? loraToken(m.name, l.version) : null;
     const seed = r.seed ?? 1000 + Math.floor(Math.random() * 99000);
-    if (!replicate && this.ctx.gpu.mode === 'runpod') this.requireCapabilities(r.engine === 'viggle' ? 'viggle' : 'h3', r.lipSync);
+    if (!replicate && this.ctx.gpu.mode !== 'simulated') this.requireCapabilities(r.engine === 'viggle' ? 'viggle' : 'h3', r.lipSync);
     // GPU: references in the order the H3 setup was tested with (≤ 6): face front, face profile, then the outfit set's
     // front, ¾ and back if it has them, otherwise the body slots. Replicate: the five locked shots, then the outfit (≤ 9).
     // <Image n> in the prompt follows this order.
@@ -367,8 +368,9 @@ export class JobService {
     this.queueInfo.delete(j.id); this.lineInfo.delete(j.id);
   }
 
-  /** Capabilities of the pod image (runpod mode) or everything (simulated). */
+  /** Capabilities of the pod image (runpod mode), everything (simulated) or nothing (the GPU is off: plans/gpu-off.md). */
   capabilities(): string[] {
+    if (this.ctx.gpu.mode === 'off') return [];
     if (this.ctx.gpu.mode === 'simulated') return ['h3', 'viggle', 'latentsync', 'lora-train', 'upscale'];
     return this.ctx.config.RUNPOD_WORKER_CAPABILITIES.split(',').map(x => x.trim()).filter(Boolean);
   }
@@ -397,6 +399,7 @@ export class JobService {
   }
   /** Refuse before any GPU starts when the pod image can't run this. */
   requireCapabilities(kind: 'h3' | 'viggle' | 'lora-train', lipSync = false) {
+    if (this.ctx.gpu.mode === 'off') throw gpuOffError();
     const caps = this.capabilities();
     if (kind === 'viggle' && !caps.includes('viggle')) throw new ApiError(400, 'engine_unavailable', "Fast · beta isn't available yet · use Draft, Standard or HD");
     if (kind === 'lora-train' && !caps.includes('lora-train')) throw new ApiError(400, 'engine_unavailable', "LoRA training isn't available yet");

@@ -18,7 +18,7 @@ import { jobs, pods, users, warmSessions } from '../db/schema.js';
 import { ApiError } from '../errors.js';
 import { uid } from '../lib/util.js';
 import type { Who } from '../money/money.js';
-import { gpuCanRun, workKindOf, type JobRow, type PodRow } from '../gpu/controller.js';
+import { GPU_OFF_REASON, gpuCanRun, gpuOffError, workKindOf, type JobRow, type PodRow } from '../gpu/controller.js';
 import type { PodPool } from '../gpu/pool.js';
 
 export type WarmSession = typeof warmSessions.$inferSelect;
@@ -81,6 +81,7 @@ export class WarmService {
     return {
       state: 'off' as const, startedAt: null, readyAt: null, minutes: 0, costUsd: 0, ratePerHour: this.ctx.config.GPU_HOURLY_USD, busy: false,
       autoOffAt: null, idleMinutes: lim.idleMinutes, maxMinutes: lim.maxMinutes, canExtend: false, allowed,
+      ...(this.ctx.gpu.mode === 'off' ? { unavailable: GPU_OFF_REASON } : {}), // plans/gpu-off.md: it can't be turned on
       ...(last?.endedAt && now - last.endedAt < LAST_OFF_MS
         ? { lastOff: { reason: last.endReason as WarmOffReason, at: last.endedAt, minutes: Math.floor((last.endedAt - last.startedAt) / MIN), costUsd: r4(last.costUsd) } } : {}),
     };
@@ -107,6 +108,7 @@ export class WarmService {
     return this.serial(user.id, async () => {
       const now = Date.now();
       const who: Who = { id: user.id, studioId: user.studioId, role: user.role };
+      if (this.ctx.gpu.mode === 'off') throw gpuOffError(); // plans/gpu-off.md: no pod, no charge
       const existing = await this.active(user.id);
       if (existing) return this.view(who, now);
       const lim = await this.limits(user.studioId);
@@ -175,6 +177,7 @@ export class WarmService {
   extend(user: AuthUser) {
     return this.serial(user.id, async () => {
       const now = Date.now();
+      if (this.ctx.gpu.mode === 'off') throw gpuOffError();
       const s = await this.active(user.id);
       if (!s || s.state === 'stopping') throw new ApiError(409, 'not_warm', 'The add-on engine is off');
       const pod = await this.podOf(s);

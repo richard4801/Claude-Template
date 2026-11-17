@@ -1,10 +1,10 @@
 // Pod pool shared by the simulated and RunPod controllers (see controller.ts for the model).
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../ctx.js';
 import { jobs, pods } from '../db/schema.js';
 import { randomToken, sha256, uid } from '../lib/util.js';
 import * as P from '../pricing.js';
-import { gpuCanRun, gpuTable, workKindOf, type GpuController, type JobRow, type PodRow, type WaitingJob, type WorkKind } from './controller.js';
+import { GPU_OFF_MESSAGE, GPU_OFF_REASON, gpuCanRun, gpuTable, workKindOf, type GpuController, type GpuMode, type JobRow, type PodRow, type WaitingJob, type WorkKind } from './controller.js';
 import type { RunpodApi } from './runpodApi.js';
 import { SOMETHING_WENT_WRONG } from '../services/jobs.js';
 
@@ -14,7 +14,7 @@ export const RUNPOD_CREDIT_RE = /\b((insufficient|enough) (funds|balance|credit)
 export class OutOfCreditError extends Error {}
 
 export abstract class PodPool implements GpuController {
-  abstract readonly mode: 'simulated' | 'runpod';
+  abstract readonly mode: GpuMode;
   /** Last launch failure per job kind (no GPU of that type available), for status and back-off. */
   protected launchFailedAt = new Map<WorkKind, { at: number; message: string; credit?: boolean }>();
   protected launchBackoffMs = 60_000;
@@ -345,4 +345,42 @@ export class RunpodGpu extends PodPool {
   }
 
   async shutdown() {}
+}
+
+/**
+ * MUSE's own GPU switched off (GPU_MODE=off, or GPU_MODE=runpod without RUNPOD_API_KEY; plans/gpu-off.md). It never
+ * starts a pod and never calls RunPod. Everything that needs the GPU is refused up front (JobService.capabilities() is
+ * empty); a GPU job that still turns up in the line (queued before the switch) is failed and refunded.
+ */
+export class OffGpu extends PodPool {
+  readonly mode = 'off' as const;
+
+  protected async launch(): Promise<null> { return null; }
+  protected async terminate() { /* no RunPod call: a pod left from before is only marked stopped */ }
+  async startPod() { return null; }
+  async activePods(): Promise<PodRow[]> { return []; }
+
+  async dispatch(waiting: WaitingJob[]) {
+    for (const j of waiting) if (j.request?.engine !== 'photo') await this.ctx.jobs.fail(j.id, GPU_OFF_MESSAGE, false, 'gpu_off');
+    return [];
+  }
+  async tick() { return []; }
+
+  /**
+   * At boot: pods a RunPod build left "starting" / "running" are marked stopped (no RunPod call: once the account is
+   * cancelled they are gone anyway), and every GPU job still in the line or on a pod is failed with its hold given back.
+   * Hosted runs (Replicate, Suite) and Photo runs are not touched. Returns what it did.
+   */
+  async retire(now = Date.now()) {
+    const stopped = await this.ctx.db.update(pods).set({ state: 'stopped', stoppedAt: now, busy: false, currentJobId: null, error: GPU_OFF_REASON })
+      .where(inArray(pods.state, ['starting', 'running', 'stopping'])).returning({ id: pods.id });
+    const left = await this.ctx.db.select({ id: jobs.id }).from(jobs)
+      .where(and(eq(jobs.state, 'running'), sql`coalesce(${jobs.request}->>'engine', '') not in ('replicate', 'suite', 'photo')`));
+    let failed = 0;
+    for (const j of left) if (await this.ctx.jobs.fail(j.id, GPU_OFF_MESSAGE, false, 'gpu_off')) failed++;
+    if (stopped.length || failed) this.ctx.log.warn({ pods: stopped.length, jobs: failed }, 'GPU is off: old pods marked stopped, GPU jobs failed and refunded');
+    return { pods: stopped.length, jobs: failed };
+  }
+
+  async status() { return { mode: this.mode, pods: [], noGpu: [], message: GPU_OFF_REASON }; }
 }

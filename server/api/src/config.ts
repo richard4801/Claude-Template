@@ -69,8 +69,9 @@ const Env = z.object({
   TOKEN_USD: num(0.01),
   BALANCE_CACHE_SEC: num(30),
 
-  // GPU
-  GPU_MODE: z.enum(['simulated', 'runpod']).default('simulated'),
+  // GPU. "off" (plans/gpu-off.md): MUSE's own GPU is switched off. No RunPod call is ever made, and everything that
+  // needs it is refused up front. "runpod" without RUNPOD_API_KEY behaves like "off" (removing the key turns it off).
+  GPU_MODE: z.enum(['simulated', 'runpod', 'off']).default('simulated'),
   /** Simulated renders run this many times faster than real time (the mock's SPEED). */
   SPEED: num(24),
   /** Simulated image generation time (ms), like the mock's GEN_MS. */
@@ -330,7 +331,7 @@ export function describeConfig(c: Config) {
     database: !c.DATABASE_URL || c.DATABASE_URL.startsWith('pglite') ? 'embedded' : 'postgres',
     migrateFrom: !!c.MIGRATE_FROM_DATABASE_URL,
     storage: c.storage,
-    gpu: c.GPU_MODE,
+    gpu: c.GPU_MODE === 'runpod' && !c.RUNPOD_API_KEY ? 'off (RUNPOD_API_KEY is not set)' : c.GPU_MODE,
     balance: c.balanceMode,
     imageProvider: c.IMAGE_PROVIDER,
     videoEngine: c.videoEngineDefault,

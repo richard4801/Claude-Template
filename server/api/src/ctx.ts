@@ -50,7 +50,7 @@ export type Ctx = {
   /** AI suite (workstream 1): video model registry, Shot API, Camera compiler, the suite line (plans/ai-suite.md). */
   suite: SuiteService;
   /** Start-up facts for /health: the build, when it started, the schema migrations applied, the starter seed. */
-  boot: { startedAt: number; build: string | null; migrations: { applied: number; latest: string | null }; starters?: { studios: number; added: number } | { error: string } };
+  boot: { startedAt: number; build: string | null; migrations: { applied: number; latest: string | null }; starters?: { studios: number; added: number } | { error: string }; gpuOff?: { pods: number; jobs: number } };
   /** Absolute base URL of this API, for image URLs and presigned local-storage URLs. */
   publicBase: () => string;
   /** Timers that stop on shutdown. */

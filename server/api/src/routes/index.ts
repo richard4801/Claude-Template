@@ -12,6 +12,7 @@ import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { accounts, clips, invites, jobs, ledger, loras, models, outfits, posts, sessions, studioSettings, takes, uploads, users, wallets, type ImageRef, type OutfitReplaced, type OutfitSlot, type SheetSlot, type SheetVersion } from '../db/schema.js';
 import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
+import { gpuOffError } from '../gpu/controller.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
 import * as P from '../pricing.js';
@@ -1057,6 +1058,7 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // (UPSCALE_PRICES, measured). A job like any add-on render: held, queued for a pod, settled at the quoted price.
   app.post<{ Params: { id: string } }>('/v1/takes/:id/upscale', async req => {
     const b = parse(z.object({ size: z.enum(P.UPSCALE_SIZES.map(x => x.id) as [P.UpscaleSize, ...P.UpscaleSize[]]), engineModel: z.string().max(40).optional() }), req.body);
+    if (ctx.gpu.mode === 'off') throw gpuOffError(); // Upscale (SeedVR2) runs on our GPU (plans/gpu-off.md)
     if (b.engineModel) await modelChoice(ctx).check(req.user, 'upscale', b.engineModel); // WS13: today only SeedVR2
     const [t] = await db.select().from(takes).where(and(eq(takes.id, req.params.id), eq(takes.studioId, req.user.studioId)));
     if (!t) throw notFound('Take');

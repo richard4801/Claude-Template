@@ -13,7 +13,7 @@ import * as P from '../pricing.js';
 import { characterSheetShot, loraToken, SHEET_ANGLES } from '../prompt/engine.js';
 import { loraVariations } from '../prompt/service.js';
 import { loraCandidate } from '../prompt/scripts/builders.js';
-import type { JobRow } from '../gpu/controller.js';
+import { gpuOffError, type JobRow } from '../gpu/controller.js';
 
 /** Candidate pool: the bundled character stills, cycled with labels (same as the mock and prototype features.js). */
 export const LORA_POOL: [string, string][] = [['g_front', 'Green set · front'], ['g_tq', 'Green set · ¾'], ['face', 'Close-up · window light'], ['c_front', 'Crystal dress · full'], ['g_side', 'Green set · side'],
@@ -62,6 +62,7 @@ export class LoraService {
   }
 
   async buildCandidates(user: AuthUser, modelId: string) {
+    if (this.ctx.gpu.mode === 'off') throw gpuOffError(); // a training set is only for training, which needs our GPU (plans/gpu-off.md)
     const m = await this.model(user, modelId);
     this.archived(m);
     const l = await this.row(user, modelId);
@@ -145,13 +146,14 @@ export class LoraService {
   }
 
   async train(user: AuthUser, modelId: string) {
+    if (this.ctx.gpu.mode === 'off') throw gpuOffError(); // plans/gpu-off.md: refused before anything else
     const m = await this.model(user, modelId);
     this.archived(m);
     const l = await this.row(user, modelId);
     if (!['review', 'ready', 'failed'].includes(l.state) || !l.candidates.length) throw badRequest('Build the training set first');
     const kept = l.candidates.filter(c => c.keep).length;
     if (kept < P.LORA_MIN_KEEP) throw badRequest(`Keep at least ${P.LORA_MIN_KEEP} shots so the LoRA learns her well`);
-    if (this.ctx.gpu.mode === 'runpod') this.ctx.jobs.requireCapabilities('lora-train');
+    if (this.ctx.gpu.mode !== 'simulated') this.ctx.jobs.requireCapabilities('lora-train'); // off: refused (plans/gpu-off.md)
     const cost = P.loraTrainCost();
     const token = loraToken(m.name, l.version + 1);
     const job = await this.ctx.jobs.createInternal(user, {

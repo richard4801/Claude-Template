@@ -829,7 +829,7 @@ export class SuiteService {
     await applySwapEngine(modelChoice(this.ctx), u, req, undefined, choice);
     const hosted = req.engine === 'replicate';
     if (hosted && !this.ctx.replicate.configured) throw new ApiError(400, 'engine_unavailable', "Swap isn't available right now");
-    if (!hosted && this.ctx.gpu.mode === 'runpod') this.ctx.jobs.requireCapabilities(req.engine as 'h3' | 'viggle');
+    if (!hosted && this.ctx.gpu.mode !== 'simulated') this.ctx.jobs.requireCapabilities(req.engine as 'h3' | 'viggle');
     const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.id, req.clipId), eq(clips.studioId, u.studioId)));
     if (!clip) throw notFound('Clip');
     const long = suiteSourceTooLong(clip.durationSec, 'Swap');

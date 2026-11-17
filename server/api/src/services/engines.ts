@@ -4,6 +4,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../ctx.js';
 import { users } from '../db/schema.js';
+import { GPU_OFF_REASON } from '../gpu/controller.js';
 
 export type EngineId = 'replicate' | 'runpod';
 export const ENGINE_NAMES: Record<EngineId, string> = { replicate: 'Replicate', runpod: 'RunPod' };
@@ -34,15 +35,16 @@ export class EngineHealth {
     const c = this.ctx.config, gpu = await this.ctx.gpu.status() as { mode?: string; noGpu?: unknown[] } & Record<string, unknown>;
     const s = await this.ctx.money.settings(studioId);
     const rep = this.credit.get('replicate'), rp = this.credit.get('runpod');
-    const rpBal = this.ctx.runpod.configured ? await this.ctx.money.runpodBalance(studioId) : null;
-    const runpodStatus = rp ? 'out_of_credit' : this.ctx.gpu.mode === 'simulated' ? 'simulated' : !this.ctx.runpod.configured ? 'no_key' : (gpu.noGpu?.length ? 'no_gpu' : 'ready');
+    const off = this.ctx.gpu.mode === 'off'; // plans/gpu-off.md: shown as off, no RunPod call
+    const rpBal = off ? await this.ctx.money.runpodBalance(studioId) : this.ctx.runpod.configured ? await this.ctx.money.runpodBalance(studioId) : null;
+    const runpodStatus = off ? 'off' : rp ? 'out_of_credit' : this.ctx.gpu.mode === 'simulated' ? 'simulated' : !this.ctx.runpod.configured ? 'no_key' : (gpu.noGpu?.length ? 'no_gpu' : 'ready');
     const sel = await this.ctx.images.selection(studioId);
     return {
       list: [
         { id: 'replicate', name: 'Replicate', usedFor: 'Draft, Standard and HD video · photos', keySet: this.ctx.replicate.configured,
           status: rep ? 'out_of_credit' : this.ctx.replicate.configured ? 'ready' : 'no_key', ...(rep ? { message: rep.message, outOfCreditAt: rep.at } : {}) },
         { id: 'runpod', name: 'RunPod', usedFor: 'Edit, Fast · beta, Upscale', keySet: this.ctx.runpod.configured, status: runpodStatus,
-          ...(rp ? { message: rp.message, outOfCreditAt: rp.at } : runpodStatus === 'no_gpu' ? { message: 'No add-on GPU free right now · jobs wait and retry' } : {}),
+          ...(off ? { message: GPU_OFF_REASON, balance: rpBal } : rp ? { message: rp.message, outOfCreditAt: rp.at } : runpodStatus === 'no_gpu' ? { message: 'No add-on GPU free right now · jobs wait and retry' } : {}),
           ...(rpBal && rpBal.balance != null ? { balanceUsd: rpBal.balance } : {}) },
       ],
       imageEngine: { ...sel, label: this.ctx.images.label(sel) },

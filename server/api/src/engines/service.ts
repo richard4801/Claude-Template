@@ -7,6 +7,7 @@ import { ASSEMBLY_MAX_RATE, ASSEMBLY_MODEL } from '../editor/assemblyai.js';
 import { eq } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
 import { ApiError, badRequest } from '../errors.js';
+import { gpuOffError } from '../gpu/controller.js';
 import * as P from '../pricing.js';
 import { MODEL_ID_RE } from '../replicate/catalog.js';
 import { estimateOne } from '../replicate/prices.js';
@@ -431,6 +432,8 @@ export class ModelChoice {
   async check(u: AuthUser, purpose: Purpose, model: string): Promise<Engine> {
     const cands = await this.candidates(u, purpose, { quotes: false });
     const e = cands.find(x => x.model === model);
+    // MUSE's own GPU is off (plans/gpu-off.md): its models are gone from the lists; picking one by name says why.
+    if (!e && this.ctx.gpu.mode === 'off' && gpuOnlyModel(model)) throw gpuOffError();
     if (u.role !== 'owner') {
       const rules = await this.memberRules(u.studioId);
       if (e && ModelChoice.forMembers(e, rules)) return e;
@@ -499,6 +502,9 @@ export function resolutionFit(e: Engine, asked: string): Engine['resolutionFit']
  * swap. `pre`: a choice the caller already made (undefined: choose now). Returns the choice, or null (built-in behaviour).
  */
 const u0Prefs = (mc: ModelChoice, u: AuthUser) => mc.prefs(u.studioId);
+/** Models that run only on MUSE's own GPU (RunPod): Edit and Fast swaps, H3 open weights, SeedVR2 upscale. */
+export const gpuOnlyModel = (model: string) => swapEngineById(model)?.runs === 'gpu' || model === 'seedvr2' || modelById(model)?.provider === 'runpod';
+
 export async function applySwapEngine(mc: ModelChoice, u: AuthUser, r: Record<string, any>, requested?: string | null, pre?: Choice | null): Promise<Choice | null> {
   for (const k of ['swapEngine', 'videoModel', 'videoNoResolution', 'minSec', 'maxSec', 'resolutionLabel']) delete r[k]; // never taken from the client
   if (!requested && pre === undefined && r.engine && r.engine !== 'replicate') return null;

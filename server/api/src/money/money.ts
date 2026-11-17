@@ -16,6 +16,7 @@ import { ledger, studioSettings, topups, users, wallets } from '../db/schema.js'
 import { ApiError } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { videosLeft } from '../pricing.js';
+import { GPU_OFF_REASON } from '../gpu/controller.js';
 
 export type RunpodBalance = { source: 'runpod' | 'simulated' | 'unavailable'; balance: number | null; spendPerHour?: number; reason?: string };
 type Who = { id: string; studioId: string; role: 'owner' | 'member' };
@@ -52,6 +53,8 @@ export class Money {
       const s = await this.settings(studioId);
       return { source: 'simulated', balance: s.simBalance };
     }
+    // The GPU is off (GPU_MODE=off, or runpod without a key): no RunPod call at all (plans/gpu-off.md).
+    if (this.ctx.gpu?.mode === 'off') return { source: 'unavailable', balance: null, reason: GPU_OFF_REASON };
     if (!this.ctx.runpod.configured) return { source: 'unavailable', balance: null, reason: 'RUNPOD_API_KEY is not set' };
     if (this.rpCache && Date.now() - this.rpCache.at < c.BALANCE_CACHE_SEC * 1000) return this.rpCache.value;
     try {
