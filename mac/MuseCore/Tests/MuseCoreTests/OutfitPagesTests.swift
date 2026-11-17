@@ -82,6 +82,7 @@ final class OutfitPagesTests: XCTestCase {
         XCTAssertNil(OutfitPictures.previous(o, 3))
         XCTAssertEqual(OutfitPictures.replaceQuestion(5), "Replace the Face ¾ picture?")
         XCTAssertEqual(OutfitPictures.uploadTitle, "Upload picture…", "free: no price on it")
+        XCTAssertEqual(OutfitPictures.replaceTitle, "Replace picture…")
         let older = try JSONDecoder().decode(Outfit.self, from: Data(#"{"id":"o2","angles":[null,null,null,null]}"#.utf8))
         XCTAssertNil(older.sources)
         XCTAssertNil(OutfitPictures.previous(older, 0))

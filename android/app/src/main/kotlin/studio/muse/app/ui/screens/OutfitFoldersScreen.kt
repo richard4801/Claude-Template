@@ -354,7 +354,7 @@ fun OutfitOpenScreen(id: String) {
     }
     val uploadMenu: (Int) -> List<MenuItem> = { i ->
         listOfNotNull(
-            MenuItem("upload", "Upload picture") { viewing = null; startUpload(i) },
+            MenuItem("upload", "Replace picture") { viewing = null; startUpload(i) },
             OutfitPictures.previous(o, i)?.let { MenuItem("undo", "Put back previous picture") { viewing = null; vm.putBack(o, i) } },
         )
     }
@@ -383,7 +383,8 @@ fun OutfitOpenScreen(id: String) {
                 o.partial?.let { if (!filling && making.isEmpty()) Notice(it.label, tone = NoticeTone.CAUTION) }
                 OutfitPictureGrid(pictures, making + fillingAt, busy = false, onMove = onMove,
                     upload = if (canUpload) startUpload else null, menu = if (canUpload) uploadMenu else null,
-                    redo = if (canChange && !filling && making.isEmpty()) ({ i -> if (o.isMissing(i)) Pair<String, () -> Unit>("Redo · ${Pricing.money(vm.redoEstimate(i))}") { vm.redo(o, i) } else null }) else null) { i ->
+                    // Every slot, made or empty (owner 2026-11-17): "Redo · $x" next to Replace / Upload. Not without a front to edit from.
+                    redo = if (canChange && !filling && making.isEmpty()) ({ i -> if (i == 0 || o.front != null) Pair<String, () -> Unit>("Redo · ${Pricing.money(vm.redoEstimate(i))}") { vm.redo(o, i) } else null }) else null) { i ->
                     viewing = OutfitPictures.pageOf(pictures, i)
                 }
                 if (filling) Notice("Making the missing angles from the front.")
@@ -426,9 +427,9 @@ fun OutfitOpenScreen(id: String) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onMove: ((from: Int, to: Int) -> Unit)? = null,
-    /** A missing picture's Redo ("Redo · $0.04" and its action), or null for none. */
+    /** A picture's Redo ("Redo · $0.04" and its action), or null for none: on an empty tile, and beside Replace under a made one. */
     redo: ((Int) -> Pair<String, () -> Unit>?)? = null,
-    /** Upload picture into a slot (free, so no price): "Upload" on an empty tile. */
+    /** Upload picture into a slot (free, so no price): "Upload" on an empty tile, "Replace" under a made one. */
     upload: ((Int) -> Unit)? = null,
     /** More long-press menu entries for a picture (Upload picture, Put back previous picture), above "Move to…". */
     menu: ((Int) -> List<MenuItem>)? = null, onOpen: (Int) -> Unit) {
@@ -515,6 +516,14 @@ fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: 
                                         }
                                         if (ref != null && (canMove || menu != null)) MuseMenu(menuFor == i, { menuFor = null },
                                             menu?.invoke(i).orEmpty() + (if (canMove) outfitMoveMenu(pictures, i) { to -> move?.invoke(i, to) } else emptyList()))
+                                    }
+                                    // A made picture's two choices, side by side (owner 2026-11-17): Replace (her own, free) and Redo · $x.
+                                    if (ref != null && i !in making) {
+                                        val again = redo?.invoke(i)
+                                        if (upload != null || again != null) Row(horizontalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                                            upload?.let { up -> TextAction("Replace", { up(i) }, Modifier.semantics { contentDescription = "Replace $label picture" }) }
+                                            again?.let { (text, go) -> TextAction(text, go) }
+                                        }
                                     }
                                     Caption(label, maxLines = 1)
                                 }

@@ -193,6 +193,7 @@ public enum OutfitPictures {
     public static let replaceDetail = "The current picture is kept, so you can put it back from the picture's menu."
     /// Its action titles: free, so no price.
     public static let uploadTitle = "Upload picture…"
+    public static let replaceTitle = "Replace picture…"
     public static let putBackTitle = "Put back previous picture"
 
     /// The ones with a picture, in order, with their index (0–6) and viewer label.
