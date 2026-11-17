@@ -231,12 +231,12 @@ struct OutfitOpenView: View {
             // Redo any picture, finished or not (owner 2026-11-17); being redone, the old one stays under a busy veil.
             OutfitPictureTile(ref: ref, label: label,
                               redo: free ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
-                              redoing: redoing,
-                              asking: Binding(get: { store.outfitRedoAsk == k }, set: { store.outfitRedoAsk = $0 ? k : nil }),
-                              price: { await store.outfitRedoPrice(o, k) },
                               moves: free ? OutfitPictures.moveTargets(o, from: k).map { OutfitMoveTarget(index: $0.index, title: $0.title) } : [],
                               dragPayload: free ? Self.payload(o.id, k) : nil,
                               onMove: { store.moveOutfitPicture(o, from: k, to: $0) },
+                              redoing: redoing,
+                              asking: Binding(get: { store.outfitRedoAsk == k }, set: { store.outfitRedoAsk = $0 ? k : nil }),
+                              price: { await store.outfitRedoPrice(o, k) },
                               open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
                               onRedo: { store.redoOutfitPicture(o, k, note: $0) })
         } else if o.isMissing(k) && store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil {
