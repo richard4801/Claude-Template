@@ -47,12 +47,42 @@ extension HTTPMuseAPI {
     }
     public func suiteLocations() async throws -> [SuiteLocation] {
         let list: [SuiteLocation] = try await suiteCall("GET", "v1/suite/locations")
-        return list.map { var l = $0; l.image = absolutize(l.image); return l }
+        return list.map(absolutizePlace)
     }
     public func createSuiteLocation(_ new: NewSuiteLocation) async throws -> SuiteLocation {
-        var l: SuiteLocation = try await suiteCall("POST", "v1/suite/locations", body: body(new))
+        absolutizePlace(try await suiteCall("POST", "v1/suite/locations", body: body(new)))
+    }
+    private func placePath(_ id: String) -> String { "v1/suite/locations/\(Self.pathKey(id))" }
+    private func absolutizePlace(_ l: SuiteLocation) -> SuiteLocation {
+        var l = l
         l.image = absolutize(l.image)
+        l.images = l.images.map { PlaceImage(image: absolutize($0.image), source: $0.source) }
         return l
+    }
+    public func createPlace(_ new: NewPlace) async throws -> SuiteLocation {
+        absolutizePlace(try await suiteCall("POST", "v1/suite/locations", body: body(new)))
+    }
+    public func updatePlace(id: String, _ patch: PlacePatch) async throws -> SuiteLocation {
+        absolutizePlace(try await suiteCall("PATCH", placePath(id), body: body(patch)))
+    }
+    public func addPlaceImage(id: String, image: ImageRef) async throws -> SuiteLocation {
+        absolutizePlace(try await suiteCall("POST", placePath(id) + "/images", body: body(["image": image])))
+    }
+    public func removePlaceImage(id: String, index: Int) async throws -> SuiteLocation {
+        absolutizePlace(try await suiteCall("DELETE", placePath(id) + "/images/\(index)"))
+    }
+    public func placePhotoEstimate(id: String, _ req: PlacePhotoRequest) async throws -> PlacePhotoEstimate {
+        var r = req
+        r.maxUsd = nil
+        return try await suiteCall("POST", placePath(id) + "/generate/estimate", body: body(r))
+    }
+    public func makePlacePhoto(id: String, _ req: PlacePhotoRequest) async throws -> PlacePhotoResult {
+        var r: PlacePhotoResult = try await suiteCall("POST", placePath(id) + "/generate", body: body(req))
+        r.place = absolutizePlace(r.place)
+        return r
+    }
+    public func copyPlace(id: String, toModel modelId: String) async throws -> SuiteLocation {
+        absolutizePlace(try await suiteCall("POST", placePath(id) + "/copy", body: body(["modelId": modelId])))
     }
     public func deleteSuiteLocation(id: String) async throws {
         try await suiteSend("DELETE", "v1/suite/locations/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? id)")

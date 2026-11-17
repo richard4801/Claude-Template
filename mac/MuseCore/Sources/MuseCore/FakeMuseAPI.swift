@@ -84,7 +84,7 @@ public actor FakeMuseAPI: MuseAPI {
     /// AI suite (workstream 1): a job's take length when it isn't the request's (Extend: source + extension; Upscale: the take's).
     var suiteTakeSeconds: [String: Double] = [:]
     /// AI suite (workstream 1): the demo studio's locations (@location), two to start with.
-    var suiteLocationList: [SuiteLocation] = FakeMuseAPI.demoLocations
+    var suiteLocationList: [SuiteLocation] = FakeMuseAPI.demoLocations + FakeMuseAPI.demoHerPlaces
     /// AI suite (workstream 1, build step 2): the studio's saved rigs (Suite/FakeMuseAPI+RigsFeed.swift), jobs deleted from
     /// Queue (their takes leave the feed), each take's character (the server's take.modelId) and each shot's aspect.
     var suiteRigList: [SuiteRigView] = FakeMuseAPI.demoRigs

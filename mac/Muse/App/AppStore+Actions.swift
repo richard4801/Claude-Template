@@ -349,6 +349,10 @@ extension AppStore {
     // MARK: Profile
 
     func openProfile(_ id: String) {
+        if id != profileModelId {
+            profileTab = .profile
+            profilePlaceId = nil
+        }
         profileModelId = id
         go(.profile)
     }

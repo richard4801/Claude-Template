@@ -105,6 +105,10 @@ enum SnapshotRunner {
                 ("queue", { store.go(.queue) }),
                 ("models", { store.go(.models) }),
                 ("cast", { store.openProfile(SampleData.demo) }),
+                // Her world, phase 1 (plans/model-world.md mockups 1, 2, 6): Wardrobe, Places with Café by the gym open, People.
+                ("cast_wardrobe", { store.openProfile(SampleData.demo); store.profileTab = .wardrobe }),
+                ("cast_places", { store.openProfile(SampleData.demo); store.profileTab = .places; store.profilePlaceId = "loc_demo_cafe" }),
+                ("cast_people", { store.openProfile(SampleData.demo); store.profileTab = .people }),
                 ("lora", { store.go(.lora) }),
                 ("settings", { store.openSettings(.account) }),
                 ("settings_prompts", { store.openSettings(.studio); store.settingsPrompts = true }),

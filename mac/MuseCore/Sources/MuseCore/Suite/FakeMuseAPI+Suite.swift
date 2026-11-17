@@ -241,6 +241,15 @@ extension FakeMuseAPI {
         SuiteLocation(id: "loc_demo_living", name: "Living room", image: .asset("vid_living"), createdAt: 1_762_300_000_000),
         SuiteLocation(id: "loc_demo_bath", name: "Bathroom", image: .asset("vid_bath"), createdAt: 1_762_300_060_000),
     ]
+    /// Her world (phase 1): two of the demo model's own places.
+    static let demoHerPlaces: [SuiteLocation] = [
+        SuiteLocation(id: "loc_demo_apartment", name: "Apartment", image: .asset("vid_living"), createdAt: 1_762_300_120_000, modelId: SampleData.demo, tag: "apartment",
+                      description: "Her living room: cream sofa, plants by the window, warm afternoon light",
+                      images: [PlaceImage(image: .asset("vid_living"), source: .upload), PlaceImage(image: .asset("vid_living2"), source: .random)]),
+        SuiteLocation(id: "loc_demo_cafe", name: "Café by the gym", image: .asset("vid_bath"), createdAt: 1_762_300_180_000, modelId: SampleData.demo, tag: "cafe",
+                      description: "Corner café with a striped awning, across the street from her gym. Wet cobbles, warm window light",
+                      images: [PlaceImage(image: .asset("vid_bath"), source: .upload)]),
+    ]
 
     public func suiteLocations() async throws -> [SuiteLocation] { suiteLocationList.sorted { $0.createdAt > $1.createdAt } }
 
@@ -255,6 +264,111 @@ extension FakeMuseAPI {
     public func deleteSuiteLocation(id: String) async throws {
         guard suiteLocationList.contains(where: { $0.id == id }) else { throw ApiError("not_found", "Location not found") }
         suiteLocationList.removeAll { $0.id == id }
+    }
+
+    // Her world, phase 1: places (demo mode keeps them in memory; a demo place photo reuses a demo still, $0.03).
+    static let demoPlacePhotoUsd = 0.03
+    private func placeIndex(_ id: String) throws -> Int {
+        guard let i = suiteLocationList.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Place not found") }
+        return i
+    }
+    private func freeTag(_ want: String?, name: String, modelId: String?, except: String? = nil) throws -> String {
+        let taken = Set(suiteLocationList.filter { $0.modelId == modelId && $0.id != except }.map(\.tag))
+        if let want {
+            guard let t = Places.cleanTag(want) else { throw ApiError("bad_request", "A tag is 1–30 letters, digits, - or _") }
+            if taken.contains(t) { throw ApiError("tag_taken", "@\(t) is already used · pick another tag") }
+            return t
+        }
+        let base = Places.tag(from: name)
+        var n = 1
+        while true {
+            let t = n == 1 ? base : "\(base.prefix(27))-\(n)"
+            if !taken.contains(t) { return t }
+            n += 1
+        }
+    }
+    private func savePlace(_ l: SuiteLocation) -> SuiteLocation {
+        var l = l
+        l.cover = min(max(0, l.cover), max(0, l.images.count - 1))
+        if let c = l.coverImage { l.image = c }
+        if let i = suiteLocationList.firstIndex(where: { $0.id == l.id }) { suiteLocationList[i] = l } else { suiteLocationList.append(l) }
+        return l
+    }
+
+    public func createPlace(_ new: NewPlace) async throws -> SuiteLocation {
+        guard let name = ComposerLocations.cleanName(new.name) else { throw ApiError("bad_request", "Give the place a name") }
+        if let mid = new.modelId { _ = try model(mid) } else if new.image == nil { throw ApiError("bad_request", "A studio place needs a photo") }
+        let tag = try freeTag(new.tag, name: name, modelId: new.modelId)
+        let images = new.image.map { [PlaceImage(image: $0, source: .upload)] } ?? []
+        return savePlace(SuiteLocation(id: "loc_" + shortId(), name: name, image: new.image ?? ImageRef(), createdAt: Double(nowMs()), modelId: new.modelId, tag: tag,
+                                       description: new.description ?? "", images: images))
+    }
+
+    public func updatePlace(id: String, _ patch: PlacePatch) async throws -> SuiteLocation {
+        var l = suiteLocationList[try placeIndex(id)]
+        if let n = patch.name {
+            guard let name = ComposerLocations.cleanName(n) else { throw ApiError("bad_request", "Give the place a name") }
+            l.name = name
+        }
+        if let t = patch.tag { l.tag = try freeTag(t, name: l.name, modelId: l.modelId, except: l.id) }
+        if let d = patch.description { l.description = d.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if let c = patch.cover {
+            guard l.images.indices.contains(c) else { throw ApiError("bad_request", "cover: no such photo") }
+            l.cover = c
+        }
+        return savePlace(l)
+    }
+
+    public func addPlaceImage(id: String, image: ImageRef) async throws -> SuiteLocation {
+        var l = suiteLocationList[try placeIndex(id)]
+        guard l.images.count < Places.maxImages else { throw ApiError("place_full", "A place keeps up to \(Places.maxImages) photos · remove one first") }
+        l.images.append(PlaceImage(image: image, source: .upload))
+        return savePlace(l)
+    }
+
+    public func removePlaceImage(id: String, index: Int) async throws -> SuiteLocation {
+        var l = suiteLocationList[try placeIndex(id)]
+        guard l.images.indices.contains(index) else { throw ApiError("not_found", "Photo not found") }
+        if l.isStudio && l.images.count == 1 { throw ApiError("last_photo", "A studio place keeps at least one photo · delete the place instead") }
+        l.images.remove(at: index)
+        l.cover = l.cover > index ? l.cover - 1 : l.cover == index ? 0 : l.cover
+        return savePlace(l)
+    }
+
+    public func placePhotoEstimate(id: String, _ req: PlacePhotoRequest) async throws -> PlacePhotoEstimate {
+        let l = suiteLocationList[try placeIndex(id)]
+        if req.mode == .random && l.images.isEmpty { throw ApiError("needs_a_photo", "A random view starts from the place’s photos · add one, or generate from a description") }
+        let usd = Self.demoPlacePhotoUsd
+        return PlacePhotoEstimate(estimate: usd, buttonLabel: "Generate · \(Places.money(usd))", priceLine: "about \(Places.money(usd)) · 1 photo")
+    }
+
+    public func makePlacePhoto(id: String, _ req: PlacePhotoRequest) async throws -> PlacePhotoResult {
+        var l = suiteLocationList[try placeIndex(id)]
+        let usd = Self.demoPlacePhotoUsd
+        if let max = req.maxUsd, usd > max + 1e-9 { throw ApiError("price_changed", "The price is now \(Places.money(usd)) · approve the new price to make it") }
+        guard l.images.count < Places.maxImages else { throw ApiError("place_full", "A place keeps up to \(Places.maxImages) photos · remove one first") }
+        switch req.mode {
+        case .random: if l.images.isEmpty { throw ApiError("needs_a_photo", "A random view starts from the place’s photos") }
+        case .reference: if req.reference == nil { throw ApiError("bad_request", "reference: the picture to rebuild from") }
+        case .description: if (req.description ?? l.description).trimmingCharacters(in: .whitespaces).isEmpty { throw ApiError("bad_request", "Describe the place") }
+        }
+        let stills = ["vid_living", "vid_bath"]
+        l.images.append(PlaceImage(image: .asset(stills[l.images.count % stills.count]), source: PlaceImageSource(rawValue: req.mode.rawValue) ?? .description))
+        return PlacePhotoResult(place: savePlace(l), chargedUsd: usd)
+    }
+
+    public func copyPlace(id: String, toModel modelId: String) async throws -> SuiteLocation {
+        let src = suiteLocationList[try placeIndex(id)]
+        _ = try model(modelId)
+        if src.modelId == modelId { throw ApiError("bad_request", "This place is already hers") }
+        let taken = suiteLocationList.contains { $0.modelId == modelId && $0.tag == src.tag }
+        let tag = taken ? try freeTag(nil, name: src.name, modelId: modelId) : src.tag
+        var copy = src
+        copy.id = "loc_" + shortId()
+        copy.modelId = modelId
+        copy.tag = tag
+        copy.createdAt = Double(nowMs())
+        return savePlace(copy)
     }
 
     public func suiteCreateShot(_ req: ShotRequest) async throws -> Job {

@@ -388,6 +388,9 @@ final class AppStore {
     // MARK: Models
 
     var profileModelId = SampleData.demo
+    /// Her page's tab and the place open on Places (plans/model-world.md); back to Profile when another model opens.
+    var profileTab: ProfileTab = .profile
+    var profilePlaceId: String?
     var create = CreateDraft()
     var outfitSheet: OutfitDraft?
     /// Outfit page (plans/outfit-head-looks.md §4): the folder page shown per model (0-based), the outfit open, the
