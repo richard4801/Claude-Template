@@ -39,7 +39,14 @@ extension AppStore {
     }
 
     /// What Generate would send now (nil until a character is picked).
-    var photoRequest: PhotoRequest? { suite.composer.photoRequest(suite.photo, product: photoProduct) }
+    var photoRequest: PhotoRequest? { suite.composer.photoRequest(suite.photo, product: photoProduct, claudeImages: photoClaudeImages) }
+
+    /// Reference images Claude added in the chat (they aren't in the composer): they count as images for Photo.
+    var photoClaudeImages: Int { suite.claude.references.filter { !$0.url.isEmpty || !$0.uploadId.isEmpty }.count }
+
+    /// The draft Photo sends: the composer's settings plus Claude's chat references, so the server sees the images
+    /// itself (an image-edit model needs one) rather than recovering them from the chat.
+    var photoDraft: SuiteDraft { SuiteAssistDraft.with(suite.claude.references, in: ComposerDrafts.draft(suite.composer, photo: suite.photo)) }
 
     /// The preset the Photo tool starts from.
     var photoPreset: MuseTemplate? { suite.photo.presetId.flatMap { id in templates.first { $0.id == id } } }
@@ -58,7 +65,7 @@ extension AppStore {
             return
         }
         suite.rigDismissals.sync(RigChoices(req))
-        if suite.composer.sent != nil { req.draft = ComposerDrafts.draft(suite.composer, photo: suite.photo) } // images sent
+        if suite.composer.sent != nil || !suite.claude.references.isEmpty { req.draft = photoDraft } // images sent, or Claude's references
         do {
             let e = try await api.suitePhotoEstimate(req)
             guard !Task.isCancelled else { return }
@@ -80,7 +87,7 @@ extension AppStore {
     func generatePhoto() {
         guard !suite.generating else { return }
         let uploading = suite.photoRefsUploading > 0 || suite.composerSlots.slots.uploading
-        if let need = suite.composer.photoMissing(suite.photo, uploading: uploading) {
+        if let need = suite.composer.photoMissing(suite.photo, uploading: uploading, claudeImages: photoClaudeImages) {
             showToast(need)
             return
         }
@@ -97,7 +104,7 @@ extension AppStore {
         perform { [self] in
             defer { suite.generating = false }
             var req = req
-            req.draft = ComposerDrafts.draft(suite.composer, photo: suite.photo) // Reuse settings
+            req.draft = photoDraft // Reuse settings, and Claude's references
             // WS19: the run is a job: the stage and the Queue follow it, and the stills land on the stage (and the Library).
             let j = try await api.suiteStartPhotos(req)
             upsert(j)
