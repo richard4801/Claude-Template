@@ -73,6 +73,7 @@ describe('Muapi schemas', () => {
     expect(a.map.referenceImages).toBe('images_list');
     expect(a.shapes.referenceImages).toBe('array');
     expect(a.inputs.referenceImages).toBe(10);
+    expect(a.refsRequired).toBe(true); // an edit model: no photo from words alone
     expect(a.missing).toEqual([]);
   });
   it('refs are one path segment: path tricks are refused', () => {
@@ -387,6 +388,93 @@ describe('Bring your own provider · Muapi against a FAKE Muapi (recorded fixtur
       expect(new Set(sizes).size).toBe(1);
       await expect(a.ctx.suite.byo.image.generate({ prompt: 'REFUSE', referenceImages: ['https://x/a.jpg'], width: 768, height: 1024, count: 1 }, { provider: 'byo', model: im.id }))
         .rejects.toMatchObject({ code: 'provider_refused' });
+    } finally { await a.close(); }
+  });
+});
+
+describe('Photo on a Muapi image-edit model (prod 2026-11-17: 422 "images_list Field required")', () => {
+  let server: http.Server, base = '';
+  const calls: { url: string; body?: any }[] = [];
+  beforeAll(async () => {
+    server = http.createServer((q, res) => {
+      let raw = '';
+      q.on('data', c => (raw += c));
+      q.on('end', () => {
+        const url = q.url ?? '';
+        const json = (s: number, o: unknown) => { res.writeHead(s, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+        const body = raw ? JSON.parse(raw) : undefined;
+        calls.push({ url, body });
+        const sub = url.slice('/mu/api/v1'.length);
+        if (sub === '/models') return json(200, fixture('muapi-models.json'));
+        let m = /^\/models\/([^/?]+)\/estimate-cost$/.exec(sub);
+        if (m) return json(200, { model: m[1], cost: 0.04, currency: 'USD' });
+        m = /^\/models\/([^/?]+)$/.exec(sub);
+        if (m) return fs.existsSync(path.join(FIX, `muapi-model-${m[1]}.json`)) ? json(200, detail(m[1]!)) : json(404, {});
+        if (sub === '/account/balance') return json(200, { balance: 12.5, currency: 'USD' });
+        m = /^\/predictions\/([^/]+)\/result$/.exec(sub);
+        if (m) return json(200, { id: m[1], status: 'failed', outputs: [], error: 'stop here' });
+        if (q.method === 'POST') {
+          // Muapi's own check: an edit model refuses a body without its image list.
+          if (/edit/.test(sub) && !(Array.isArray(body?.images_list) && body.images_list.length)) return json(422, { detail: [{ type: 'missing', loc: ['body', 'images_list'], msg: 'Field required' }] });
+          return json(200, { request_id: `req_${calls.length}`, status: 'processing' });
+        }
+        return json(404, {});
+      });
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    base = `http://127.0.0.1:${(server.address() as any).port}`;
+  });
+  afterAll(() => { server?.close(); });
+
+  it('Claude\'s draft reference (no character) reaches images_list; with no image at all it is refused before any charge', async () => {
+    const a = await makeApp({ PROVIDER_KEYS_SECRET: SECRET, MUAPI_API_URL: `${base}/mu/api/v1`, REPLICATE_API_URL: `${base}/none`, SUITE_POLL_MS: '10', REPLICATE_POLL_MS: '10',
+      IMAGE_PROVIDER: 'simulated', SUITE_MODE: 'live' });
+    const { owner } = await people(a, 0, { topUp: 100 });
+    try {
+      const p = (await owner.req('POST', '/v1/providers', { kind: 'muapi', apiKey: MU_GOOD })).body;
+      const im = (await owner.req('POST', `/v1/providers/${p.id}/models`, { ref: 'bytedance-seedream-v4-edit' })).body;
+      expect((await owner.req('PATCH', `/v1/providers/models/${im.id}`, { enabled: true })).status).toBe(200);
+      const url = '/uploads/u/up_outfit_sheet.jpg';
+      const draft = { v: 1, tool: 'photo', references: [{ uploadId: 'up_outfit', url, use: 'outfit' }] };
+      const body = { prompt: 'Copy the attached reference exactly: the same outfit sheet.', count: 1, imageModel: im.id, draft };
+      const est = await owner.req('POST', '/v1/suite/photos/estimate', body);
+      expect(est.status, JSON.stringify(est.body)).toBe(200);
+      expect(est.body.sentImages.images.length, JSON.stringify(est.body.sentImages)).toBe(1);
+      calls.length = 0;
+      const run = await owner.req('POST', '/v1/suite/photos', body);
+      const posts = calls.filter(c => c.url === '/mu/api/v1/bytedance-seedream-edit-v4');
+      expect(posts.length, JSON.stringify(run.body)).toBeGreaterThan(0);
+      expect(posts[0]!.body.images_list).toEqual([expect.stringMatching(/^https?:\/\//)]);
+
+      // As the Mac sent it: the Photo draft WITHOUT `references` (Claude's reference lives in the person's Suite draft with
+      // Claude only), async. MUSE takes Claude's reference from that open Photo draft.
+      const assist = await owner.req('POST', '/v1/suite/assist', { draft: { v: 1, tool: 'photo', count: 1, tokens: [{ t: 'text', text: body.prompt }], references: draft.references } });
+      expect(assist.status, JSON.stringify(assist.body)).toBe(200);
+      const mac = { prompt: body.prompt, count: 1, imageModel: im.id, title: 'Copy the attached reference', draft: { v: 1, tool: 'photo', count: 1, tokens: [{ t: 'text', text: body.prompt }] } };
+      const macEst = await owner.req('POST', '/v1/suite/photos/estimate', mac);
+      expect(macEst.status, JSON.stringify(macEst.body)).toBe(200);
+      expect(macEst.body.sentImages.images.length).toBe(1);
+      calls.length = 0;
+      const macRun = await owner.req('POST', '/v1/suite/photos', { ...mac, async: true });
+      expect(macRun.status, JSON.stringify(macRun.body)).toBe(200);
+      await until(() => calls.some(c => c.url === '/mu/api/v1/bytedance-seedream-edit-v4'), 10_000);
+      const macPost = calls.find(c => c.url === '/mu/api/v1/bytedance-seedream-edit-v4')!;
+      expect(macPost.body.images_list).toEqual([expect.stringMatching(/^https?:\/\//)]);
+      // Another prompt is another photo: the open draft's reference isn't borrowed for it.
+      const other = await owner.req('POST', '/v1/suite/photos/estimate', { ...mac, prompt: 'Something else entirely.', draft: { v: 1, tool: 'photo' } });
+      expect(other.status).toBe(400);
+      await until(async () => (await owner.req('GET', `/v1/jobs/${macRun.body.job.id}`)).body.state !== 'running', 10_000);
+
+      // Words alone on a model that edits a picture: a clear 400 before anything is held or sent.
+      const words = { prompt: 'A quiet beach at dawn.', count: 1, imageModel: im.id };
+      calls.length = 0;
+      const e2 = await owner.req('POST', '/v1/suite/photos/estimate', words);
+      expect(e2.status).toBe(400);
+      expect(e2.body.error).toBe("This model edits a picture: add a reference image or pick a character first.");
+      const r2 = await owner.req('POST', '/v1/suite/photos', { ...words, async: true });
+      expect(r2.status).toBe(400);
+      expect(r2.body.error).toMatch(/edits a picture/);
+      expect(calls.filter(c => c.url === '/mu/api/v1/bytedance-seedream-edit-v4')).toHaveLength(0);
     } finally { await a.close(); }
   });
 });

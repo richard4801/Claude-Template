@@ -602,6 +602,22 @@ function parseDraft(v: unknown): Draft {
 
 const services = new WeakMap<Ctx, SuiteAssist>();
 export const assistOf = (ctx: Ctx) => { let s = services.get(ctx); if (!s) { s = new SuiteAssist(ctx); services.set(ctx, s); } return s; };
+/** How long the person's Suite draft with Claude stays "the one on screen" for a Photo request that doesn't carry it. */
+const LIVE_ASSIST_MS = 6 * 3600_000;
+const samePrompt = (a: string, b: string) => { const n = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim(); return n(a) === n(b); };
+/**
+ * Claude's chat references (suite_add_reference) on the Photo draft this person has open, for a Photo request whose own
+ * draft doesn't say (prod 2026-11-17: the Mac's Photo Generate sent its draft without `references`, so an image-edit
+ * model got no image). Only the person's most recent Suite draft, a Photo one changed in the last hours, with the same
+ * prompt as the request: never an older or another tool's draft.
+ */
+export async function liveClaudeReferences(ctx: Ctx, u: AuthUser, prompt: string): Promise<DraftReference[]> {
+  const [r] = await ctx.db.select().from(suiteAssists).where(and(eq(suiteAssists.studioId, u.studioId), eq(suiteAssists.userId, u.id))).orderBy(desc(suiteAssists.updatedAt)).limit(1);
+  if (!r || Date.now() - r.updatedAt > LIVE_ASSIST_MS) return [];
+  const d = r.draft as Draft;
+  if (d.tool !== 'photo' || !samePrompt(promptText(tokensOf(d)), prompt)) return [];
+  return referencesOf(d);
+}
 /** The member's most recent assists (for the threads list). */
 export async function recentAssists(ctx: Ctx, u: AuthUser, limit = 10) {
   return (await ctx.db.select().from(suiteAssists).where(and(eq(suiteAssists.studioId, u.studioId), eq(suiteAssists.userId, u.id))).orderBy(desc(suiteAssists.updatedAt)).limit(limit)).map(r => assistOf(ctx).view(r));

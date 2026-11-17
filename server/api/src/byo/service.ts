@@ -399,7 +399,10 @@ export class ByoService {
     const a = r.analysis, fixed = (r.fixedInputs ?? {}) as Record<string, unknown>;
     const fixedAr = a.map.aspectRatio ? fixed[a.map.aspectRatio] : undefined;
     const aspects = typeof fixedAr === 'string' ? [fixedAr] : a.map.width && a.map.height ? null : a.map.aspectRatio && a.inputs.aspectRatios.length ? a.inputs.aspectRatios : null;
-    return { name: r.displayName, aspects, needsImage: false };
+    // An image-edit model (its image input required) can't make a photo from words alone. An analysis stored before
+    // refsRequired existed: a model named "…-edit" with an image input (Muapi's flux-2-dev-edit, seedream-…-edit).
+    const needsImage = !!a.map.referenceImages && (a.refsRequired ?? /(^|[-_./])edit([-_.]|$)/i.test(r.ref));
+    return { name: r.displayName, aspects, needsImage };
   }
   async photoCapacity(studioId: string, id: string) {
     await this.ensure(studioId);
