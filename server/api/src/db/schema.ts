@@ -154,6 +154,8 @@ export const outfits = pgTable('outfits', {
   cost: money('cost'),
   /** Dress up outfits: the face close-ups wearing its accessories (face, face ¾, profile). */
   faces: jsonb('faces').$type<(ImageRef | null)[]>(),
+  /** An outfit made "From a photo": the reference photo(s) it was made from, so Redo sends the original (owner 2026-11-17). */
+  photos: jsonb('photos').$type<ImageRef[]>(),
   createdBy: text('created_by'),
   createdAt: ms('created_at').notNull(),
 }, t => [index('outfits_studio_idx').on(t.studioId)]);

@@ -288,6 +288,13 @@
       "when": 1794872030040,
       "tag": "0040_places",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794897415019,
+      "tag": "0041_outfit_photos",
+      "breakpoints": true
     }
   ]
 }

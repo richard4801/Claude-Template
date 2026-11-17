@@ -96,6 +96,8 @@ export const PROMPT_DEFS: PromptDef[] = [
     [['photo', 'the outfit photo: "image 5" or "panel 5"', true]]),
   d('outfit.photo.complete', 'outfits', 'Outfit photo \u00b7 head to toe', 'Every angle of an outfit set made from a photo: the whole outfit, footwear included.',
     'The complete outfit head to toe as in {photo}, including the footwear, on every angle.', [['photo', 'the outfit photo: "image 5" or "panel 5"', true]]),
+  d('outfit.redo.front', 'outfits', 'Redo \u00b7 the outfit\u2019s front', 'Redo or fill of the \u00be, side or back as a new shot of an outfit made from a photo: its current front is sent too, so the angles match.',
+    '{front} shows this outfit\u2019s front: the same clothes, footwear, hair and accessories, from this angle.', [['front', 'the front: "image 6" or "panel 6"', true]]),
   d('outfit.never.extra', 'outfits', 'Never add (outfit sets)', 'Comma-separated. Added to never-add for outfit sets.', 'visible brand logos', [], { kind: 'list' }),
   // Her figure in every outfit picture (owner 2026-11-16: "always keep her shape, from every angle"). Sent with every angle,
   // every way of making an outfit (new shots, edits, keeping pieces from her base); Presets off never drops it.

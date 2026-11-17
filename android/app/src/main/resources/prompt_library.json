@@ -733,6 +733,26 @@
    "updatedBy": null
   },
   {
+   "key": "outfit.redo.front",
+   "group": "outfits",
+   "title": "Redo · the outfit’s front",
+   "description": "Redo or fill of the ¾, side or back as a new shot of an outfit made from a photo: its current front is sent too, so the angles match.",
+   "kind": "text",
+   "default": "{front} shows this outfit’s front: the same clothes, footwear, hair and accessories, from this angle.",
+   "current": "{front} shows this outfit’s front: the same clothes, footwear, hair and accessories, from this angle.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "front",
+     "description": "the front: \"image 6\" or \"panel 6\"",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "outfit.never.extra",
    "group": "outfits",
    "title": "Never add (outfit sets)",
