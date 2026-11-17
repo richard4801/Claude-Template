@@ -754,6 +754,7 @@ struct RTextBox: View {
             TextEditor(text: $text)
                 .font(t.scale.body.font)
                 .scrollContentBackground(.hidden)
+                .scrollIndicators(.never) // no NSScrollView scroller knob inside the 2-3 line field (run 710 review)
                 .focused($focused)
                 .frame(height: CGFloat(lines) * 21)
         }
