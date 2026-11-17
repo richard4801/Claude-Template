@@ -476,7 +476,7 @@ private fun NewSwapBar(wide: Boolean, est: studio.muse.app.data.SuiteEstimate?, 
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SuitePill("clock", secs?.let { "${trimNum(it)} s" } ?: "—")
                 SuitePill("device-mobile", clip?.let { shape(it.width, it.height) } ?: "9:16")
-                if (wide) SuitePill("stack", row?.price?.resolution?.ifBlank { null } ?: "—")
+                ResolutionPill(d, row) { r -> ns.draft.update { it.copy(resolution = r) } }
                 // The model: Auto first and why; every model that edits a video, with its price for this clip.
                 Box {
                     val shape = RoundedCornerShape(m.radii.control)
@@ -516,3 +516,31 @@ private fun NewSwapBar(wide: Boolean, est: studio.muse.app.data.SuiteEstimate?, 
     }
 }
 
+/**
+ * The bar's resolution (owner bug 2026-11-17: it was a read-out): a menu of the model's `limits.resolutions` with a check
+ * on the current one, the model's default when none is picked. Read-only while the model offers one resolution.
+ */
+@Composable
+private fun ResolutionPill(d: RemixDraft, row: studio.muse.app.data.RemixModels.Row?, pick: (String?) -> Unit) {
+    val m = muse
+    val options = row?.limits?.resolutions.orEmpty()
+    val current = d.resolution ?: row?.price?.resolution?.ifBlank { null }
+    if (options.size <= 1) { SuitePill("stack", current ?: options.firstOrNull() ?: "—"); return }
+    var open by remember { mutableStateOf(false) }
+    Box {
+        val shape = RoundedCornerShape(m.radii.control)
+        Row(Modifier.heightIn(min = 40.dp).clip(shape).border(1.dp, m.roles.hairline, shape).press { open = true }.padding(horizontal = 10.dp)
+            .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = "Resolution: ${current ?: "the model's default"}" },
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SIc("stack", 14.dp, m.roles.ink2)
+            T(current ?: "Resolution", m.scale.label.copy(fontWeight = FontWeight.Medium), m.roles.ink, maxLines = 1)
+            SIc("caret-down", 12.dp, m.roles.ink2)
+        }
+        DropdownMenu(open, { open = false }) {
+            options.forEach { r ->
+                DropdownMenuItem({ T(r, m.scale.label, m.roles.ink) }, onClick = { open = false; pick(r) },
+                    trailingIcon = { if (r == current) SIc("check", 16.dp, m.roles.ink) })
+            }
+        }
+    }
+}

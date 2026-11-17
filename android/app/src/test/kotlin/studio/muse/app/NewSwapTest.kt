@@ -42,6 +42,18 @@ class NewSwapTest {
         assertNotNull(RemixDraft(lookOn = true, lookWords = "night").request("c", "x"))
     }
 
+    @Test fun thePickedResolutionGoesOnTheRequestAndFallsBackWhenTheModelDoesntMakeIt() {
+        // Owner bug 2026-11-17: the bar's resolution picks it (the Mac's RemixDraft.resolution).
+        val d = RemixDraft(lookOn = true, lookWords = "night")
+        assertNull("the model's default: none sent", d.request("c", "x")!!.resolution)
+        val low = d.copy(resolution = "480p")
+        assertEquals("480p", low.request("c", "x")!!.resolution)
+        assertEquals("480p", low.resolutionKept(listOf("480p", "720p")))
+        assertNull(low.resolutionKept(listOf("720p", "1080p")))
+        assertEquals("kept until the list is in", "480p", low.resolutionKept(null))
+        assertNull(d.resolutionKept(listOf("720p")))
+    }
+
     @Test fun clampRangeKeepsTheWholeClipAsNull() {
         assertNull(RemixDraft.clampRange(0.0, 9.4, 9.4))
         assertEquals(studio.muse.app.data.RemixRange(1.2, 5.0), RemixDraft.clampRange(1.23, 5.0, 9.4))

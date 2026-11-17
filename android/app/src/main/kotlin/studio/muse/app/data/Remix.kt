@@ -49,6 +49,8 @@ data class RemixDraft(
     val range: RemixRange? = null,
     /** The picked model (null = Auto). */
     val engineModel: String? = null,
+    /** The picked resolution (null = the model's default; owner bug 2026-11-17). Cleared when the model in use doesn't make it. */
+    val resolution: String? = null,
     val keepAudio: Boolean = true,
 ) {
     val anyOn: Boolean get() = backgroundOn || outfitOn || characterOn || lookOn
@@ -101,7 +103,14 @@ data class RemixDraft(
     fun request(clipId: String?, clipName: String?): SuiteShotRequest? {
         if (clipId == null || missing != null) return null
         return SuiteShotRequest(mode = MODE, title = "New Swap · ${clipName ?: "clip"}", prompt = "", quality = "standard", takes = 1, clipId = clipId,
-            keepAudio = keepAudio, engineModel = engineModel, remix = toggles, range = range?.let { listOf(it.from, it.to) })
+            keepAudio = keepAudio, engineModel = engineModel, remix = toggles, range = range?.let { listOf(it.from, it.to) }, resolution = resolution)
+    }
+
+    /** The picked resolution if the model in use makes it, else null (its default); kept while the list isn't in yet. */
+    fun resolutionKept(resolutions: List<String>?): String? {
+        val r = resolution ?: return null
+        val list = resolutions ?: return r
+        return r.takeIf { it in list }
     }
 
     companion object {
