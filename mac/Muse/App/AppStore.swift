@@ -403,6 +403,8 @@ final class AppStore {
     var remakingOutfit: [String: Set<Int>] = [:]
     /// The opened outfit's picture whose Redo box is open (0–3 angles, 4–6 faces), nil when none.
     var outfitRedoAsk: Int?
+    /// Outfit pictures being uploaded into their slot (Upload picture): outfit id → picture indices.
+    var uploadingOutfit: [String: Set<Int>] = [:]
 
     // MARK: Model tools (plans/api.md "Model tools")
 

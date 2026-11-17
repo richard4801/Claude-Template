@@ -148,6 +148,49 @@ extension AppStore {
         }
     }
 
+    /// Upload picture (owner 2026-11-17: "I shouldn't need to generate if I already have it"): a photo from disk (picked,
+    /// or dropped on the tile) goes into slot `k`, empty or filled. Free; anyone in the studio. Replacing a picture asks
+    /// first; the old one is kept by the server and comes back with "Put back previous picture".
+    func uploadOutfitPicture(_ o: Outfit, _ k: Int, file: URL? = nil) {
+        guard OutfitPictures.keys.indices.contains(k) else { return }
+        guard canUploadOutfitPicture(o) else {
+            showToast("This outfit is still being made · add the picture when it finishes")
+            return
+        }
+        guard let url = file ?? MediaImport.pick(MediaImport.imageTypes, multiple: false, prompt: "Upload").first else { return }
+        guard MediaImport.isImage(url) else { showToast("That isn't a photo · use a JPEG, PNG, WebP or HEIC"); return }
+        if OutfitPictures.refs(o)[k] != nil {
+            let alert = NSAlert()
+            alert.messageText = OutfitPictures.replaceQuestion(k)
+            alert.informativeText = OutfitPictures.replaceDetail
+            alert.addButton(withTitle: "Replace picture")
+            alert.addButton(withTitle: "Keep")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        setOutfitPicture(o, k, toast: OutfitPictures.refs(o)[k] == nil ? "\(OutfitPictures.captions[k]) picture added" : "\(OutfitPictures.captions[k]) picture replaced") { [self] in
+            try await uploadImage(url)
+        }
+    }
+    /// The picture an upload replaced in slot `k` goes back (the current one is kept in its place in the list).
+    func putBackOutfitPicture(_ o: Outfit, _ k: Int) {
+        guard let prev = OutfitPictures.previous(o, k), canUploadOutfitPicture(o) else { return }
+        setOutfitPicture(o, k, toast: "Previous \(OutfitPictures.captions[k].lowercased()) picture put back") { prev }
+    }
+    /// Not while it's being made, redone, or another picture of it is uploading.
+    func canUploadOutfitPicture(_ o: Outfit) -> Bool {
+        o.state != "generating" && !fillingOutfits.contains(o.id) && remakingOutfit[o.id] == nil && (uploadingOutfit[o.id]?.isEmpty ?? true)
+    }
+    private func setOutfitPicture(_ o: Outfit, _ k: Int, toast: String, image: @escaping () async throws -> ImageRef) {
+        uploadingOutfit[o.id, default: []].insert(k)
+        perform { [self] in
+            defer { uploadingOutfit[o.id]?.remove(k) }
+            let ref = try await image()
+            let r = try await api.setOutfitPicture(id: o.id, picture: OutfitPictures.keys[k], image: ref)
+            LiveEvents.applyOutfit(&outfits, &models, r.outfit)
+            showToast(toast)
+        }
+    }
+
     /// One edit; the front is a new shot (its price as one new outfit picture).
     func outfitRedoEstimate(_ k: Int) -> Double { k == 0 ? photoPricing.outfitSet() - 3 * photoPricing.perEdit : photoPricing.perEdit }
 
