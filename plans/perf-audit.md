@@ -283,3 +283,17 @@ Static read of the path: a patch from the live session lands in `showRemote` →
 
 - **All perf checks pass:** patches show within 0.81 s; patch CPU 79 % median; the orb drew 136 clock ticks and 136 frames; Claude working uses 10.2 %; idle after patches is 0 %.
 - **Composer CUT, last cause:** the render card fits now. In the mid-render shot, though, the whole window's content (sidebar included) starts about 31 pt further right, and "MUSE Studio" sits on one line instead of two: the window content is wider than the window. The title bar's running-render indicator still had a minimum width even with the bar at 16 pt (padding, the truncated label, spacing), and theme C's title bar is right at 1000 pt. The indicator now uses `ViewThatFits`: label and bar, then the bar alone, then nothing. The stage card shows the render's progress anyway. `composer_empty` (no render running) was already fitting at 823.
+
+### Final: bundle 38 (run 743, prod 3dc739f8 + perf through f33afc1 + Redo), green and READY
+
+| Check | Build 704 | Run 743 |
+|---|---|---|
+| Idle, every main page, panel idle, window hidden | not measured | 0.0–0.1 % |
+| Claude patches into the 66-clip edit: slowest to show | not measured (run 718: 2.63 s) | **0.86 s** (hard gate 1 s) |
+| CPU while Claude patches (median) | not measured (run 718: 91 %) | 84 % (INFO, aim 83 %; windows 62 79 84 104 94) |
+| Edit paused while Claude's reply streams | 33 % | 4–6 % (runs 735–739) |
+| Claude panel open, Claude working (orb at 20 fps) | not measured | 8.8 % |
+| Orb clock ticks / frames while working | — | 118 / 118 |
+| Composer 1000×700 theme C, mid-render | CUT (title bar indicator) | FITS (Generate at x 834) |
+
+Parked for a session on the owner's Mac with Instruments (coordinator): Canvas-drawn interactive timeline lanes (move, trim, keyframes, badges). That is the remaining lever for CPU while Claude patches. The late 104 % / 94 % windows come after the sample, while the player items rebuilt for the last patches decode.
