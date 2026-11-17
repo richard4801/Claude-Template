@@ -83,10 +83,10 @@ extension SnapshotRunner {
         let seenVisible = OrbVisibility.shared.visible
         // Counted as visible while measured, whatever the runner's occlusion says, so the number is the orb's real cost.
         OrbVisibility.shared.force(true)
-        let f0 = orbFrames
+        let f0 = orbFrames, k0 = OrbTicker.shared.frame
         await measure("Claude panel open, Claude working", settle: 2, limit: idleLimitWorking)
         note("INFO orb while working: state \(service.orb.state(at: now).rawValue), wants \(Int(service.orb.frameRate(at: now))) fps, "
-             + "window visible on its own \(seenVisible) (forced visible while measured), \(orbFrames - f0) orb frames drawn over the "
+             + "window visible on its own \(seenVisible) (forced visible while measured), \(OrbTicker.shared.frame - k0) clock ticks and \(orbFrames - f0) orb frames drawn over the "
              + "settle and 12 s measured (no reply text streams here: Edit's big check streams a real reply)")
         OrbVisibility.shared.force(false)
         service.orbEvent(.done(ok: true, error: nil, model: nil))
