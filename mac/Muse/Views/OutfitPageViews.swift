@@ -269,9 +269,10 @@ struct OutfitOpenView: View {
             // already has (free, so no price).
             emptySlot(label) {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Space.s2) { redoButton(o, k); uploadButton(o, k) }
-                    VStack(spacing: Space.s2) { redoButton(o, k); uploadButton(o, k) }
+                    HStack(spacing: Space.s1) { uploadButton(o, k); redoButton(o, k) }
+                    VStack(spacing: Space.s1) { uploadButton(o, k); redoButton(o, k) }
                 }
+                .padding(Space.s1)
             }
             .contextMenu { emptyMenu(o, k) }
         } else if canUpload {
@@ -290,10 +291,10 @@ struct OutfitOpenView: View {
             .accessibilityLabel("\(label) missing")
     }
     private func redoButton(_ o: Outfit, _ k: Int) -> some View {
-        RButton("Redo · \(Pricing.money(store.outfitRedoEstimate(k)))", small: true) { store.redoOutfitPicture(o, k) }
+        OutfitTileButton(title: "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))") { store.redoOutfitPicture(o, k) }
     }
     private func uploadButton(_ o: Outfit, _ k: Int) -> some View {
-        RButton("Upload", small: true) { store.uploadOutfitPicture(o, k) }
+        OutfitTileButton(title: "Upload") { store.uploadOutfitPicture(o, k) }
             .help("Upload a picture you already have (free). You can also drop a photo here.")
     }
     @ViewBuilder private func emptyMenu(_ o: Outfit, _ k: Int) -> some View {
@@ -328,6 +329,36 @@ struct OutfitOpenView: View {
     /// The pictures that exist, in order, for the full-size viewer ("Face side  7 of 7").
     static func items(_ o: Outfit) -> [LightboxItem] {
         OutfitPictures.shown(o).map { LightboxItem(label: $0.label, ref: $0.ref) }
+    }
+}
+
+/// A tile's action ("Replace", "Upload", "Redo · $0.03"): a compact button on the raised tone with a hairline, the same
+/// on a made picture and on an empty slot, so both read as buttons. Tighter than RButton so two fit side by side on a
+/// ~187 pt tile; the label never truncates (prices stay whole).
+struct OutfitTileButton: View {
+    var title: String
+    var action: () -> Void
+    @Environment(\.theme) private var t
+    @State private var hover = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: t.radii.control, style: .continuous)
+        Button(action: action) {
+            Text(title)
+                .font(t.scale.label.font)
+                .lineLimit(1)
+                .fixedSize()
+                .foregroundStyle(t.roles.ink)
+                .padding(.horizontal, Space.s2)
+                .frame(minHeight: 28)
+                .background(shape.fill(t.roles.raised))
+                .overlay(shape.fill(t.roles.ink.opacity(hover ? (t.isDark ? 0.08 : 0.06) : 0)).allowsHitTesting(false))
+                .overlay(shape.strokeBorder(t.roles.hairline, lineWidth: 1))
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityLabel(title)
     }
 }
 
@@ -383,10 +414,10 @@ struct OutfitPictureTile: View {
             .overlay(alignment: .bottom) {
                 if !redoing && !uploading && (onUpload != nil || redo != nil) {
                     ViewThatFits(in: .horizontal) {
-                        HStack(spacing: Space.s2) { choices }
+                        HStack(spacing: Space.s1) { choices }
                         VStack(spacing: Space.s1) { choices }
                     }
-                    .padding(Space.s2)
+                    .padding(Space.s1)
                 }
             }
             .onHover { hover = $0 }
@@ -405,11 +436,11 @@ struct OutfitPictureTile: View {
     /// "Replace" (upload a picture; asks first) and "Redo · $x" (its box with a note and the server's price).
     @ViewBuilder private var choices: some View {
         if let onUpload {
-            RButton("Replace", small: true) { onUpload() }
+            OutfitTileButton(title: "Replace") { onUpload() }
                 .help("Replace with a picture you already have (free). You can also drop a photo here.")
         }
         if let redo {
-            RButton(redo, small: true) { ask() }
+            OutfitTileButton(title: redo) { ask() }
                 .help("Make the \(label.lowercased()) picture again")
                 .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) {
                     OutfitRedoBox(title: OutfitRedoBox.title(OutfitPictures.viewerLabels.firstIndex(of: label) ?? 0), estimate: redo,
