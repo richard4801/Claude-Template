@@ -107,6 +107,8 @@ enum SnapshotRunner {
                 ("models", { store.go(.models) }),
                 ("cast", { store.openProfile(SampleData.demo) }),
                 // Her world, phase 1 (plans/model-world.md mockups 1, 2, 6): Wardrobe, Places with Café by the gym open, People.
+                ("cast_profile_world", { store.openProfile(SampleData.demo); store.profileTab = .profile; Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1)); state.scrollTo = "profile.world" } }),
                 ("cast_wardrobe", { store.openProfile(SampleData.demo); store.profileTab = .wardrobe }),
                 ("cast_places", { store.openProfile(SampleData.demo); store.profileTab = .places; store.profilePlaceId = "loc_demo_cafe" }),
                 ("cast_people", { store.openProfile(SampleData.demo); store.profileTab = .people }),
