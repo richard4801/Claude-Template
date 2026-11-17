@@ -99,6 +99,10 @@ struct ComposerPromptBox: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: boxHeight)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: boxHeight)
+        .onChange(of: SnapshotRunner.state.overlay) { _, o in
+            // Review screenshots only: the @ menu open on an empty query (mockup 4).
+            if o == "at_menu" { typed = TypedTrigger(trigger: PromptTrigger(char: "@", query: "", start: 0), part: 0, caret: 0) }
+        }
         .overlay(alignment: suggestionAlignment) {
             if let typed, !matches.isEmpty {
                 switch suggestions {

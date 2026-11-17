@@ -255,25 +255,39 @@ struct AddPlacePhotoMenu: View {
     var place: SuiteLocation
     var pick: (PlacePhotoMode?) -> Void
     @State private var open = false
-    @State private var prices: [PlacePhotoMode: Double] = [:]
 
     var body: some View {
         Button { open = true } label: { Label("Add photo", ph: "plus") }
             .buttonStyle(RButtonStyle(kind: .quiet, small: true, off: place.images.count >= Places.maxImages))
             .disabled(place.images.count >= Places.maxImages)
             .help(place.images.count >= Places.maxImages ? "A place keeps up to \(Places.maxImages) photos" : "Add a photo")
-            .popover(isPresented: $open, arrowEdge: .bottom) { menu.environment(store).environment(\.theme, t) }
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                AddPlacePhotoList(place: place) { m in
+                    open = false
+                    pick(m)
+                }
+                .environment(store).environment(\.theme, t)
+            }
     }
+}
 
-    private var menu: some View {
+/// The Add photo menu's rows (also drawn inline for the review screenshots).
+struct AddPlacePhotoList: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var place: SuiteLocation
+    var pick: (PlacePhotoMode?) -> Void
+    @State private var prices: [PlacePhotoMode: Double] = [:]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            row(icon: "upload-simple", title: "Upload photos", line: "From your Mac", price: "Free") { open = false; pick(nil) }
+            row(icon: "upload-simple", title: "Upload photos", line: "From your Mac", price: "Free") { pick(nil) }
             Rectangle().fill(t.roles.hairline).frame(height: 1).padding(.vertical, Space.s2)
             Text("Generate one").scaled(t.scale.caption, t.roles.ink2).padding(.horizontal, Space.s3).padding(.bottom, Space.s1)
             ForEach(PlacePhotoMode.allCases, id: \.self) { m in
                 let noPhotos = m == .random && place.images.isEmpty
                 row(icon: m == .random ? "shuffle" : m == .description ? "text-aa" : "image", title: m.title,
-                    line: noPhotos ? "Add a photo first" : m.line, price: prices[m].map(Places.money) ?? "…", off: noPhotos) { open = false; pick(m) }
+                    line: noPhotos ? "Add a photo first" : m.line, price: prices[m].map(Places.money) ?? "…", off: noPhotos) { pick(m) }
             }
             Text("You see the price and approve before anything is made.").scaled(t.scale.caption, t.roles.ink2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -281,7 +295,7 @@ struct AddPlacePhotoMenu: View {
         }
         .padding(Space.s2)
         .frame(width: 340)
-        .task {
+        .task(id: place.id) {
             for m in PlacePhotoMode.allCases where !(m == .random && place.images.isEmpty) {
                 if let e = await store.placePhotoPrice(place, PlacePhotoRequest(mode: m)) { prices[m] = e.estimate }
             }
