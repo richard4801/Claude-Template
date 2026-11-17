@@ -287,10 +287,10 @@ struct OutfitOpenView: View {
             .accessibilityLabel("\(label) missing")
     }
     private func redoButton(_ o: Outfit, _ k: Int) -> some View {
-        OutfitTileButton(icon: "arrow.clockwise", title: "Redo \(Pricing.money(store.outfitRedoEstimate(k)))") { store.redoOutfitPicture(o, k) }
+        OutfitTileButton(icon: "arrow-clockwise", title: "Redo \(Pricing.money(store.outfitRedoEstimate(k)))") { store.redoOutfitPicture(o, k) }
     }
     private func uploadButton(_ o: Outfit, _ k: Int) -> some View {
-        OutfitTileButton(icon: "square.and.arrow.up", title: "Upload") { store.uploadOutfitPicture(o, k) }
+        OutfitTileButton(icon: "upload-simple", title: "Upload") { store.uploadOutfitPicture(o, k) }
             .help("Upload a picture you already have (free). You can also drop a photo here.")
     }
     @ViewBuilder private func emptyMenu(_ o: Outfit, _ k: Int) -> some View {
@@ -342,7 +342,7 @@ struct OutfitTileButton: View {
         let shape = RoundedRectangle(cornerRadius: t.radii.control, style: .continuous)
         Button(action: action) {
             HStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 10, weight: .semibold)).accessibilityHidden(true)
+                Ph(icon, 10).accessibilityHidden(true)
                 Text(title).font(t.scale.caption.font).lineLimit(1)
             }
                 .fixedSize()
@@ -433,11 +433,11 @@ struct OutfitPictureTile: View {
     /// "Replace" (upload a picture; asks first) and "Redo · $x" (its box with a note and the server's price).
     @ViewBuilder private var choices: some View {
         if let onUpload {
-            OutfitTileButton(icon: "square.and.arrow.up", title: "Replace") { onUpload() }
+            OutfitTileButton(icon: "upload-simple", title: "Replace") { onUpload() }
                 .help("Replace with a picture you already have (free). You can also drop a photo here.")
         }
         if let redo {
-            OutfitTileButton(icon: "arrow.clockwise", title: OutfitTileButton.short(redo)) { ask() }
+            OutfitTileButton(icon: "arrow-clockwise", title: OutfitTileButton.short(redo)) { ask() }
                 .help("Make the \(label.lowercased()) picture again")
                 .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) {
                     OutfitRedoBox(title: OutfitRedoBox.title(OutfitPictures.viewerLabels.firstIndex(of: label) ?? 0), estimate: redo,
