@@ -61,7 +61,7 @@ object PhotoComposer {
      */
     fun request(d: ComposerDraft, p: PhotoDraft): PhotoRequest? {
         val who = d.characterId
-        if (who == null && (p.presetId != null || (p.refs.isEmpty() && !hasWords(d)))) return null
+        if (who == null && (p.presetId != null || (!hasImage(d, p) && !hasWords(d)))) return null
         val s = d.settings
         return PhotoRequest(
             modelId = who, outfitId = who?.let { d.characterOutfit }, prompt = d.tokens.promptText().take(2000),
@@ -75,6 +75,12 @@ object PhotoComposer {
         )
     }
 
+    /** Reference images Claude added in the chat (in the composer draft, sent with it): they count as images for Photo. */
+    fun claudeImages(d: ComposerDraft): Int = d.references.count { it.url.isNotBlank() || it.uploadId.isNotBlank() }
+
+    /** An image to work from: one of the Photo tab's references, or one of Claude's (the Mac's photoClaudeImages). */
+    fun hasImage(d: ComposerDraft, p: PhotoDraft): Boolean = p.refs.isNotEmpty() || claudeImages(d) > 0
+
     /** The prompt has words: enough for a Photo without a character (owner 2026-11-11). */
     fun hasWords(d: ComposerDraft): Boolean = d.tokens.promptText().isNotBlank()
 
@@ -82,7 +88,7 @@ object PhotoComposer {
     fun problem(d: ComposerDraft, p: PhotoDraft, busy: Boolean = false): String? = when {
         busy -> "Making the photos…"
         d.characterId == null && p.presetId != null -> "Presets need a character · pick one with @"
-        d.characterId == null && p.refs.isEmpty() && !hasWords(d) && p.uploading == null -> "Describe the photo or add an image"
+        d.characterId == null && !hasImage(d, p) && !hasWords(d) && p.uploading == null -> "Describe the photo or add an image"
         p.uploading != null -> "Waiting for the upload"
         else -> null
     }
