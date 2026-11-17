@@ -77,7 +77,14 @@ extension SnapshotRunner {
         let service = ClaudeCodeService.shared
         service.orbTurnStarted()
         service.orbEvent(.text(delta: "…"))
+        // Integrator, run 709: this read 0.0 %. Say what was really drawing: the orb's state and frame rate, whether the
+        // window counts as visible (the orb and edge stop when it doesn't), and the orb frames drawn while measured.
+        let now = ClaudeCodeService.now
+        let f0 = orbFrames
         await measure("Claude panel open, Claude working", settle: 2, limit: idleLimitWorking)
+        note("INFO orb while working: state \(service.orb.state(at: now).rawValue), wants \(Int(service.orb.frameRate(at: now))) fps, "
+             + "window visible \(OrbVisibility.shared.visible), \(orbFrames - f0) orb frames drawn over the settle and 12 s measured "
+             + "(no reply text streams here: Edit's big check streams a real reply)")
         service.orbEvent(.done(ok: true, error: nil, model: nil))
         await measure("Claude panel open, after the turn", settle: 3, limit: idleLimitPanel)
 
@@ -92,6 +99,10 @@ extension SnapshotRunner {
         NSApp.activate(ignoringOtherApps: true)
         try? await Task.sleep(for: .seconds(1))
     }
+
+    /// Orb frames drawn (review mode only).
+    static var orbFrames = 0
+    static func noteOrbFrame() { if probing { orbFrames += 1 } }
 
     nonisolated static func median(_ xs: [Double]) -> Double {
         guard !xs.isEmpty else { return 0 }
