@@ -20,6 +20,7 @@ struct ComposerPriceKey: Equatable {
     var photo: PhotoDraft // Photo tool (workstream 3): count, preset and references re-price too
     var remix: RemixDraft // New Swap (beta): the toggles, trim and model re-price too
     var swapVariant: SwapVariant
+    var claudeRefs: [String] = [] // Claude's chat references (Photo sends them in its draft): adding or removing one re-prices
 }
 
 /// The composer's width below which the rail narrows to 264 and the bar's pills go to icon plus value. A 1000 pt window
@@ -133,7 +134,7 @@ struct ComposerView: View {
             if new != nil { store.applyDefaultRigIfAny() }
         }
         .task(id: ComposerPriceKey(draft: s.composer, slots: s.composerSlots.slots, swap: s.swap, clipId: store.clip?.id, catalogLoaded: s.catalog != nil, photo: s.photo,
-                                          remix: s.remix, swapVariant: s.swapVariant)) {
+                                          remix: s.remix, swapVariant: s.swapVariant, claudeRefs: s.claude.references.map(\.id))) {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
             switch s.composer.tool {
