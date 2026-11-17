@@ -286,6 +286,20 @@ class FakeMuseApi(
         return OutfitReorder(o, changed)
     }
 
+    override suspend fun setOutfitPicture(outfitId: String, slot: String, image: ImageRef): OutfitSlotSet {
+        val (o, old) = lock.withLock {
+            val o0 = outfit(outfitId)
+            if (o0.state == "generating") throw ApiException("outfit_busy", "This outfit is still being made · add the picture when it finishes")
+            val i = OutfitPictures.KEYS.indexOf(slot)
+            if (i < 0) throw ApiException("bad_request", "Unknown picture")
+            val o = OutfitPictures.withPicture(o0, i, image, by = "u_me", at = now())
+            replaceOutfit(o)
+            o to OutfitPictures.all(o0)[i]
+        }
+        events.tryEmit(ApiEvent("outfit", outfit = o))
+        return OutfitSlotSet(o, slot, old)
+    }
+
     override suspend fun saveOutfit(outfitId: String, name: String?): Outfit {
         val (o, m) = lock.withLock {
             val o = outfit(outfitId).let { if (name != null) it.copy(name = outfitName(name)) else it }.copy(state = "ready")

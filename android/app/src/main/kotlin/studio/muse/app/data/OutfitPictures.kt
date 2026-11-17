@@ -61,6 +61,39 @@ object OutfitPictures {
         return o.copy(angles = all.take(BODY), faces = if (o.faces == null && faces.all { it == null }) null else faces)
     }
 
+    /** The picture in slot [i] was put in by hand (Upload picture), not generated. */
+    fun isUpload(o: Outfit, i: Int): Boolean = o.sources?.get(KEYS.getOrNull(i)) == "upload"
+
+    /** The picture an upload most recently replaced in slot [i] (Put back previous picture), if any. */
+    fun previous(o: Outfit, i: Int): ImageRef? {
+        val key = KEYS.getOrNull(i) ?: return null
+        val now = all(o)[i]
+        return o.replaced?.lastOrNull { it.slot == key && it.image != now }?.image
+    }
+
+    /** Asked before an upload replaces a picture. */
+    fun replaceQuestion(i: Int): String = "Replace the ${LABELS[i]} picture?"
+    const val REPLACE_DETAIL = "The current picture is kept, so you can put it back from the picture's menu."
+
+    /**
+     * [o] with [image] in slot [i] (what POST /slot does; the demo's): the old picture goes to [Outfit.replaced] (newest last, at
+     * most 30), a picture from that list comes back with its own source, anything else is marked "upload".
+     */
+    fun withPicture(o: Outfit, i: Int, image: ImageRef, by: String? = null, at: Long? = null): Outfit {
+        val key = KEYS[i]
+        val pics = all(o).toMutableList()
+        val old = pics[i]
+        val list = o.replaced.orEmpty()
+        val source = list.lastOrNull { it.image == image }?.source ?: "upload"
+        val replaced = list.filter { it.image != image } +
+            (if (old != null && old != image) listOf(OutfitReplaced(key, old, o.sources?.get(key) ?: "generated", at, by)) else emptyList())
+        pics[i] = image
+        val sources = o.sources.orEmpty().toMutableMap().apply { if (source == "upload") put(key, "upload") else remove(key) }
+        val faces = pics.drop(BODY)
+        return o.copy(angles = pics.take(BODY), faces = if (o.faces == null && faces.all { it == null }) null else faces,
+            sources = sources.ifEmpty { null }, replaced = replaced.takeLast(30).ifEmpty { null })
+    }
+
     /** How many face close-ups it has. */
     fun madeFaces(o: Outfit): Int = (0 until FACES).count { o.faces?.getOrNull(it) != null }
 

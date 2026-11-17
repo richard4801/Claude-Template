@@ -107,6 +107,10 @@ data class Outfit(
     /** A set that came out partly (some pictures failed while making it; owner 2026-11-12): "5 of 7 made · Redo the
      *  missing ones" and which are missing (OutfitPictures.KEYS names). Null when complete or still being made. */
     val partial: OutfitPartial? = null,
+    /** Pictures the person put in by hand (Upload picture; owner 2026-11-17), by slot key: {"side": "upload"}. Others are generated. */
+    val sources: Map<String, String>? = null,
+    /** The pictures those uploads replaced, newest last; sending one back with POST /slot puts it back. */
+    val replaced: List<OutfitReplaced>? = null,
 ) {
     val front: ImageRef? get() = angles.firstOrNull()
     /** One of its 7 pictures (0–3 angles, 4–6 faces) is missing from a partial set: it gets its own Redo with its price. */
@@ -138,6 +142,18 @@ data class OutfitMove(val from: String, val to: String)
 /** POST /v1/outfits/{id}/reorder (owner or the outfit's maker, free): the moves in order; [dryRun] checks them without saving. */
 @Serializable
 data class OutfitReorderRequest(val moves: List<OutfitMove>, val dryRun: Boolean? = null)
+
+/** A picture an upload replaced (newest last): its slot key, the picture, "upload" or "generated", when and by whom. */
+@Serializable
+data class OutfitReplaced(val slot: String, val image: ImageRef, val source: String = "generated", val at: Long? = null, val by: String? = null)
+
+/** POST /v1/outfits/{id}/slot (free; anyone in the studio): put [image] (an upload, or a picture it replaced) in [slot]. */
+@Serializable
+data class OutfitSlotRequest(val slot: String, val image: ImageRef, val dryRun: Boolean? = null)
+
+/** POST /v1/outfits/{id}/slot: the outfit now and the picture it replaced (null for an empty slot). */
+@Serializable
+data class OutfitSlotSet(val outfit: Outfit, val slot: String = "", val replaced: ImageRef? = null)
 
 /** POST /v1/outfits/{id}/reorder: the outfit now and which slots changed. */
 @Serializable
