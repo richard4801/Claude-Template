@@ -46,7 +46,7 @@ import { previewLayouts } from '../suite/previewLayouts.js'; // the take viewer'
 import { placeSetting, resolvePlace } from '../suite/locations.js';
 import { freePhotoPrompt, PhotoRequestSchema, photoAspects, photoButton, photoSize, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
-import { assistOf, referencesOf } from '../suite/assist.js';
+import { assistOf, liveClaudeReferences, referencesOf } from '../suite/assist.js';
 import { modelChoice } from '../engines/service.js'; // WS13: model choice everywhere
 import type { StepOverrides } from '../images/steps.js'; // WS13
 import { mediaProfile } from '../lib/resources.js';
@@ -1217,12 +1217,16 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const r = PhotoRequestSchema.safeParse(body ?? {});
     if (!r.success) throw badRequest(`Invalid photo: ${r.error.issues[0]?.path.join('.')} ${r.error.issues[0]?.message}`);
     const p = r.data, graded = photoFilter(p);
+    // References Claude added to the composer's draft (suite_add_reference) count too, after the ones sent (max 3). A
+    // request whose draft doesn't carry `references` (the Mac's Photo Generate, prod 2026-11-17) takes them from the
+    // person's open Photo draft with Claude (same prompt), so an image-edit model isn't sent words alone.
+    const sentDraft = draftOf(body);
+    const draftRefs = sentDraft && 'references' in sentDraft ? referencesOf(sentDraft) : await liveClaudeReferences(ctx, u, p.prompt ?? '');
     // Her world (plans/model-world.md §1): `placeId` or an @tag → the place's photo as the scene reference (refs.scene).
     const placed = await resolvePlace(ctx, u, { placeId: p.placeId, prompt: p.prompt, modelId: p.modelId });
     p.prompt = placed.prompt;
     let still = stillRig(p);
-    // References Claude added to the composer's draft (suite_add_reference) count too, after the ones sent (max 3).
-    const fromDraft = referencesOf((draftOf(body) ?? {}) as Draft).map(r => ({ image: { url: r.url }, guides: [r.use === 'pose' ? 'pose' : r.use === 'location' ? 'scene' : 'look'] as ('pose' | 'look' | 'scene')[] }));
+    const fromDraft = draftRefs.map(r => ({ image: { url: r.url }, guides: [r.use === 'pose' ? 'pose' : r.use === 'location' ? 'scene' : 'look'] as ('pose' | 'look' | 'scene')[] }));
     const refsAll = [...(p.references ?? []), ...fromDraft.filter(d => !(p.references ?? []).some(x => x.image?.url === d.image.url))].slice(0, 3);
     const shootOf = (refs: typeof refsAll) => ({ modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: refs.length ? refs : undefined, templateId: p.presetId, aspect: p.aspect,
       shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true,
@@ -1264,7 +1268,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     // The photo model (owner 2026-11-14): the bar's "Auto · <model>", the shapes it makes, and words alone only on a model
     // that can make a photo without an image.
     const shape = await ctx.images.shotShape(u.studioId, s.b.imageEngine, s.stepModels);
-    if (s.kind === 'free' && !s.plan.images.length && shape.needsImage) throw badRequest(`${shape.name} needs an image to work from · add a photo or pick another model`);
+    // A model that edits a picture (its image input is required) and nothing to send it: refused here, before anything is
+    // held or submitted (prod 2026-11-17: Muapi answered 422 "images_list Field required" after the hold).
+    if (!s.plan.images.length && shape.needsImage) throw badRequest('This model edits a picture: add a reference image or pick a character first.');
     return { p, s, notes, graded, shape };
   };
   // Images sent (images/sent.ts): what each page's generation would send, for Claude's get_sent_images / set_sent_images.

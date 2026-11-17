@@ -30,6 +30,9 @@ export type Analysis = {
   fields: string[];
   /** The start frame is required: the model can't make a shot from text alone. */
   startRequired: boolean;
+  /** The reference image(s) are required (an image-edit model: it can't make a picture from words alone). Older stored
+   * analyses don't have it (byo/service.ts photoShape guesses from the model's name then). */
+  refsRequired?: boolean;
 };
 
 type Json = Record<string, any>;
@@ -154,6 +157,7 @@ export function analyse(root: Json, input: Json | undefined, hint: { category?: 
       duration, aspectRatios: aspects, resolutions: enumOf('resolution'), seed: !!map.seed },
     map, shapes, missing: [...new Set(missing)], fields: names,
     startRequired: !!map.startImage && required.has(map.startImage) && props[map.startImage]!.default === undefined,
+    refsRequired: !!map.referenceImages && required.has(map.referenceImages) && props[map.referenceImages]!.default === undefined,
   };
 }
 

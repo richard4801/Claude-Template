@@ -108,7 +108,8 @@ describe('Photos on a custom Muapi model that fails at Muapi', () => {
       const im = (await owner.req('POST', `/v1/providers/${p.id}/models`, { ref: 'bytedance-seedream-v4-edit' })).body;
       expect((await owner.req('PATCH', `/v1/providers/models/${im.id}`, { enabled: true, members: true, displayName: 'House Still' })).status).toBe(200);
       const shoot = async (who: Client, prompt: string) => {
-        const r = await who.req('POST', '/v1/suite/photos', { prompt, count: 2, imageModel: im.id, async: true });
+        // An edit model takes a picture to work from (words alone are refused before the run since 2026-11-17).
+        const r = await who.req('POST', '/v1/suite/photos', { prompt, count: 2, imageModel: im.id, async: true, references: [{ image: { asset: 'g_front' }, guides: ['look'] }] });
         expect(r.status, JSON.stringify(r.body)).toBe(200);
         const id = r.body.job.id as string;
         return until(async () => { const j = (await who.req('GET', `/v1/jobs/${id}`)).body; return j?.state === 'failed' || j?.state === 'done' ? j : null; }, 15_000);
