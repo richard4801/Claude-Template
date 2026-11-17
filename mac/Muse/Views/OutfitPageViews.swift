@@ -312,9 +312,17 @@ struct OutfitPictureTile: View {
                     ProgressView().controlSize(.small).frame(width: 28, height: 28).padding(Space.s2)
                 } else if let redo, hover || asking {
                     RIconButton(systemName: "arrow.clockwise", help: redo) { ask() }.padding(Space.s2)
-                        .popover(isPresented: $asking, arrowEdge: .bottom) { redoBox }
+                        .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) { redoBox }
                 }
             }
+            // Review screenshots only: a popover is its own window, so the snapshot draws the same box under the tile.
+            .overlay(alignment: .bottom) {
+                if asking && inlineBox {
+                    redoBox.background(t.roles.raised).museFloat(t).fixedSize()
+                        .alignmentGuide(.bottom) { d in d[.top] - Space.s2 }
+                }
+            }
+            .zIndex(asking ? 1 : 0)
             .onHover { hover = $0 }
             .contextMenu {
                 if let redo { Button(redo) { ask() } }
@@ -326,6 +334,8 @@ struct OutfitPictureTile: View {
             })
     }
 
+    /// The snapshot runner's review shot of the Redo box (drawn inline, not as a popover window).
+    private var inlineBox: Bool { SnapshotRunner.state.overlay == "outfit_redo" }
     private func ask() {
         note = ""
         cost = nil

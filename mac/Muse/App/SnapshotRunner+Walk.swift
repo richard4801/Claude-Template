@@ -49,10 +49,13 @@ extension SnapshotRunner {
                 store.themeID = theme
                 store.openOutfit(o)
                 try? await Task.sleep(for: .seconds(1.2))
+                // The box is a popover (its own window, which the capture misses): review mode draws it under the tile.
+                state.overlay = "outfit_redo"
                 store.outfitRedoAsk = 1
-                try? await Task.sleep(for: .seconds(1.2))
+                try? await Task.sleep(for: .seconds(1.5))
                 capture(dir.appendingPathComponent("mac_\(theme.rawValue)_outfit_redo_popover.png"))
                 store.outfitRedoAsk = nil
+                state.overlay = nil
                 store.remakingOutfit[o.id] = [1]
                 try? await Task.sleep(for: .seconds(1.2))
                 capture(dir.appendingPathComponent("mac_\(theme.rawValue)_outfit_redo_veil.png"))
