@@ -244,10 +244,10 @@ extension FakeMuseAPI {
     /// Her world (phase 1): two of the demo model's own places.
     static let demoHerPlaces: [SuiteLocation] = [
         SuiteLocation(id: "loc_demo_apartment", name: "Apartment", image: .asset("vid_living"), createdAt: 1_762_300_120_000, modelId: SampleData.demo, tag: "apartment",
-                      description: "Her living room: cream sofa, plants by the window, warm afternoon light",
+                      description: "Her living room: cream sofa, plants by the window, warm afternoon light.",
                       images: [PlaceImage(image: .asset("vid_living"), source: .upload), PlaceImage(image: .asset("vid_living2"), source: .random)]),
         SuiteLocation(id: "loc_demo_cafe", name: "Café by the gym", image: .asset("vid_bath"), createdAt: 1_762_300_180_000, modelId: SampleData.demo, tag: "cafe",
-                      description: "Corner café with a striped awning, across the street from her gym. Wet cobbles, warm window light",
+                      description: "Corner café with a striped awning, across the street from her gym. Wet cobbles, warm window light.",
                       images: [PlaceImage(image: .asset("vid_bath"), source: .upload)]),
     ]
 

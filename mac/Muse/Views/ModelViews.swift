@@ -122,10 +122,12 @@ struct ProfileView: View {
     @Environment(\.theme) private var t
     @State private var newNever = ""
     @State private var addingNever = false
+    @State private var allAngles = false
     @FocusState private var neverFocused: Bool
 
     var body: some View {
         if let m = store.profileModel {
+            ScrollViewReader { proxy in
             ScreenPage {
                 Crumb(parent: "Models", title: m.name) { store.go(.models) }
                 header(m)
@@ -142,6 +144,9 @@ struct ProfileView: View {
                 }
             }
             .task(id: m.id) { await store.reloadPlaces() }
+            // Review screenshots only (SnapshotRunner): scroll to an anchor (Her world).
+            .onChange(of: SnapshotRunner.state.scrollTo) { _, id in if let id { proxy.scrollTo(id, anchor: .top) } }
+            }
         } else if store.loading {
             ScreenPage {
                 HStack(alignment: .center, spacing: Space.s4) {
@@ -209,7 +214,7 @@ struct ProfileView: View {
     private func lookLine(_ m: MuseModel) -> String {
         let look = m.look.trimmingCharacters(in: .whitespacesAndNewlines)
         let sheet = m.isLocked ? "Identity locked, \(ScreenCopy.count(m.filled, "photo"))" : ScreenCopy.count(m.filled, "photo")
-        return look.isEmpty ? sheet : "\(look.hasSuffix(".") ? look : look + "."). \(sheet)"
+        return look.isEmpty ? sheet : "\(look.hasSuffix(".") ? look : look + ".") \(sheet)"
     }
 
     private func count(_ tab: ProfileTab, _ m: MuseModel) -> Int? {
@@ -265,22 +270,28 @@ struct ProfileView: View {
                         RButton("Versions", kind: .plain, small: true) { store.openVersions(m.id) }
                     }
                 }
-                Text("Hover a shot to replace it, or drop an image on it.").scaled(t.scale.caption, t.roles.ink2)
-                    .padding(.bottom, Space.s4)
-                VStack(alignment: .leading, spacing: Space.s5) {
-                    sheetGroup(m, "Face close-ups", SheetAngle.faceGroup)
-                    sheetGroup(m, "Full body", SheetAngle.bodyGroup)
+                // Mockup 1: one row (face front and ¾, full body front and ¾, her first outfit); every angle on demand.
+                if allAngles {
+                    VStack(alignment: .leading, spacing: Space.s5) {
+                        sheetGroup(m, "Face close-ups", SheetAngle.faceGroup)
+                        sheetGroup(m, "Full body", SheetAngle.bodyGroup)
+                    }
+                    .dropDestination(for: URL.self) { urls, _ in
+                        store.uploadSheet(m, urls: urls)
+                        return true
+                    }
+                } else {
+                    photoRow(m)
                 }
-                .dropDestination(for: URL.self) { urls, _ in
-                    store.uploadSheet(m, urls: urls)
-                    return true
-                }
+                RButton(allAngles ? "Show fewer" : "All \(SheetAngle.allCases.count) angles", kind: .plain, small: true) { allAngles.toggle() }
+                    .padding(.top, Space.s2)
                 if !m.hasBothFaces && m.filled > 0 {
                     InlineNotice("No \(m.slot("face")?.image == nil ? "face" : "profile") close-up yet. Faces come out softer without both close-ups.", tone: .caution,
                                  actionTitle: "Upload images") { store.uploadSheet(m) }
                         .padding(.top, Space.s4)
                 }
-                herWorld(m)
+                herWorld(m).id("profile.world")
+                ProfileAccounts(model: m)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             about(m).frame(width: 300, alignment: .leading)
@@ -354,10 +365,45 @@ struct ProfileView: View {
                 }
                 Text("Removed from every render").scaled(t.scale.micro, t.roles.ink2)
             }
-            ProfileLoraCard(model: m)
-            ProfileAccounts(model: m)
+            loraRow(m)
         }
         .padding(.top, Space.s5)
+    }
+
+    /// The five photos of mockup 1: hover to replace or retake a sheet photo, as on the full sheet.
+    private func photoRow(_ m: MuseModel) -> some View {
+        let outfit = store.outfits(for: m).first
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s3), count: 5), alignment: .leading, spacing: Space.s3) {
+            ForEach([SheetAngle.face, .faceTq, .front, .tq]) { a in
+                let sl = m.slot(a.rawValue)
+                SheetSlotTile(label: a.label, ref: sl?.image, ai: sl?.isAI ?? false, busy: sl?.busy ?? false, primary: "Replace", secondary: "Retake with AI",
+                              onPrimary: { store.replaceSlot(m, a) }, onSecondary: { store.retakeSlot(m, a) }, onDrop: { store.replaceSlot(m, a, with: $0) })
+            }
+            if let o = outfit {
+                MediaTile(ref: o.angles.compactMap { $0 }.first, ratio: 0.75, caption: "Outfit, \(o.name)")
+            }
+        }
+    }
+
+    /// Mockup 1's right column: her LoRA as one quiet row that opens its page.
+    private func loraRow(_ m: MuseModel) -> some View {
+        let l = store.lora(for: m)
+        return Button { store.openLora(m.id) } label: {
+            HStack(spacing: Space.s3) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Identity LoRA").scaled(t.scale.label, t.roles.ink)
+                    Text(store.loraLine(l)).scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: Space.s2)
+                Ph("caret-right", 12).foregroundStyle(t.roles.ink2)
+            }
+            .padding(.vertical, Space.s3)
+            .overlay(alignment: .top) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Identity LoRA: \(store.loraLine(l))")
+        .accessibilityHint("Opens the LoRA page")
     }
 
     private func detail(_ label: String, _ value: String) -> some View {
