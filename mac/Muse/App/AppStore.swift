@@ -401,6 +401,8 @@ final class AppStore {
     var fillingOutfits: Set<String> = []
     /// Outfit pictures being made again (Redo, Add face close-ups): outfit id → picture indices (0–3 angles, 4–6 faces).
     var remakingOutfit: [String: Set<Int>] = [:]
+    /// The opened outfit's picture whose Redo box is open (0–3 angles, 4–6 faces), nil when none.
+    var outfitRedoAsk: Int?
 
     // MARK: Model tools (plans/api.md "Model tools")
 
