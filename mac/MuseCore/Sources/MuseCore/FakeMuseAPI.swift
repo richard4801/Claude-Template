@@ -724,7 +724,13 @@ public actor FakeMuseAPI: MuseAPI {
         return OutfitReorder(outfit: outfits[i], changed: changed)
     }
 
-    public func redoOutfit(id: String, picture: String, imageModel: String?) throws -> OutfitFill {
+    public func redoOutfitPrice(id: String, picture: String, imageModel: String?) throws -> Double {
+        guard outfits.contains(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
+        guard OutfitPictures.keys.contains(picture) else { throw ApiError("bad_request", "angle: front, tq, side, back, face, faceTq or profile") }
+        return photoPricing.perEdit
+    }
+
+    public func redoOutfit(id: String, picture: String, imageModel: String?, note: String?) throws -> OutfitFill {
         guard let i = outfits.firstIndex(where: { $0.id == id }) else { throw ApiError("not_found", "Outfit not found") }
         guard let k = OutfitPictures.keys.firstIndex(of: picture) else { throw ApiError("bad_request", "angle: front, tq, side, back, face, faceTq or profile") }
         let cost = photoPricing.perEdit

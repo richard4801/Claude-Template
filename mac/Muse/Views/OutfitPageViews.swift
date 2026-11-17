@@ -222,18 +222,22 @@ struct OutfitOpenView: View {
     @ViewBuilder private func picture(_ o: Outfit, _ k: Int, items: [LightboxItem], filling: Bool) -> some View {
         let ref = OutfitPictures.refs(o)[k]
         let label = OutfitPictures.viewerLabels[k]
-        let busy = store.remakingOutfit[o.id]?.contains(k) == true || (filling && k < 4 && ref == nil)
+        let redoing = store.remakingOutfit[o.id]?.contains(k) == true
+        let busy = (redoing && ref == nil) || (filling && k < 4 && ref == nil)
         if busy {
             SkeletonBlock(ratio: 0.75, radius: t.radii.container)
         } else if let ref, let at = items.firstIndex(where: { $0.ref == ref && $0.label == label }) {
             let free = store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil
+            // Redo any picture, finished or not (owner 2026-11-17); being redone, the old one stays under a busy veil.
             OutfitPictureTile(ref: ref, label: label,
                               redo: free ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
+                              redoing: redoing,
+                              price: { await store.outfitRedoPrice(o, k) },
                               moves: free ? OutfitPictures.moveTargets(o, from: k).map { OutfitMoveTarget(index: $0.index, title: $0.title) } : [],
                               dragPayload: free ? Self.payload(o.id, k) : nil,
                               onMove: { store.moveOutfitPicture(o, from: k, to: $0) },
                               open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
-                              onRedo: { store.redoOutfitPicture(o, k) })
+                              onRedo: { store.redoOutfitPicture(o, k, note: $0) })
         } else if o.isMissing(k) && store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil {
             // Missing from a set that came out partly: Redo it, priced (the rest of the set was kept and charged).
             Color.clear.aspectRatio(0.75, contentMode: .fit)
@@ -282,29 +286,72 @@ struct OutfitPictureTile: View {
     /// Set when it may be dragged to another slot.
     var dragPayload: String?
     var onMove: (Int) -> Void = { _ in }
+    /// Being made again: the old picture stays, veiled, until the new one arrives.
+    var redoing = false
+    /// The server's price for a redo (dryRun), asked when the Redo box opens.
+    var price: () async -> Double = { 0 }
     var open: () -> Void
-    var onRedo: () -> Void
+    /// Redo with the note typed in the box ("" for none).
+    var onRedo: (String) -> Void
+    @Environment(\.theme) private var t
     @State private var hover = false
+    @State private var asking = false
+    @State private var note = ""
+    @State private var cost: Double?
 
     var body: some View {
         withDrag(Button(action: open) { MediaFrame(ref: ref, ratio: 0.75) }
             .buttonStyle(.plain)
             .help("View \(label.lowercased()) full size")
             .accessibilityLabel("View \(label.lowercased()) full size")
+            .overlay {
+                if redoing {
+                    RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(.black.opacity(0.35))
+                        .overlay { ProgressView().controlSize(.small) }
+                        .accessibilityLabel("Making \(label.lowercased()) again")
+                }
+            }
             .overlay(alignment: .topTrailing) {
-                if let redo, hover {
-                    RIconButton(systemName: "arrow.clockwise", help: redo, action: onRedo).padding(Space.s2)
+                if let redo, hover || asking {
+                    RIconButton(systemName: "arrow.clockwise", help: redo) { ask() }.padding(Space.s2)
+                        .popover(isPresented: $asking, arrowEdge: .bottom) { redoBox }
                 }
             }
             .onHover { hover = $0 }
             .contextMenu {
-                if let redo { Button(redo, action: onRedo) }
+                if let redo { Button(redo) { ask() } }
                 if !moves.isEmpty {
                     Menu("Move to…") {
                         ForEach(moves, id: \.self) { m in Button(m.title) { onMove(m.index) } }
                     }
                 }
             })
+    }
+
+    private func ask() {
+        note = ""
+        cost = nil
+        asking = true
+    }
+    private func go() {
+        asking = false
+        onRedo(note)
+    }
+    /// The Redo box: its price (the server's), an optional note for this picture only, and Redo.
+    private var redoBox: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text("Redo \(label.lowercased())").scaled(t.scale.body, t.roles.ink)
+            RTextField(placeholder: "Note for this picture (optional), e.g. sneakers on", text: $note, onSubmit: go)
+                .frame(width: 280)
+            HStack(spacing: Space.s2) {
+                Text(cost.map { Pricing.money($0) } ?? "Pricing…").scaled(t.scale.caption, t.roles.ink2)
+                Spacer()
+                RButton("Cancel", small: true) { asking = false }
+                RButton("Redo", kind: .action, small: true) { go() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(Space.s3)
+        .task { cost = await price() }
     }
 
     @ViewBuilder private func withDrag<V: View>(_ v: V) -> some View {
