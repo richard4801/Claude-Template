@@ -296,4 +296,4 @@ Static read of the path: a patch from the live session lands in `showRemote` →
 | Orb clock ticks / frames while working | — | 118 / 118 |
 | Composer 1000×700 theme C, mid-render | CUT (title bar indicator) | FITS (Generate at x 834) |
 
-Parked for a session on the owner's Mac with Instruments (coordinator): Canvas-drawn interactive timeline lanes (move, trim, keyframes, badges). That is the remaining lever for CPU while Claude patches. The late 104 % / 94 % windows come after the sample, while the player items rebuilt for the last patches decode.
+Parked for a session on the owner's Mac with Instruments (coordinator): Canvas-drawn interactive timeline lanes (move, trim, keyframes, badges). That is the remaining lever for CPU while Claude patches. The late 104 % / 94 % windows are not explained yet; one guess, unverified, is the preview rebuilds of the last patches decoding.
