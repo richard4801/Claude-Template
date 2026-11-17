@@ -26,7 +26,7 @@ struct ClaudeOrbView: View {
         let orb = box.orb
         let now = Date().timeIntervalSinceReferenceDate
         let fps = visibility.visible && live ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
-        TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
+        TimelineView(OrbSchedule(fps: fps)) { ctx in
             let _ = SnapshotRunner.noteOrbFrame() // review mode only: the idle check counts the frames drawn
             let time = ctx.date.timeIntervalSinceReferenceDate
             let look = orb.look(at: time, reduceMotion: reduceMotion)
@@ -84,6 +84,24 @@ final class ClaudeOrbBox: ObservableObject {
 
     /// Something time-based ended (an error's hold, a flash): the views work out their frame rate again.
     func redraw() { objectWillChange.send() }
+}
+
+/// The orb's clock: `fps` frames a second on a plain timer, or one frame and nothing more at 0. Build 704, run 718: the
+/// `.animation` schedule follows the display's refresh, which a headless CI runner doesn't have, so the working orb drew one
+/// frame in 12 s there and its cost couldn't be measured; a timer ticks the same on any Mac.
+struct OrbSchedule: TimelineSchedule {
+    var fps: Double
+
+    func entries(from start: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        guard fps > 0 else {
+            var done = false
+            return AnyIterator { defer { done = true }; return done ? nil : start }
+        }
+        // The system's low-frequency mode (a window in the background, low power): at most 4 a second.
+        let step = 1 / (mode == .lowFrequency ? min(fps, 4) : fps)
+        var next = start
+        return AnyIterator { defer { next = next.addingTimeInterval(step) }; return next }
+    }
 }
 
 /// The ribbons' phase, shared by every orb and the panel's edge so they turn together. It only moves forward, at the
@@ -150,7 +168,7 @@ struct ClaudeLivingEdge: View {
         // open panel with nothing happening no longer redraws the whole edge and its 12 pt blur 12 times a second. Any
         // real activity changes `orb`, which re-runs this body and starts the timeline again.
         let fps = visibility.visible && orb.state(at: now) != .idle ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
-        TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
+        TimelineView(OrbSchedule(fps: fps)) { ctx in
             let time = ctx.date.timeIntervalSinceReferenceDate
             let look = orb.look(at: time, reduceMotion: reduceMotion)
             let e = orb.edge(at: time, reduceMotion: reduceMotion)
