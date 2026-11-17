@@ -90,39 +90,6 @@ extension EditSuiteSession {
         liveTasks = [events, presence]
     }
 
-    /// A change from the live session: shown now after a quiet moment; while Claude's patches keep coming, at most once every
-    /// 0.75 s, the newest (each holds the whole project). Build 704, run 718: every patch re-diffed the whole editor.
-    func queueRemote(_ p: E.Project, entry: EditHistoryEntry?) {
-        let keep = (entry?.byClaude == true) ? entry : remotePending?.entry
-        remotePending = (p, keep)
-        let now = Date().timeIntervalSinceReferenceDate
-        let wait = remoteThrottle.delay(at: now)
-        if wait <= 0 { showPendingRemote(); return }
-        guard remoteTask == nil else { return }
-        remoteTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-            guard let self, !Task.isCancelled else { return }
-            self.remoteTask = nil
-            self.showPendingRemote()
-        }
-    }
-
-    /// Shows the held change now (also before any local edit, so that edit lands on top of it).
-    func showPendingRemote() {
-        remoteTask?.cancel()
-        remoteTask = nil
-        guard let pending = remotePending else { return }
-        remotePending = nil
-        let p = pending.project, entry = pending.entry
-        remoteThrottle.shown(at: Date().timeIntervalSinceReferenceDate)
-        showRemote(p)
-        if let e = entry, e.byClaude {
-            claudeToast = e.notice.map { "Claude · \($0)" } ?? e.claudeToast
-            if e.notice != nil { ClaudeEditNotice.shared.post(e, from: self) }
-        }
-        mirrorLive()
-    }
-
     func mirrorLive() {
         let history = live?.history ?? []
         if liveHistory != history { liveHistory = history } // only on a change: every patch re-rendered the History list
@@ -200,7 +167,11 @@ extension EditSuiteSession {
     func handleLive(_ u: EditSessionSync.Update) async {
         switch u {
         case .project(let p, let entry):
-            queueRemote(p, entry: entry)
+            showRemote(p)
+            if let e = entry, e.byClaude {
+                claudeToast = e.notice.map { "Claude · \($0)" } ?? e.claudeToast
+                if e.notice != nil { ClaudeEditNotice.shared.post(e, from: self) }
+            }
         case .history:
             break
         case .pending(let p):
