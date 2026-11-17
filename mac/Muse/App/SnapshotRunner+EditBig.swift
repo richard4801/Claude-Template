@@ -232,10 +232,11 @@ extension SnapshotRunner {
         line(late.isEmpty && worst <= 1.0, "Claude patches show within 1 s",
              String(format: "%d patches at 2 a second: slowest to show %.2f s (fails above 1 s), ", n, worst)
              + "\(rebuilds) preview rebuilds" + (late.isEmpty ? "" : ", not shown within 1.5 s: \(late.joined(separator: ", "))"))
-        // Coordinator, after run 728 (85 % with patches showing in 0.84 s): accepted for this release, aim 83 %; INFO up to
-        // 90 %, fails above (no regression past it). The Canvas-drawn interactive lanes wait for a session on a real Mac.
-        line(med <= 90 ? nil : false, "CPU while Claude patches the big edit",
-             String(format: "median %.0f %% of one core (aim 83 %%; INFO up to 90 %%, fails above it; windows %@)",
+        // Coordinator, after run 728 (85 % with patches showing in 0.84 s): 85 % accepted for this release, aim 83 %; INFO up
+        // to 86 % (85 plus a point of noise), fails above, so a real regression shows. The Canvas-drawn interactive lanes wait
+        // for a session on a real Mac.
+        line(med <= 86 ? nil : false, "CPU while Claude patches the big edit",
+             String(format: "median %.0f %% of one core (aim 83 %%; INFO up to 86 %%, fails above it; windows %@)",
                     med, cpu.map { String(format: "%.0f", $0) }.joined(separator: " ")))
         for f in mainThreadTop(sampleFile, count: 25) { line(nil, "main (patches)", f) }
         try? await Task.sleep(for: .seconds(3))
