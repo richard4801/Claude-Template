@@ -110,7 +110,7 @@ public struct ClaudeBrief: Codable, Hashable, Sendable {
         if let s = sessionId, !s.isEmpty { lines.append("The edit session: \(s).") }
         if let a = assistId, !a.isEmpty { lines.append("The Suite draft: \(a).") }
         if let c = chatId, !c.isEmpty {
-            lines.append("This chat: \(c). Pass it as chatId to where_am_i, open_page, memory_add, chats_list and chat_read. Each message starts with a [Page: …] line: the page the person is on and the ids it has open; pass those ids to the tools that need them. Read the studio's memory (memory_read) at the start of a chat and follow its pinned rules.")
+            lines.append("This chat: \(c). Pass it as chatId to where_am_i, open_page, memory_add, chats_list, chat_read and pipeline_propose. Each message starts with a [Page: …] line: the page the person is on and the ids it has open; pass those ids to the tools that need them. Read the studio's memory (memory_read) at the start of a chat and follow its pinned rules.")
         }
         return lines.joined(separator: "\n\n")
     }

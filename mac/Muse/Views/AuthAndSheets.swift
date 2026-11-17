@@ -194,6 +194,10 @@ struct OutfitSheetView: View {
                                  text: Binding(get: { store.outfitSheet?.description ?? "" }, set: { store.outfitSheet?.description = $0 }), lines: 2)
                     case .photo:
                         dropZone(d)
+                        // The server adds this to the look in photo mode too ("For this look also: …").
+                        Text("Anything else for this look (optional)").scaled(t.scale.label, t.roles.ink)
+                        RTextBox(placeholder: "e.g. her hair from the photo, a small nose stud",
+                                 text: Binding(get: { store.outfitSheet?.description ?? "" }, set: { store.outfitSheet?.description = $0 }), lines: 2)
                     case .own:
                         Text("Click a box to add that view, or drop a photo on it. Any you skip can be made later from the front.")
                             .scaled(t.scale.caption, t.roles.ink2).fixedSize(horizontal: false, vertical: true)

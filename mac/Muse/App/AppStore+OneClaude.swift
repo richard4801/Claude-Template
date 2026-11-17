@@ -29,6 +29,8 @@ final class OneClaudeState {
     var remembered: ClaudeUI?
     /// "Shall I remember: …?" (Remember / No): nothing is saved until Remember.
     var suggestion: ClaudeUI?
+    /// "Updated the edit pipeline: 3 small changes, 1 waiting for you" (Review).
+    var pipelineUpdate: ClaudeUI?
     /// Claude's gated actions waiting for the person (Approve / Decline); nothing happens until they press.
     var approvals: [ClaudeUI] = []
     /// Paid helpers Claude asked for on ANY of the owner's edits (ci_e546642a4026): shown whichever edit is open, each
@@ -168,6 +170,7 @@ extension AppStore {
         oneClaude.askOpen = nil
         oneClaude.remembered = nil
         oneClaude.suggestion = nil
+        oneClaude.pipelineUpdate = nil
         oneClaude.approvals = []
         Task { await loadClaudeApprovals(id) }
         oneClaude.lastSentChat = nil
@@ -272,6 +275,8 @@ extension AppStore {
             oneClaude.suggestion = nil
         case "memory_suggest":
             oneClaude.suggestion = ui
+        case "pipeline_update":
+            oneClaude.pipelineUpdate = ui
         case "card":
             if case .approve(_, _, _, _, let target, _, _)? = ui.card?.card { oneClaude.waitingCards.insert(Self.cardKey(target)) }
         case "approve":

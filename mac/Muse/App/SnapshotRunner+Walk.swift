@@ -17,7 +17,7 @@ extension SnapshotRunner {
     }
 
     /// The outfit sheet with its angles, and the angle open full size, at 1280 × 800 in the four themes
-    /// (`mac_<theme>_outfit_sheet.png`, `mac_<theme>_outfit_lightbox.png`).
+    /// (`mac_<theme>_outfit_sheet.png`, `mac_<theme>_outfit_lightbox.png`; photo mode in C and A: `mac_<theme>_outfit_sheet_photo.png`).
     static func outfitShots(_ store: AppStore, dir: URL) async {
         guard let w = mainWindow else { return }
         let full = w.frame
@@ -32,6 +32,14 @@ extension SnapshotRunner {
             store.outfitSheet?.viewing = 1
             try? await Task.sleep(for: .seconds(1.2))
             capture(dir.appendingPathComponent("mac_\(theme.rawValue)_outfit_lightbox.png"))
+            // Photo mode: the drop zone with the optional "Anything else for this look" box under it.
+            if theme == .c || theme == .a {
+                var p = OutfitDraft(modelId: SampleData.demo)
+                p.mode = .photo
+                store.outfitSheet = p
+                try? await Task.sleep(for: .seconds(1.2))
+                capture(dir.appendingPathComponent("mac_\(theme.rawValue)_outfit_sheet_photo.png"))
+            }
         }
         store.outfitSheet = nil
         store.themeID = .a

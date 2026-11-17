@@ -309,6 +309,18 @@ struct OneClaudePanel: View {
             .accessibilityLabel("Claude asks to run \(a.pending.label) in \(store.editApprovalName(a))")
         }
         ClaudeEditNoticeLine()
+        if let u = o.pipelineUpdate, let line = u.summary {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                Text(line).scaled(t.scale.caption, r.ink2).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                RButton("Review", kind: .plain, small: true) { store.oneClaude.pipelineUpdate = nil; store.openSettings(.account) }
+                    .help("Open Settings → Claude → Edit pipeline skill")
+                    .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline chat review") } }
+            }
+            .padding(.horizontal, Space.s4).padding(.top, Space.s2)
+            .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pipeline chat line") } }
+            .accessibilityElement(children: .combine)
+        }
         if let m = o.remembered, let text = m.text {
             HStack(alignment: .top, spacing: Space.s1) {
                 Ph("push-pin", 13)
