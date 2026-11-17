@@ -106,7 +106,9 @@ struct ComposerPromptBox: View {
         .overlay(alignment: suggestionAlignment) {
             if let typed, !matches.isEmpty {
                 switch suggestions {
-                case .above: suggestionList(typed).alignmentGuide(.top) { $0[.bottom] + 4 }
+                // Opens upwards by its own height (known: 40 pt rows, capped at 360), so it never covers the controls
+                // under the prompt or runs off the window's bottom (review, mockup 4).
+                case .above: suggestionList(typed).offset(y: -(min(360, suggestionHeight(matches, typed)) + 4))
                 case .below: suggestionList(typed).alignmentGuide(.bottom) { $0[.top] - 4 }
                 case .inside: suggestionList(typed).padding(Space.s2)
                 }
