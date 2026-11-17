@@ -1,5 +1,9 @@
 package studio.muse.app.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -157,6 +161,26 @@ class OutfitsViewModel(private val c: AppContainer) : ViewModel() {
     }
     fun redoEstimate(index: Int): Double = OutfitPictures.redoEstimate(photoPrices(c), index)
 
+    /** Upload picture and Put back are for anyone in the studio, not while any of it is being made. */
+    fun canUpload(o: Outfit): Boolean = o.state != "generating" && o.id !in state.value.filling && state.value.making[o.id].isNullOrEmpty()
+
+    /** Upload picture (owner 2026-11-17): the photo picked goes into slot [index], empty or filled (asked first). Free. */
+    fun upload(o: Outfit, index: Int, uri: Uri) = viewModelScope.launch {
+        if (!canUpload(o)) { c.repo.toast("This outfit is still being made · add the picture when it finishes"); return@launch }
+        val media = c.media ?: return@launch
+        val bytes = media.bytes(uri) ?: return@launch c.repo.toast("Couldn't read that image")
+        val filled = OutfitPictures.all(o).getOrNull(index) != null
+        val ref = c.repo.uploadImage(media.displayName(uri), bytes, media.mime(uri)) ?: return@launch
+        c.repo.setOutfitPicture(o.id, index, ref)?.let { c.repo.toast("${OutfitPictures.LABELS[index]} picture ${if (filled) "replaced" else "added"}") }
+    }
+
+    /** The picture an upload replaced in slot [index] goes back (the current one is kept to put back in turn). */
+    fun putBack(o: Outfit, index: Int) = viewModelScope.launch {
+        val prev = OutfitPictures.previous(o, index) ?: return@launch
+        if (!canUpload(o)) return@launch
+        c.repo.setOutfitPicture(o.id, index, prev)?.let { c.repo.toast("Previous ${OutfitPictures.LABELS[index].lowercase()} picture put back") }
+    }
+
     /** Move picture [from] to slot [to], swapping with whatever is there (free; the outfit event updates the grid). */
     fun move(o: Outfit, from: Int, to: Int) {
         if (o.id in state.value.filling || !state.value.making[o.id].isNullOrEmpty()) return
@@ -286,6 +310,15 @@ fun OutfitOpenScreen(id: String) {
     var viewing by remember { mutableStateOf<Int?>(null) }
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    // Upload picture: the slot waiting for the photo picker, and the filled slot whose replacement is being asked about.
+    var uploadAt by remember { mutableStateOf<Int?>(null) }
+    var replacing by remember { mutableStateOf<Int?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        val k = uploadAt
+        uploadAt = null
+        if (uri != null && k != null) vm.outfit(id)?.let { vm.upload(it, k, uri) }
+    }
+    fun pick(i: Int) { uploadAt = i; picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
     if (o == null) {
         ScreenBox(bg = m.roles.canvas) {
             Column(Modifier.fillMaxSize()) {
@@ -312,6 +345,22 @@ fun OutfitOpenScreen(id: String) {
         shownAt.getOrNull(page)?.let { (i, _) -> outfitMoveMenu(pictures, i) { to -> viewing = null; vm.move(o, i, to) } }.orEmpty()
     }) else null
     val onMove: ((Int, Int) -> Unit)? = if (canChange) ({ from: Int, to: Int -> vm.move(o, from, to) }) else null
+    // Upload picture (owner 2026-11-17: "I shouldn't need to generate if I already have it"): anyone in the studio, free
+    // (no price). A filled slot asks first; the picture it replaces can be put back from the menu.
+    val canUpload = vm.canUpload(o)
+    val startUpload: (Int) -> Unit = { i ->
+        if (pictures.getOrNull(i) != null) replacing = i else pick(i)
+        Unit
+    }
+    val uploadMenu: (Int) -> List<MenuItem> = { i ->
+        listOfNotNull(
+            MenuItem("upload", "Upload picture") { viewing = null; startUpload(i) },
+            OutfitPictures.previous(o, i)?.let { MenuItem("undo", "Put back previous picture") { viewing = null; vm.putBack(o, i) } },
+        )
+    }
+    val viewerMenu: ((Int) -> List<MenuItem>)? = if (canUpload || moveMenu != null) ({ page: Int ->
+        shownAt.getOrNull(page)?.let { (i, _) -> if (canUpload) uploadMenu(i) else emptyList() }.orEmpty() + moveMenu?.invoke(page).orEmpty()
+    }) else null
     val facesMissing = OutfitPictures.FACES - OutfitPictures.madeFaces(o)
     val makingFaces = (OutfitPictures.BODY until OutfitPictures.KEYS.size).any { it in making }
     // "Make missing angles": the empty ¾ / side / back show as skeletons until they come back.
@@ -333,6 +382,7 @@ fun OutfitOpenScreen(id: String) {
                 // A set that came out partly: what was made; each missing picture has its own Redo with its price.
                 o.partial?.let { if (!filling && making.isEmpty()) Notice(it.label, tone = NoticeTone.CAUTION) }
                 OutfitPictureGrid(pictures, making + fillingAt, busy = false, onMove = onMove,
+                    upload = if (canUpload) startUpload else null, menu = if (canUpload) uploadMenu else null,
                     redo = if (canChange && !filling && making.isEmpty()) ({ i -> if (o.isMissing(i)) Pair<String, () -> Unit>("Redo · ${Pricing.money(vm.redoEstimate(i))}") { vm.redo(o, i) } else null }) else null) { i ->
                     viewing = OutfitPictures.pageOf(pictures, i)
                 }
@@ -355,12 +405,13 @@ fun OutfitOpenScreen(id: String) {
                 }
             }
         }
-        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start, action = redoAction, more = moveMenu) { viewing = null } }
+        viewing?.let { start -> if (shown.isNotEmpty()) ImageViewer(shown, start, action = redoAction, more = viewerMenu) { viewing = null } }
         ActionDock {
             PrimaryButton("Use in Photo", { studio.muse.app.ui.screens.suite.composer.openPhoto(c, nav, o.modelId, o.id) }, Modifier.weight(1f))
         }
         if (renaming) RenameOutfit(o.name, { renaming = false }) { vm.rename(o, it); renaming = false }
         if (deleting) LearnConfirm("Delete this outfit?", "Takes and photos already made with it are kept.", "Delete", { deleting = false; vm.delete(o) { nav.back() } }, { deleting = false })
+        replacing?.let { i -> LearnConfirm(OutfitPictures.replaceQuestion(i), OutfitPictures.REPLACE_DETAIL, "Replace picture", { replacing = null; pick(i) }, { replacing = null }) }
     }
 }
 
@@ -376,7 +427,11 @@ fun OutfitOpenScreen(id: String) {
 @Composable
 fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: Boolean, onMove: ((from: Int, to: Int) -> Unit)? = null,
     /** A missing picture's Redo ("Redo · $0.04" and its action), or null for none. */
-    redo: ((Int) -> Pair<String, () -> Unit>?)? = null, onOpen: (Int) -> Unit) {
+    redo: ((Int) -> Pair<String, () -> Unit>?)? = null,
+    /** Upload picture into a slot (free, so no price): "Upload" on an empty tile. */
+    upload: ((Int) -> Unit)? = null,
+    /** More long-press menu entries for a picture (Upload picture, Put back previous picture), above "Move to…". */
+    menu: ((Int) -> List<MenuItem>)? = null, onOpen: (Int) -> Unit) {
     val m = muse
     val density = LocalDensity.current
     val canMove = onMove != null && !busy && making.isEmpty()
@@ -440,14 +495,26 @@ fun OutfitPictureGrid(pictures: List<ImageRef?>, making: Collection<Int>, busy: 
                                                         },
                                                     )
                                                 }.semantics { contentDescription = "$label, view full size" }
+                                                menu != null -> t.combinedClickable(
+                                                    onClickLabel = "View full size", onLongClickLabel = "More options",
+                                                    onLongClick = { menuFor = i }, onClick = { onOpen(i) },
+                                                ).semantics { contentDescription = "$label, view full size" }
                                                 else -> t.press { onOpen(i) }.semantics { contentDescription = "$label, view full size"; role = Role.Button }
                                             }
                                         },
                                         contentAlignment = androidx.compose.ui.Alignment.Center,
                                     ) {
                                         if (ref != null) RefImage(ref, Modifier.fillMaxSize())
-                                        else redo?.invoke(i)?.let { (text, go) -> TextAction(text, go) }
-                                        if (canMove && ref != null) MuseMenu(menuFor == i, { menuFor = null }, outfitMoveMenu(pictures, i) { to -> move?.invoke(i, to) })
+                                        else {
+                                            // Empty: its Redo (priced) when it's missing from a partial set, and Upload (free).
+                                            val again = redo?.invoke(i)
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(MuseSpace.s2)) {
+                                                again?.let { (text, go) -> TextAction(text, go) }
+                                                upload?.let { up -> TextAction("Upload", { up(i) }) }
+                                            }
+                                        }
+                                        if (ref != null && (canMove || menu != null)) MuseMenu(menuFor == i, { menuFor = null },
+                                            menu?.invoke(i).orEmpty() + (if (canMove) outfitMoveMenu(pictures, i) { to -> move?.invoke(i, to) } else emptyList()))
                                     }
                                     Caption(label, maxLines = 1)
                                 }

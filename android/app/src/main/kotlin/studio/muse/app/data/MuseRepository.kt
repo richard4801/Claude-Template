@@ -437,6 +437,19 @@ class MuseRepository(
         _state.update { s -> s.copy(outfits = s.outfits.upsert(r.outfit) { it.id == r.outfit.id }) }
     }
 
+    /**
+     * Upload picture (owner 2026-11-17: "I shouldn't need to generate if I already have it"): [image] into slot [index]
+     * ([OutfitPictures.KEYS]), empty or filled; free. The slot shows a skeleton until it's in.
+     */
+    suspend fun setOutfitPicture(id: String, index: Int, image: ImageRef): OutfitSlotSet? {
+        val key = OutfitPictures.KEYS.getOrNull(index) ?: return null
+        making(id, setOf(index))
+        return attempt { setOutfitPicture(id, key, image) }.also { r ->
+            making(id, null)
+            if (r != null) _state.update { s -> s.copy(outfits = s.outfits.upsert(r.outfit) { it.id == r.outfit.id }) }
+        }
+    }
+
     suspend fun saveOutfit(id: String, name: String? = null) = attempt { saveOutfit(id, name) }?.also { o ->
         _state.update { s ->
             s.copy(

@@ -50,6 +50,8 @@ interface MuseApi {
     suspend fun redoOutfit(outfitId: String, angle: String): OutfitFill
     /** Reorders the 7 pictures (free): each move swaps the pictures of two slots ([OutfitPictures.KEYS]); an outfit event follows. */
     suspend fun reorderOutfit(outfitId: String, moves: List<OutfitMove>): OutfitReorder
+    /** Upload picture (owner 2026-11-17): [image] into [slot] ([OutfitPictures.KEYS]), empty or filled. Free. */
+    suspend fun setOutfitPicture(outfitId: String, slot: String, image: ImageRef): OutfitSlotSet
 
     // Uploads. [onProgress] gets 0..1 while the bytes go up (presigned PUT to R2, or multipart).
     suspend fun uploadImage(name: String, bytes: ByteArray, mime: String, onProgress: (Float) -> Unit = {}): ImageRef
