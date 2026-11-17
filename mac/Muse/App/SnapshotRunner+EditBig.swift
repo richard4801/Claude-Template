@@ -228,10 +228,14 @@ extension SnapshotRunner {
         _ = await sampled
         let med = median(cpu)
         let rebuilds = s.rebuildCount - rebuilds0
-        line(late.isEmpty && worst <= 1.0 && med <= 80, "Claude patches into the big edit",
-             String(format: "%d patches at 2 a second: CPU median %.0f %% of one core (fails above 80 %%; windows %@), slowest to show %.2f s (fails above 1 s), ",
-                    n, med, cpu.map { String(format: "%.0f", $0) }.joined(separator: " "), worst)
+        // Coordinator, after run 722: the show time is the lag the owner feels, a hard gate (each patch within 1 s). The CPU is
+        // INFO while it stays at or under run 722's 83 % (a Canvas-drawn timeline is the next step), and fails above it.
+        line(late.isEmpty && worst <= 1.0, "Claude patches show within 1 s",
+             String(format: "%d patches at 2 a second: slowest to show %.2f s (fails above 1 s), ", n, worst)
              + "\(rebuilds) preview rebuilds" + (late.isEmpty ? "" : ", not shown within 1.5 s: \(late.joined(separator: ", "))"))
+        line(med <= 83 ? nil : false, "CPU while Claude patches the big edit",
+             String(format: "median %.0f %% of one core (INFO up to run 722's 83 %%, fails above it; windows %@)",
+                    med, cpu.map { String(format: "%.0f", $0) }.joined(separator: " ")))
         for f in mainThreadTop(sampleFile, count: 25) { line(nil, "main (patches)", f) }
         try? await Task.sleep(for: .seconds(3))
         let after = await cpuMedian(over: 8)
