@@ -50,6 +50,18 @@ class NewSwapState(private val c: AppContainer, private val store: SuiteStore) {
         models.value = if (!d.anyOn) null else c.repo.attemptInline {
             suiteRemixModels(RemixModelsRequest(d.toggles, clip.value?.id, d.range?.let { listOf(it.from, it.to) }))
         }.first
+        // A picked resolution the model in use doesn't make goes back to the model's default (the Mac's AppStore+NewSwap).
+        val row = row()
+        if (d.resolution != null && row != null) {
+            val kept = d.resolutionKept(row.limits.resolutions.ifEmpty { null })
+            if (kept != d.resolution) draft.update { it.copy(resolution = kept) }
+        }
+    }
+
+    /** The model New Swap uses now: the picked one, else Auto's. */
+    fun row(): RemixModels.Row? {
+        val d = draft.value
+        return models.value?.models?.firstOrNull { if (d.engineModel == null) it.auto else it.model == d.engineModel }
     }
 
     /** Why Generate can't go now (null = it can, at the estimate's price). */

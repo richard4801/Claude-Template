@@ -86,6 +86,13 @@ class SuitePhotoTest {
         assertNull(free.outfitId)
         assertNull(free.productImage)
         assertNull(PhotoComposer.request(noOne, PhotoDraft(presetId = "t", refs = img)))
+        // Claude's chat references count as images (they ride in the draft; the Mac's photoClaudeImages).
+        val claude = noOne.copy(references = listOf(studio.muse.app.data.DraftReference("up_1", "/uploads/u/c.jpg", "look")))
+        assertEquals(1, PhotoComposer.claudeImages(claude))
+        assertNull(PhotoComposer.problem(claude, PhotoDraft()))
+        assertNotNull(PhotoComposer.request(claude, PhotoDraft()))
+        assertEquals("Presets need a character · pick one with @", PhotoComposer.problem(claude, PhotoDraft(presetId = "t")))
+        assertEquals("an empty reference isn't an image", 0, PhotoComposer.claudeImages(noOne.copy(references = listOf(studio.muse.app.data.DraftReference("", "", "look")))))
         assertEquals("Waiting for the upload", PhotoComposer.problem(draft(), PhotoDraft(uploading = "ref")))
         assertEquals("Making the photos…", PhotoComposer.problem(draft(), PhotoDraft(), busy = true))
         assertNull(PhotoComposer.problem(draft(), PhotoDraft()))
