@@ -237,20 +237,15 @@ struct TitleBar: View {
                     .transition(.opacity)
                 }
                 if let r = store.runningJob {
-                    Button { store.go(.queue) } label: {
-                        HStack(spacing: Space.s2) {
-                            Text(r.isWaiting ? (r.queuePosition.map { $0 <= 1 ? "Waiting to start" : "#\($0) in line" } ?? "Waiting to start") : "Rendering \(Int(r.progress.rounded()))%")
-                                .font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2)
-                            // Gives way in narrow windows (run 728/735: at a fixed 60 pt, with a render running, theme C's title bar
-                            // needed more than 1000 pt and pushed the whole window's content past its right edge, cutting Generate).
-                            RProgress(value: r.progress / 100).frame(minWidth: 16, idealWidth: 60, maxWidth: 60)
-                        }
-                        .padding(.horizontal, Space.s2)
-                        .frame(height: 28)
-                        .contentShape(Rectangle())
+                    // Gives way in narrow windows, down to nothing (runs 728–739: with a render running, theme C's title bar
+                    // needed ~31 pt more than a 1000 pt window, which pushed the whole window's content past its right edge and
+                    // cut Generate; the stage shows the render's progress anyway). Label and bar, then the bar, then nothing.
+                    let label = r.isWaiting ? (r.queuePosition.map { $0 <= 1 ? "Waiting to start" : "#\($0) in line" } ?? "Waiting to start") : "Rendering \(Int(r.progress.rounded()))%"
+                    ViewThatFits(in: .horizontal) {
+                        runningJob(r, label: label)
+                        runningJob(r, label: nil)
+                        Color.clear.frame(width: 0, height: 28)
                     }
-                    .buttonStyle(.plain)
-                    .help(r.progressLine)
                 }
                 // Keep add-on engine ready: the owner's small indicator, only while it's on.
                 if store.warmOn { WarmIndicator() }
@@ -286,6 +281,23 @@ struct TitleBar: View {
         .background(WindowDragArea())
         .background(t.chrome)
         .overlay(alignment: .bottom) { Rectangle().fill(t.isD ? t.roles.hairline : t.roles.hairline.opacity(t.isC ? 0 : 1)).frame(height: 1) }
+    }
+
+    /// The title bar's running render: "Rendering 42%" and its bar (or the bar alone); opens the Queue.
+    private func runningJob(_ r: Job, label: String?) -> some View {
+        Button { store.go(.queue) } label: {
+            HStack(spacing: Space.s2) {
+                if let label {
+                    Text(label).font(t.scale.caption.font).monospacedDigit().foregroundStyle(t.roles.ink2).lineLimit(1).fixedSize()
+                }
+                RProgress(value: r.progress / 100).frame(width: 60)
+            }
+            .padding(.horizontal, Space.s2)
+            .frame(height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(r.progressLine)
     }
 }
 
