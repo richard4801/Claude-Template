@@ -265,6 +265,12 @@ public final class HTTPMuseAPI: MuseAPI, ClaudeVideoUploading, @unchecked Sendab
         struct Body: Encodable { var imageModel: String }
         return try await call("POST", "v1/models/\(modelId)/fill-angles", Body(imageModel: imageModel))
     }
+    /// Retake with AI on one sheet photo: an edit of the current photo (kept until the new one comes out; the old one
+    /// stays in Sheet versions). `imageModel`: the owner's model pick (WS13), as fillAngles.
+    public func retakeSlot(modelId: String, slot: String, imageModel: String? = nil) async throws -> FillAnglesResponse {
+        struct Body: Encodable { var imageModel: String? }
+        return try await call("POST", "v1/models/\(modelId)/slots/\(slot)/retake", Body(imageModel: imageModel))
+    }
     public func listOutfits() async throws -> [Outfit] { try await call("GET", "v1/outfits") }
     public func createOutfit(_ req: CreateOutfitRequest) async throws -> Outfit { try await call("POST", "v1/outfits", req) }
     public func outfitEstimate(_ req: CreateOutfitRequest) async throws -> OutfitEstimate {
