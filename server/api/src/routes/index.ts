@@ -415,6 +415,17 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     return any >= 0 ? `her body photo (${at(any)})` : undefined;
   };
   /**
+   * Which sent image(s) show the outfit photo of an outfit made from a photo, as the prompt names them ("image 5",
+   * "panels 5 and 6"); undefined when none is sent.
+   */
+  const photoOf = (plan: { images: ImageRef[]; panels?: { label: string; role: string }[]; sheet?: boolean }, photos: ImageRef[]) => {
+    let at = plan.images.map((x, i) => (photos.some(p => sameImage(x, p)) ? i + 1 : 0)).filter(Boolean);
+    if (!at.length) at = (plan.panels ?? []).map((p, i) => (p.role === 'product' ? i + 1 : 0)).filter(Boolean);
+    if (!at.length) return undefined;
+    const word = plan.sheet ? 'panel' : 'image';
+    return at.length === 1 ? `${word} ${at[0]}` : `${word}s ${at.slice(0, -1).join(', ')} and ${at[at.length - 1]}`;
+  };
+  /**
    * A chosen image list (images/sent.ts) is the same for all four angles: in each angle's copy, her body photo in it is
    * swapped for her body photo of THAT angle (front→front, ¾→tq, side→side, back→back), so her figure matches from every
    * side (plans/outfit-head-looks.md §1). A list without a body photo, or that already has this angle's, stays as chosen.
@@ -490,7 +501,9 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const spec = { name: b.name || 'New outfit', description: b.description, source: mode === 'describe' ? 'described' as const : mode === 'photo' ? 'product-photo' as const : 'reference-set' as const };
     const texts = await ctx.prompts.texts(req.user.studioId);
     // Each angle's prompt names the image that shows her figure from that angle.
-    const set = outfitSet(identity, spec, undefined, texts, BODY_SLOTS.map((k, i) => anglePlans?.[i] ? figureOf(anglePlans[i]!, bodySlots[i], k) : undefined));
+    const set = outfitSet(identity, spec, undefined, texts, BODY_SLOTS.map((k, i) => anglePlans?.[i] ? figureOf(anglePlans[i]!, bodySlots[i], k) : undefined),
+      // From a photo: each angle's prompt names the outfit photo by its number (owner 2026-11-17).
+      BODY_SLOTS.map((_, i) => (mode === 'photo' && anglePlans?.[i] ? photoOf(anglePlans[i]!, productIds.map(x => x.image)) : undefined)));
     const [o] = await db.insert(outfits).values({ id, studioId: req.user.studioId, modelId: m.id, name: spec.name, mode, description: b.description ?? '',
       angles: [null, null, null, null], state: 'generating', prompt: keeping ? outfitKeepFront(keep!, b.description?.trim() || (productIds.length ? 'the clothes in the product photo' : spec.name), texts) : set[0]!.text, seed: set[0]!.seed ?? null, createdBy: req.user.id, createdAt: Date.now() }).returning();
     emitOutfit(o!);
@@ -659,9 +672,13 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
           const a = OUTFIT_ANGLES[i]!, body = angleBody(BODY_SLOTS[i]!);
           if (plans[k]) {
             const { ids, plan } = plans[k]!;
-            const spec = { name: o.name, description: o.description || undefined, source: 'reference-set' as const, extra: o.mode === 'photo' ? o.description : undefined };
+            // Made from a photo: its old front is the outfit photo now, named by its number with the hair and head-to-toe lines.
+            const fromPhoto = o.mode === 'photo' && !!o.angles[0];
+            const spec = fromPhoto ? { name: o.name, description: o.description || undefined, source: 'product-photo' as const }
+              : { name: o.name, description: o.description || undefined, source: 'reference-set' as const, extra: o.mode === 'photo' ? o.description : undefined };
             const figure = BODY_SLOTS.map((k, j) => (j === i ? figureOf(plan, slotOf(k), k) : undefined));
-            const p = outfitSet(await identityOf(m, sentOf(ids, plan)), spec, undefined, texts, figure)[i]!;
+            const photo = BODY_SLOTS.map((_, j) => (j === i && fromPhoto ? photoOf(plan, [o.angles[0]!]) : undefined));
+            const p = outfitSet(await identityOf(m, sentOf(ids, plan)), spec, undefined, texts, figure, photo)[i]!;
             made.set(i, await ctx.images.generate({ studioId: user.studioId, userId: user.id, purpose: 'outfit', refId: o.id, override: b.imageEngine, models: stepModels, refs: plan.images, maxImages: plan.images.length, panels: plan.panels, bill,
               req: { prompt: p.text, width: 768, height: 1024, count: 1, seed: p.seed ?? undefined } }).then(r => r.images[0] ?? null, remakeFailed(i)));
             if (i === 0 && made.get(0)) front = made.get(0)!;

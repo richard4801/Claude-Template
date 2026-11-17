@@ -2897,6 +2897,20 @@
      "description": "An outfit made from a reference photo has its own words (a new hairstyle, piercing, make-up): they follow the outfit line.",
      "type": "bool",
      "sample": false
+    },
+    {
+     "name": "photoNamed",
+     "label": "Outfit photo numbered",
+     "description": "Made from a photo whose image or panel number is known: the prompt names it (\"the outfit in image 5\").",
+     "type": "bool",
+     "sample": false
+    },
+    {
+     "name": "photoHair",
+     "label": "Hair from the photo",
+     "description": "Made from a photo whose description asks for the hair (hair, hairstyle, braids, bun, wig …) of the person in it.",
+     "type": "bool",
+     "sample": false
     }
    ],
    "sections": [
@@ -2915,6 +2929,18 @@
     {
      "id": "outfitExtra",
      "label": "Outfit · its own words",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "hair",
+     "label": "Hair from the photo",
+     "kind": "system",
+     "pick": "first"
+    },
+    {
+     "id": "complete",
+     "label": "Head to toe",
      "kind": "system",
      "pick": "first"
     },
@@ -2962,6 +2988,14 @@
     {
      "id": "outfitExtra",
      "label": "Outfit · its own words"
+    },
+    {
+     "id": "hair",
+     "label": "Hair from the photo"
+    },
+    {
+     "id": "complete",
+     "label": "Head to toe"
     },
     {
      "id": "task",
@@ -3039,14 +3073,22 @@
      "name": "body",
      "description": "which image shows her figure for this angle",
      "sample": "her body photo (image 3)"
+    },
+    {
+     "name": "photo",
+     "description": "the outfit photo, by its number",
+     "sample": "image 4"
     }
    ],
    "blocks": [
     "shoot.identity",
+    "outfit.photo.named",
     "shoot.outfit.described",
     "shoot.outfit.product",
     "shoot.outfit.set",
     "shoot.outfit.product.extra",
+    "outfit.photo.hair",
+    "outfit.photo.complete",
     "outfit.task",
     "outfit.figure",
     "shoot.style",
@@ -3062,6 +3104,24 @@
      "when": [],
      "block": "shoot.identity",
      "locked": true
+    },
+    {
+     "id": "outfit.photo",
+     "label": "Outfit photo named by its number",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "outfitSource",
+       "op": "is",
+       "value": "product"
+      },
+      {
+       "input": "photoNamed",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "outfit.photo.named"
     },
     {
      "id": "outfit.described",
@@ -3108,6 +3168,47 @@
       }
      ],
      "block": "shoot.outfit.product.extra"
+    },
+    {
+     "id": "photo.hair",
+     "label": "Her hair from the photo (the description asks)",
+     "target": "hair",
+     "when": [
+      {
+       "input": "outfitSource",
+       "op": "is",
+       "value": "product"
+      },
+      {
+       "input": "photoNamed",
+       "op": "is",
+       "value": true
+      },
+      {
+       "input": "photoHair",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "outfit.photo.hair"
+    },
+    {
+     "id": "photo.complete",
+     "label": "The whole outfit head to toe, footwear included",
+     "target": "complete",
+     "when": [
+      {
+       "input": "outfitSource",
+       "op": "is",
+       "value": "product"
+      },
+      {
+       "input": "photoNamed",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "outfit.photo.complete"
     },
     {
      "id": "task",
@@ -3157,6 +3258,24 @@
      "locked": true
     },
     {
+     "id": "outfit.photo",
+     "label": "Outfit photo named by its number",
+     "target": "outfit",
+     "when": [
+      {
+       "input": "outfitSource",
+       "op": "is",
+       "value": "product"
+      },
+      {
+       "input": "photoNamed",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "outfit.photo.named"
+    },
+    {
      "id": "outfit.described",
      "label": "Outfit described in words",
      "target": "outfit",
@@ -3201,6 +3320,47 @@
       }
      ],
      "block": "shoot.outfit.product.extra"
+    },
+    {
+     "id": "photo.hair",
+     "label": "Her hair from the photo (the description asks)",
+     "target": "hair",
+     "when": [
+      {
+       "input": "outfitSource",
+       "op": "is",
+       "value": "product"
+      },
+      {
+       "input": "photoNamed",
+       "op": "is",
+       "value": true
+      },
+      {
+       "input": "photoHair",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "outfit.photo.hair"
+    },
+    {
+     "id": "photo.complete",
+     "label": "The whole outfit head to toe, footwear included",
+     "target": "complete",
+     "when": [
+      {
+       "input": "outfitSource",
+       "op": "is",
+       "value": "product"
+      },
+      {
+       "input": "photoNamed",
+       "op": "is",
+       "value": true
+      }
+     ],
+     "block": "outfit.photo.complete"
     },
     {
      "id": "task",

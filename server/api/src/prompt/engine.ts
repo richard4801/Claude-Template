@@ -213,9 +213,10 @@ export const OUTFIT_FACES = [{ key: 'face', label: 'Face · front', words: 'face
   { key: 'profile', label: 'Face · side', words: 'face close-up in profile (side view)' }] as const;
 export const outfitFacePrompt = (i: number, t: PromptTexts = DEFAULT_TEXTS) => fill(t['outfit.face']!, { angle: OUTFIT_FACES[i]!.words });
 
-/** The four angles. `bodies[i]`: which image shows her figure for angle i ("her body photo (image 3)"); default her body photos. */
-export const outfitSet = (id: Identity, outfit: OutfitSpec, seed = seedFor(outfit.name), t: PromptTexts = DEFAULT_TEXTS, bodies: (string | null | undefined)[] = []) =>
-  OUTFIT_ANGLES.map((a, i) => outfitAngle(id, outfit, a, seed, t, bodies[i] ?? undefined));
+/** The four angles. `bodies[i]`: which image shows her figure for angle i ("her body photo (image 3)"); default her body photos.
+ *  `photos[i]`: which image shows the outfit photo for angle i ("image 5"), for an outfit made from a photo. */
+export const outfitSet = (id: Identity, outfit: OutfitSpec, seed = seedFor(outfit.name), t: PromptTexts = DEFAULT_TEXTS, bodies: (string | null | undefined)[] = [], photos: (string | null | undefined)[] = []) =>
+  OUTFIT_ANGLES.map((a, i) => outfitAngle(id, outfit, a, seed, t, bodies[i] ?? undefined, photos[i] ?? undefined));
 
 
 // ---- Replicate (hosted MiniMax H3): a SHORT prompt (plans/backend.md "Replicate").

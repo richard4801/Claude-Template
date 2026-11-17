@@ -87,6 +87,15 @@ export const PROMPT_DEFS: PromptDef[] = [
     [], { allowEmpty: false }),
   // ---------------------------------------------------------------- outfits
   d('outfit.task', 'outfits', 'Outfit angle task', 'One angle of an outfit set.', 'Task: {angle}, plain studio background.', [['angle', 'full body front view …', true]]),
+  // An outfit made "From a photo" (owner 2026-11-17): the photo named by its image/panel number, her hair from it when
+  // the description asks, and the whole outfit head to toe, footwear included, on every angle.
+  d('outfit.photo.named', 'outfits', 'Outfit photo (by number)', 'An outfit set made from a photo, when the photo\u2019s image or panel number is known: replaces the product-photo line.',
+    'Wearing: the outfit in {photo} ({outfit}).', [['photo', 'the outfit photo: "image 5" or "panel 5"', true], ['outfit', 'the outfit name, lower case']]),
+  d('outfit.photo.hair', 'outfits', 'Outfit photo \u00b7 hair', 'An outfit set made from a photo whose description asks for the hair (hair, hairstyle, braids, bun, wig \u2026) from the photo. Her written look then leaves out its hair words.',
+    'Hair for this look: the hairstyle of the person in {photo} (cut, colour, length and styling), replacing her usual hair; her face, skin and features stay exactly hers from her own images.',
+    [['photo', 'the outfit photo: "image 5" or "panel 5"', true]]),
+  d('outfit.photo.complete', 'outfits', 'Outfit photo \u00b7 head to toe', 'Every angle of an outfit set made from a photo: the whole outfit, footwear included.',
+    'The complete outfit head to toe as in {photo}, including the footwear, on every angle.', [['photo', 'the outfit photo: "image 5" or "panel 5"', true]]),
   d('outfit.never.extra', 'outfits', 'Never add (outfit sets)', 'Comma-separated. Added to never-add for outfit sets.', 'visible brand logos', [], { kind: 'list' }),
   // Her figure in every outfit picture (owner 2026-11-16: "always keep her shape, from every angle"). Sent with every angle,
   // every way of making an outfit (new shots, edits, keeping pieces from her base); Presets off never drops it.

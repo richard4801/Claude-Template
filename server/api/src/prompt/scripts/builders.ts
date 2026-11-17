@@ -91,13 +91,29 @@ export function loraCandidate(id: Identity, angle: SheetAngle, n: number, t: Pro
 
 /** Which image shows her figure, when the caller doesn't know its number. */
 export const FIGURE_DEFAULT = 'her body photos';
-/** `body`: which image shows her figure for this angle ("her body photo (image 3)"); default her body photos. */
-export function outfitAngle(id: Identity, outfit: OutfitSpec, angle: { label: string; words: string }, seed: number, t: PromptTexts = DEFAULT_TEXTS, body = FIGURE_DEFAULT): BuiltPrompt {
+/** Words in a photo-made outfit's description that ask for the hair of the person in the photo. */
+export const HAIR_WORDS = /\b(hair|hairs|hairstyle|hairstyles|haircut|hairdo|braid|braids|braided|bun|buns|ponytail|pigtails|wig|bangs|fringe|curls|dreadlocks|locs|afro|updo|bob)\b/i;
+/** Her written look without its hair clauses ("shoulder-length dark brown hair"), then where her hair comes from instead. */
+export function lookWithoutHair(look: string, photo: string) {
+  const kept = look.split(',').map(x => x.trim()).filter(x => x && !HAIR_WORDS.test(x));
+  return [...kept, `hair as in ${photo} for this look`].join(', ');
+}
+/**
+ * `body`: which image shows her figure for this angle ("her body photo (image 3)"); default her body photos. `photo`: which
+ * image shows the outfit photo of an outfit made from a photo ("image 5"); then the prompt names it, asks for the whole
+ * outfit head to toe, and, when its description asks for the hair, takes her hairstyle from it.
+ */
+export function outfitAngle(id: Identity, outfit: OutfitSpec, angle: { label: string; words: string }, seed: number, t: PromptTexts = DEFAULT_TEXTS, body = FIGURE_DEFAULT, photo?: string): BuiltPrompt {
   const never = { ...id, neverAdd: [...(id.neverAdd ?? []), ...listOf(t['outfit.never.extra'] ?? '')] };
   const key = ({ Front: 'front', '¾': 'tq', Side: 'side', Back: 'back' } as Record<string, string>)[angle.label] ?? 'front';
   const extra = outfitExtra(outfit);
-  const r = run('outfit.angle', t, { inputs: { outfitSource: outfitSource(outfit), angle: key, outfitWords: !!extra },
-    vars: { ...idVars(never, t), outfit: outfitVar(outfit), extra, angle: angle.words, seed, body } });
+  const photoNamed = outfit.source === 'product-photo' && !!photo?.trim();
+  const photoHair = photoNamed && HAIR_WORDS.test(extra);
+  const vars = idVars(never, t);
+  // The hair asked for from the photo: her written look must not pull back to her usual hair.
+  if (photoHair) vars.look = lookWithoutHair(id.look, photo!.trim());
+  const r = run('outfit.angle', t, { inputs: { outfitSource: outfitSource(outfit), angle: key, outfitWords: !!extra, photoNamed, photoHair },
+    vars: { ...vars, outfit: outfitVar(outfit), extra, angle: angle.words, seed, body, photo: photo?.trim() ?? '' } });
   return built(r, seed, []);
 }
 /**

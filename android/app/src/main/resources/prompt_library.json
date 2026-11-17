@@ -668,6 +668,71 @@
    "updatedBy": null
   },
   {
+   "key": "outfit.photo.named",
+   "group": "outfits",
+   "title": "Outfit photo (by number)",
+   "description": "An outfit set made from a photo, when the photo’s image or panel number is known: replaces the product-photo line.",
+   "kind": "text",
+   "default": "Wearing: the outfit in {photo} ({outfit}).",
+   "current": "Wearing: the outfit in {photo} ({outfit}).",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "photo",
+     "description": "the outfit photo: \"image 5\" or \"panel 5\"",
+     "required": true
+    },
+    {
+     "name": "outfit",
+     "description": "the outfit name, lower case",
+     "required": false
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "outfit.photo.hair",
+   "group": "outfits",
+   "title": "Outfit photo · hair",
+   "description": "An outfit set made from a photo whose description asks for the hair (hair, hairstyle, braids, bun, wig …) from the photo. Her written look then leaves out its hair words.",
+   "kind": "text",
+   "default": "Hair for this look: the hairstyle of the person in {photo} (cut, colour, length and styling), replacing her usual hair; her face, skin and features stay exactly hers from her own images.",
+   "current": "Hair for this look: the hairstyle of the person in {photo} (cut, colour, length and styling), replacing her usual hair; her face, skin and features stay exactly hers from her own images.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "photo",
+     "description": "the outfit photo: \"image 5\" or \"panel 5\"",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
+   "key": "outfit.photo.complete",
+   "group": "outfits",
+   "title": "Outfit photo · head to toe",
+   "description": "Every angle of an outfit set made from a photo: the whole outfit, footwear included.",
+   "kind": "text",
+   "default": "The complete outfit head to toe as in {photo}, including the footwear, on every angle.",
+   "current": "The complete outfit head to toe as in {photo}, including the footwear, on every angle.",
+   "overridden": false,
+   "allowEmpty": false,
+   "placeholders": [
+    {
+     "name": "photo",
+     "description": "the outfit photo: \"image 5\" or \"panel 5\"",
+     "required": true
+    }
+   ],
+   "updatedAt": null,
+   "updatedBy": null
+  },
+  {
    "key": "outfit.never.extra",
    "group": "outfits",
    "title": "Never add (outfit sets)",

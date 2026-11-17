@@ -177,13 +177,22 @@ const loraCandidate: Script = {
 };
 const outfitAngle: Script = {
   id: 'outfit.angle', group: 'outfits', title: 'Outfit set angle', description: 'One angle of an outfit set (made from scratch).', format: 'lines',
-  inputs: [OUTFIT_SOURCE, en('angle', 'Angle', 'Which angle.', [['front', 'Front'], ['tq', '¾'], ['side', 'Side'], ['back', 'Back']]), OUTFIT_WORDS],
-  sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), outfitExtraSection(), sec('task', 'Task'), sec('figure', 'Figure'), sec('style', 'Style'), sec('negative', 'Never add'), sec('seed', 'Seed')],
-  rules: [identity(), ...outfitRules(), outfitExtraRule(), R('task', 'Angle task', 'task', 'outfit.task'), figureRule(), R('style', 'House style', 'style', 'shoot.style'),
+  inputs: [OUTFIT_SOURCE, en('angle', 'Angle', 'Which angle.', [['front', 'Front'], ['tq', '¾'], ['side', 'Side'], ['back', 'Back']]), OUTFIT_WORDS,
+    bool('photoNamed', 'Outfit photo numbered', 'Made from a photo whose image or panel number is known: the prompt names it ("the outfit in image 5").', false),
+    bool('photoHair', 'Hair from the photo', 'Made from a photo whose description asks for the hair (hair, hairstyle, braids, bun, wig …) of the person in it.', false)],
+  sections: [sec('identity', 'Identity'), sec('outfit', 'Outfit'), outfitExtraSection(), sec('hair', 'Hair from the photo', { layer: 'outfit' }),
+    sec('complete', 'Head to toe', { layer: 'outfit' }), sec('task', 'Task'), sec('figure', 'Figure'), sec('style', 'Style'), sec('negative', 'Never add'), sec('seed', 'Seed')],
+  rules: [identity(),
+    R('outfit.photo', 'Outfit photo named by its number', 'outfit', 'outfit.photo.named', [is('outfitSource', 'product'), is('photoNamed', true)]),
+    ...outfitRules(), outfitExtraRule(),
+    R('photo.hair', 'Her hair from the photo (the description asks)', 'hair', 'outfit.photo.hair', [is('outfitSource', 'product'), is('photoNamed', true), is('photoHair', true)]),
+    R('photo.complete', 'The whole outfit head to toe, footwear included', 'complete', 'outfit.photo.complete', [is('outfitSource', 'product'), is('photoNamed', true)]),
+    R('task', 'Angle task', 'task', 'outfit.task'), figureRule(), R('style', 'House style', 'style', 'shoot.style'),
     R('never', 'Never add', 'negative', 'shoot.never', [], { locked: true }), R('seed', 'Shared seed', 'seed', 'outfit.seed')],
   vars: [...SHOOT_VARS, { name: 'angle', description: 'full body front view …', sample: 'full body front view' }, { name: 'seed', description: 'the seed', sample: '421337' },
     { name: 'extra', description: 'the outfit’s own words (made from a photo)', sample: 'platinum blonde high ponytail, small silver nose stud' },
-    { name: 'body', description: 'which image shows her figure for this angle', sample: 'her body photo (image 3)' }],
+    { name: 'body', description: 'which image shows her figure for this angle', sample: 'her body photo (image 3)' },
+    { name: 'photo', description: 'the outfit photo, by its number', sample: 'image 4' }],
 };
 const single = (id: string, group: string, title: string, description: string, block: string, inputs: InputDef[] = []): Script =>
   ({ id, group, title, description, format: 'lines', inputs, sections: [sec('prompt', 'Prompt')], rules: [R('prompt', title, 'prompt', block)] });
