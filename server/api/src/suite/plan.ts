@@ -77,6 +77,9 @@ export const ShotRequestSchema = z.object({
   /** The character (a MUSE model) and her outfit. */
   modelId: z.string().max(80).optional(),
   outfitId: z.string().max(80).optional(),
+  /** Her world (plans/model-world.md §1): a place sent as the scene reference after her images (else in words). An
+   *  `@tag` in the prompt picks one too. */
+  placeId: z.string().max(80).optional(),
   /** Scene, action and dialogue in the user's words. */
   prompt: z.string().max(SHOT_PROMPT_CEILING).default(''),
   frames: z.object({ start: ImageRefSchema.optional(), middle: z.array(ImageRefSchema).max(8).optional(), end: ImageRefSchema.optional() }).optional(),
@@ -119,6 +122,8 @@ export const ShotRequestSchema = z.object({
   ...SENT_FIELDS,
 }).strict();
 export type ShotRequest = z.infer<typeof ShotRequestSchema>;
+/** A tagged place as the planner takes it: its cover photo (null = none yet) and the words used when it isn't sent. */
+export type PlacePlan = { name: string; image: ImageRef | null; words: string };
 
 export type ModelPrefs = Record<string, { enabled?: boolean; acknowledgedAt?: number | null; priceScale?: number }>;
 export type SuitePrefs = { models?: ModelPrefs; ladder?: Partial<Record<Tier, LadderStep[]>>; capPerJob?: number | null; capPerDay?: number | null;
@@ -459,7 +464,9 @@ const ROLE_WORDS: Record<string, [string, string]> = {
 };
 
 /** Builds the whole plan for a picked model. */
-export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character | null, o: { texts?: PromptTexts; priceScale?: number; speaking?: boolean; separationUsd?: number; sent?: Resolved | null }): ShotPlan {
+export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character | null, o: { texts?: PromptTexts; priceScale?: number; speaking?: boolean; separationUsd?: number; sent?: Resolved | null;
+  /** A tagged place (suite/locations.ts resolvePlace): its photo after her images when there's room, else its words. */
+  place?: PlacePlan | null }): ShotPlan {
   const t = o.texts ?? DEFAULT_TEXTS;
   const m = p.model, notes: string[] = [];
   let kind = kindOf(m, n);
@@ -504,6 +511,21 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const charSent = charImgs.filter(x => chosen.includes(x));
   images.refs = [...charSent.map(x => ({ label: x.label, role: 'character', image: x.image, ...(x.why ? { why: x.why } : {}) })), ...extraFit];
   if (charImgs.length > charSent.length && charRoom > 0) notes.push(`${charImgs.length - charSent.length} character image(s) left out (limit ${m.refs.images})`);
+  // Her world: a tagged place goes after her identity and your references (it gives way first); on a model that can't
+  // take it as a reference, or with no room left, it is described in words (plans/model-world.md §1).
+  let placeInWords: string | null = null;
+  const pl = o.place;
+  if (pl) {
+    const already = !!pl.image && images.refs.some(x => sameImage(x.image, pl.image!));
+    const canRef = kind !== 't2v' || m.modes.reference;
+    if (already) { /* sent already as your location reference */ }
+    else if (pl.image && canRef && room - images.refs.length > 0) images.refs.push({ label: pl.name, role: 'location', image: pl.image });
+    else {
+      placeInWords = pl.words;
+      notes.push(pl.image ? `${pl.name} is described in words: ${room > 0 && canRef ? `no room for its photo (${m.name} takes ${room} image${room === 1 ? '' : 's'}, her own come first)` : `${m.name} takes no reference images here`}`
+        : `${pl.name} is described in words (it has no photo yet)`);
+    }
+  }
   // Guide keyframes the model can't take as frames: reference images in the room left (her images and yours come first).
   if (kfLeft.length) {
     // On a model that charges per extra image (Higgsfield H3), the stills only take the free slots while the guide clip
@@ -547,7 +569,7 @@ export function buildPlan(r: ShotRequest, n: Need, p: Pick, character: Character
   const avoid = !m.negativePrompt && cam.avoid.length ? cam.avoid.map(a => a.charAt(0).toUpperCase() + a.slice(1)).join('. ') + '.' : '';
   const ident = character ? { name: character.name, look: character.look, neverAdd: character.neverAdd } : null;
   // AI suite (workstream 1): `#Move` text is a chip, not prose (stripMoveTokens).
-  const userWords = stripMoveTokens([r.prompt, r.direction].map(x => (x ?? '').trim()).filter(Boolean).join(' '), cam.moves);
+  const userWords = stripMoveTokens([r.prompt, r.direction, placeInWords].map(x => (x ?? '').trim()).filter(Boolean).join(' '), cam.moves);
   const { clean, removed } = ident ? sanitizeDirection(userWords, ident, t) : { clean: userWords, removed: [] as string[] };
   if (removed.length) notes.push(`left out of the scene (it would change her look): ${removed.join('; ')}`);
   const audioSent: 'speech' | 'music' | 'none' = audioPlan ? (speaking ? 'speech' : 'music') : 'none';

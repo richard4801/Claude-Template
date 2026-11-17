@@ -5,7 +5,7 @@ import { ApiError } from '../errors.js';
 import { cameraCatalog } from '../suite/camera.js';
 import { feed } from '../suite/feed.js';
 import { registerRecreateRoutes } from './recreate.js';
-import { createLocation, deleteLocation, listLocations } from '../suite/locations.js';
+import { addLocationImage, copyLocation, createLocation, deleteLocation, estimateLocationImage, generateLocationImage, getLocation, listLocations, locationView, removeLocationImage, updateLocation } from '../suite/locations.js';
 import { createRig, deleteRig, listRigs, patchRig } from '../suite/rigs.js';
 import { addToCollection, collectionsOf, createCollection, deleteCollection, getCollection, listCollections, removeFromCollection, renameCollection } from '../suite/collections.js';
 import { discardQueued, listQueue, queueEstimate, queueShot, runQueued } from '../suite/queue.js';
@@ -31,9 +31,17 @@ export async function registerSuiteRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/v1/suite/remix/models', async req => ctx.suite.remixModels(req.user, req.body));
   app.get('/v1/suite/shots/:id', async req => ctx.suite.shot(req.user, (req.params as { id: string }).id));
   // The studio's locations (composer @location).
-  app.get('/v1/suite/locations', async req => listLocations(ctx, req.user));
+  // Places (plans/model-world.md §1): hers (`modelId`) or the studio's. `?modelId=` lists hers first, then the studio's.
+  app.get('/v1/suite/locations', async req => listLocations(ctx, req.user, { modelId: typeof (req.query as { modelId?: unknown })?.modelId === 'string' ? (req.query as { modelId: string }).modelId : undefined }));
   app.post('/v1/suite/locations', async req => createLocation(ctx, req.user, req.body));
+  app.get('/v1/suite/locations/:id', async req => locationView(await getLocation(ctx, req.user, (req.params as { id: string }).id)));
+  app.patch('/v1/suite/locations/:id', async req => updateLocation(ctx, req.user, (req.params as { id: string }).id, req.body));
   app.delete('/v1/suite/locations/:id', async req => deleteLocation(ctx, req.user, (req.params as { id: string }).id));
+  app.post('/v1/suite/locations/:id/images', async req => addLocationImage(ctx, req.user, (req.params as { id: string }).id, req.body));
+  app.delete('/v1/suite/locations/:id/images/:index', async req => { const p = req.params as { id: string; index: string }; return removeLocationImage(ctx, req.user, p.id, Number(p.index)); });
+  app.post('/v1/suite/locations/:id/generate/estimate', async req => estimateLocationImage(ctx, req.user, (req.params as { id: string }).id, req.body));
+  app.post('/v1/suite/locations/:id/generate', async req => generateLocationImage(ctx, req.user, (req.params as { id: string }).id, req.body));
+  app.post('/v1/suite/locations/:id/copy', async req => copyLocation(ctx, req.user, (req.params as { id: string }).id, req.body));
   // The new Suite (plans/ai-suite-design.md build step 2): saved rigs (each member's own; the owner sees all) and the takes feed.
   app.get('/v1/suite/rigs', async req => listRigs(ctx, req.user));
   app.post('/v1/suite/rigs', async req => createRig(ctx, req.user, req.body));

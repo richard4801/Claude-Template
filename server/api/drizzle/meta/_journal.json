@@ -281,6 +281,13 @@
       "when": 1794852236127,
       "tag": "0039_pipeline_skill",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794872030040,
+      "tag": "0040_places",
+      "breakpoints": true
     }
   ]
 }

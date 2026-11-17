@@ -19,6 +19,9 @@ export const PhotoRequestSchema = z.object({
   /** The character (a MUSE model) and her outfit. Optional (owner 2026-11-11): without one, an image is needed and is the photo to work from. */
   modelId: z.string().min(1).max(80).optional(),
   outfitId: z.string().max(80).optional(),
+  /** Her world (plans/model-world.md §1): a place sent as the scene reference after her images (else in words). An
+   *  `@tag` in the prompt picks one too. */
+  placeId: z.string().max(80).optional(),
   /** The scene and what she does, in the member's words. */
   prompt: z.string().max(2000).default(''),
   /** The composer's rig. Movement, tempo, frame rate and shutter are ignored for stills. */

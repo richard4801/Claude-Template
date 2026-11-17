@@ -130,6 +130,8 @@ export function cameraOf(rig: Rig, moves: { id: string; intensity: number }[]): 
     ...(Object.keys(angle).length ? { angle } : {}), ...(Object.keys(style).length ? { style } : {}) };
   return Object.keys(spec).length > 1 ? spec as CameraSpecInput : undefined;
 }
+/** A place chip's id (her world: @cafe; older drafts: an @location), if it is a place. */
+const placeMention = (toks: Token[]) => toks.find((x): x is Extract<Token, { t: 'mention' }> => x.t === 'mention' && (x.kind === 'place' || x.kind === 'location') && /^loc_/.test(x.id))?.id;
 /** What Generate sends for this draft (POST /v1/suite/shots), the draft included for Reuse settings. */
 export function requestOf(d: Draft): ShotRequestOf & { mode?: string; clipId?: string; keepAudio?: boolean } {
   return d.tool === 'remix' ? remixRequestOf(d) as unknown as ShotRequestOf : shotRequestOf(d);
@@ -146,6 +148,8 @@ function shotRequestOf(d: Draft) {
   return withFrames(withScreen({
     ...(mention('character') ? { modelId: mention('character') } : {}),
     ...((mention('outfit') ?? extra.outfitId) ? { outfitId: (mention('outfit') ?? extra.outfitId) as string } : {}),
+    // Her world: a place chip (@cafe) sends the place (suite/locations.ts resolvePlace); typed @tags resolve on the server.
+    ...(placeMention(toks) ? { placeId: placeMention(toks) } : {}),
     prompt: promptText(toks), duration: Math.round(d.duration ?? 5), aspectRatio: d.aspect ?? '9:16', quality: d.quality ?? 'draft', takes: d.takes ?? 1,
     ...(d.sound !== undefined ? { audio: !!d.sound } : {}), ...(typeof extra.speaking === 'boolean' ? { speaking: extra.speaking } : {}),
     ...(camera ? { camera } : {}),
@@ -187,6 +191,7 @@ export function photoRequestOf(d: Draft): Record<string, unknown> {
   const aspect = d.aspect && PHOTO_ASPECTS.has(d.aspect) ? d.aspect : base.aspect;
   const out: Record<string, unknown> = { ...base, prompt: promptText(toks), count: d.count ?? base.count ?? 1, draft: d,
     ...(modelId ? { modelId } : {}), ...(outfitId ? { outfitId } : {}), ...(camera ? { camera } : {}), ...(aspect ? { aspect } : {}),
+    ...(placeMention(toks) ? { placeId: placeMention(toks) } : {}),
     ...(rig.gradeLook === false ? { gradeLook: false } : {}), ...sentOfDraft(d) };
   // The pinned image model: a custom one ("c_…") is engineModel; a Replicate "owner/name" is imageModel.
   if (engine) { delete out.imageModel; delete out.engineModel; if (engine.startsWith('c_')) out.engineModel = engine; else out.imageModel = engine; }
