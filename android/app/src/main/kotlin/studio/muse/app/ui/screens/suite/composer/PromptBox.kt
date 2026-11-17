@@ -108,13 +108,17 @@ sealed interface Suggestion {
  * The suggestions for a trigger: @ = the studio's characters, the picked one's outfits and the studio's locations, ending
  * with "+ New location"; # = moves matching the word.
  */
-fun suggestions(tr: Trigger?, models: List<Model>, outfits: List<Outfit>, cat: CameraCatalog, talkOnly: Boolean, locations: List<SuiteLocation> = emptyList(), places: Boolean = true): List<Suggestion> {
+fun suggestions(tr: Trigger?, models: List<Model>, outfits: List<Outfit>, cat: CameraCatalog, talkOnly: Boolean, locations: List<SuiteLocation> = emptyList(), places: Boolean = true,
+                leadId: String? = null): List<Suggestion> {
     tr ?: return emptyList()
     val q = tr.query.lowercase()
+    // Her world: her places first, then the studio's; another model's places aren't hers to use. Matched on name or @tag.
+    val (hers, studio) = studio.muse.app.data.Places.forModel(leadId, locations)
+    val placeList = (hers + studio).filter { q.isEmpty() || it.name.lowercase().contains(q) || it.atTag.contains(q) }
     return if (tr.char == '@') {
         models.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Character(it) } +
             outfits.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Dress(it) } +
-            (if (places) locations.filter { q.isEmpty() || it.name.lowercase().contains(q) }.map { Suggestion.Place(it) } + Suggestion.NewPlace else emptyList())
+            (if (places) placeList.map { Suggestion.Place(it) } + Suggestion.NewPlace else emptyList())
     } else PromptTokens.searchMoves(cat, tr.query).filter { !talkOnly || it.talkSafe }.take(10).map { Suggestion.Move(it) }
 }
 
@@ -142,7 +146,7 @@ fun PromptBox(
     var dragging by remember { mutableStateOf<PromptPart?>(null) }
     var dragAt by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val trigger = if (field.selection.collapsed) PromptCodec.triggerAt(field.text, field.selection.start) else null
-    val list = suggestions(trigger, models, outfits, cat, talkOnly, locations)
+    val list = suggestions(trigger, models, outfits, cat, talkOnly, locations, leadId = tokens.mentions.firstOrNull { it.kind == "character" }?.id)
     val transformation = remember(tokens, m.t.surface2) { TokenTransformation(tokens, m.t.surface2, m.t.ink, m.t.accent) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.fillMaxWidth().heightIn(min = minHeight, max = maxHeight).padding(vertical = 4.dp)) {

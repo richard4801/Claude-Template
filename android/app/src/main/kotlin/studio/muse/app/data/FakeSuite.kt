@@ -26,6 +26,13 @@ class FakeSuite {
     val locations = mutableListOf(
         SuiteLocation("loc_loft", "Sunlit loft", ImageRef.asset("g_front"), 1_762_300_000_000),
         SuiteLocation("loc_studio", "Grey studio", ImageRef.asset("hero"), 1_762_200_000_000),
+        // Her world (phase 1): two of the demo model's own places.
+        SuiteLocation("loc_demo_apartment", "Apartment", ImageRef.asset("g_front"), 1_762_300_120_000, modelId = SampleData.DEMO, tag = "apartment",
+            description = "Her living room: cream sofa, plants by the window, warm afternoon light",
+            images = listOf(PlaceImage(asset = "g_front"), PlaceImage(asset = "g_tq", source = "random"))),
+        SuiteLocation("loc_demo_cafe", "Café by the gym", ImageRef.asset("hero"), 1_762_300_180_000, modelId = SampleData.DEMO, tag = "cafe",
+            description = "Corner café with a striped awning, across the street from her gym. Wet cobbles, warm window light",
+            images = listOf(PlaceImage(asset = "hero"))),
     )
     /** Spent today on suite shots (demo, never settled: test renders). */
     var spentToday = 0.0

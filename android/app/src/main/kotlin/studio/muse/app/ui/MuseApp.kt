@@ -257,6 +257,7 @@ fun MuseApp(
                     composable(Routes.OUTFIT) { OutfitScreen() }
                     composable(Routes.OUTFITS) { OutfitFoldersScreen() }
                     composable(Routes.OUTFIT_VIEW) { e -> OutfitOpenScreen(e.arguments?.getString("id") ?: "") }
+                    composable(PLACE_ROUTE) { e -> PlaceScreen(e.arguments?.getString("id") ?: "") }
                     // Photoshoot is the Photo tool now (workstream 3): an old "shoot" route that reaches the graph directly opens Suite → Photo.
                     composable(Routes.SHOOT) { LaunchedEffect(Unit) { nav.navigate(Routes.SUITE_PHOTO) { popUpTo(Routes.SHOOT) { inclusive = true }; launchSingleTop = true } } }
                     composable(Routes.SOURCE) { SourceScreen() }

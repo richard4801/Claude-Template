@@ -1606,6 +1606,83 @@ class FakeMuseApi(
     }
     override suspend fun deleteSuiteLocation(id: String) { lock.withLock { suite.locations.removeAll { it.id == id } } }
 
+    // Her world, phase 1: places (in memory; a demo place photo reuses a demo still at $0.03).
+    private fun placeAt(id: String): Int = suite.locations.indexOfFirst { it.id == id }.takeIf { it >= 0 } ?: throw ApiException("not_found", "Place not found")
+    private fun freeTag(want: String?, name: String, modelId: String?, except: String? = null): String {
+        val taken = suite.locations.filter { it.modelId == modelId && it.id != except }.map { it.atTag }.toSet()
+        if (want != null) {
+            val t = want.trim().removePrefix("@").lowercase()
+            if (!Regex("^[a-z0-9][a-z0-9_-]{0,29}$").matches(t)) throw ApiException("bad_request", "A tag is 1–30 letters, digits, - or _")
+            if (t in taken) throw ApiException("tag_taken", "@$t is already used · pick another tag")
+            return t
+        }
+        val base = Places.tagFrom(name)
+        return generateSequence(1) { it + 1 }.map { if (it == 1) base else "${base.take(27)}-$it" }.first { it !in taken }
+    }
+    private fun savePlace(l: SuiteLocation): SuiteLocation {
+        val photos = l.photos
+        val cover = l.cover.coerceIn(0, maxOf(0, photos.size - 1))
+        val v = l.copy(images = photos, cover = cover, image = photos.getOrNull(cover)?.ref ?: l.image)
+        val i = suite.locations.indexOfFirst { it.id == v.id }
+        if (i >= 0) suite.locations[i] = v else suite.locations.add(0, v)
+        return v
+    }
+    override suspend fun createPlace(req: PlaceCreate) = lock.withLock {
+        val name = req.name.trim()
+        if (name.isEmpty() || name.length > 60) throw ApiException("bad_request", "Give the place a name")
+        if (req.modelId != null) { if (models.none { it.id == req.modelId }) throw ApiException("not_found", "Model not found") }
+        else if (req.image == null) throw ApiException("bad_request", "A studio place needs a photo")
+        val tag = freeTag(req.tag, name, req.modelId)
+        savePlace(SuiteLocation("loc_" + uid(), name, req.image ?: ImageRef(), now(), modelId = req.modelId, tag = tag, description = req.description.orEmpty(),
+            images = listOfNotNull(req.image?.let { PlaceImage(it.asset, it.url) })))
+    }
+    override suspend fun updatePlace(id: String, patch: PlacePatch) = lock.withLock {
+        var l = suite.locations[placeAt(id)]
+        patch.name?.let { n -> if (n.isBlank()) throw ApiException("bad_request", "Give the place a name"); l = l.copy(name = n.trim()) }
+        patch.tag?.let { l = l.copy(tag = freeTag(it, l.name, l.modelId, l.id)) }
+        patch.description?.let { l = l.copy(description = it.trim()) }
+        patch.cover?.let { c -> if (c !in l.photos.indices) throw ApiException("bad_request", "cover: no such photo"); l = l.copy(cover = c) }
+        savePlace(l)
+    }
+    override suspend fun addPlaceImage(id: String, image: ImageRef) = lock.withLock {
+        val l = suite.locations[placeAt(id)]
+        if (l.photos.size >= Places.MAX_IMAGES) throw ApiException("place_full", "A place keeps up to ${Places.MAX_IMAGES} photos · remove one first")
+        savePlace(l.copy(images = l.photos + PlaceImage(image.asset, image.url)))
+    }
+    override suspend fun removePlaceImage(id: String, index: Int) = lock.withLock {
+        val l = suite.locations[placeAt(id)]
+        if (index !in l.photos.indices) throw ApiException("not_found", "Photo not found")
+        if (l.isStudio && l.photos.size == 1) throw ApiException("last_photo", "A studio place keeps at least one photo · delete the place instead")
+        val cover = if (l.cover > index) l.cover - 1 else if (l.cover == index) 0 else l.cover
+        savePlace(l.copy(images = l.photos.filterIndexed { i, _ -> i != index }, cover = cover))
+    }
+    override suspend fun placePhotoEstimate(id: String, req: PlacePhotoRequest) = lock.withLock {
+        val l = suite.locations[placeAt(id)]
+        if (req.mode == "random" && l.photos.isEmpty()) throw ApiException("needs_a_photo", "A random view starts from the place’s photos · add one, or generate from a description")
+        val usd = 0.03
+        PlacePhotoEstimate(usd, "Generate · ${Places.money(usd)}", "about ${Places.money(usd)} · 1 photo")
+    }
+    override suspend fun makePlacePhoto(id: String, req: PlacePhotoRequest) = lock.withLock {
+        val l = suite.locations[placeAt(id)]
+        val usd = 0.03
+        req.maxUsd?.let { if (usd > it + 1e-9) throw ApiException("price_changed", "The price is now ${Places.money(usd)} · approve the new price to make it") }
+        if (l.photos.size >= Places.MAX_IMAGES) throw ApiException("place_full", "A place keeps up to ${Places.MAX_IMAGES} photos · remove one first")
+        when (req.mode) {
+            "random" -> if (l.photos.isEmpty()) throw ApiException("needs_a_photo", "A random view starts from the place’s photos")
+            "reference" -> if (req.reference == null) throw ApiException("bad_request", "Pick the picture to rebuild from")
+            else -> if ((req.description ?: l.description).isBlank()) throw ApiException("bad_request", "Describe the place")
+        }
+        val still = listOf("g_front", "g_tq", "hero")[l.photos.size % 3]
+        PlacePhotoResult(savePlace(l.copy(images = l.photos + PlaceImage(asset = still, source = req.mode))), usd)
+    }
+    override suspend fun copyPlace(id: String, modelId: String) = lock.withLock {
+        val src = suite.locations[placeAt(id)]
+        if (models.none { it.id == modelId }) throw ApiException("not_found", "Model not found")
+        if (src.modelId == modelId) throw ApiException("bad_request", "This place is already hers")
+        val taken = suite.locations.any { it.modelId == modelId && it.atTag == src.atTag }
+        savePlace(src.copy(id = "loc_" + uid(), modelId = modelId, tag = if (taken) freeTag(null, src.name, modelId) else src.atTag, createdAt = now()))
+    }
+
     // ---- AI suite build step 2 (plans/api.md "The new Suite's server pieces"): saved rigs, default rigs, the takes feed.
     /** Who the demo acts as while [suiteOwner] is false (a member of the demo studio). */
     var suiteMemberId = FakeSuiteRigs.MEMBER_ID

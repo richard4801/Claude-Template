@@ -341,12 +341,13 @@ class SuiteComposerFollowupTest {
     @Test fun `demo mode has two locations and adds, lists and deletes them`() = kotlinx.coroutines.runBlocking {
         val api = studio.muse.app.data.FakeMuseApi(kotlinx.coroutines.MainScope(), null, speed = 0.0, genDelayMs = 0)
         val list = api.suiteLocations()
-        assertEquals(2, list.size)
+        assertEquals(2, list.count { it.isStudio }) // plus the demo model's own two places (her world)
+        assertEquals(4, list.size)
         assertTrue(list.all { it.image.asset != null && it.name.isNotBlank() })
         val made = api.createSuiteLocation(SuiteLocationCreate("Rooftop", ImageRef(url = "file:///x.jpg")))
         assertEquals("Rooftop", api.suiteLocations().first().name)
         api.deleteSuiteLocation(made.id)
-        assertEquals(2, api.suiteLocations().size)
+        assertEquals(4, api.suiteLocations().size)
         // A server without locations says so (the composer then simply has none).
         val old = object : studio.muse.app.data.MuseApi by api {
             override suspend fun suiteLocations(): List<SuiteLocation> = super<studio.muse.app.data.MuseApi>.suiteLocations()

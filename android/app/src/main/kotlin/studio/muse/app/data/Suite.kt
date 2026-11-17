@@ -253,9 +253,72 @@ data class SuiteCustomEngine(
 @Serializable
 data class SuiteToolInfo(val id: String, val available: Boolean = false, val comingSoon: Boolean = false)
 
-/** A place in the studio's locations library (`@location` in the prompt). GET/POST/DELETE /v1/suite/locations. */
+/**
+ * A place (`@tag` in the prompt). GET/POST/DELETE /v1/suite/locations. Her world (plans/model-world.md): hers
+ * ([modelId]) or the studio's (null, "Studio places"); up to 8 photos, the [cover] one sent. An older server sends only
+ * [image]: the tag comes from the name and the image is the one photo.
+ */
 @Serializable
-data class SuiteLocation(val id: String, val name: String = "", val image: ImageRef = ImageRef(), val createdAt: Long = 0)
+data class SuiteLocation(
+    val id: String, val name: String = "", val image: ImageRef = ImageRef(), val createdAt: Long = 0,
+    val modelId: String? = null, val tag: String = "", val description: String = "", val images: List<PlaceImage> = emptyList(), val cover: Int = 0,
+) {
+    val isStudio: Boolean get() = modelId == null
+    val atTag: String get() = tag.ifBlank { Places.tagFrom(name) }
+    /** Its photos (an older server: the one image). */
+    val photos: List<PlaceImage> get() = images.ifEmpty { if (image.asset != null || image.url != null) listOf(PlaceImage(image.asset, image.url)) else emptyList() }
+    val coverImage: ImageRef? get() = photos.getOrNull(cover)?.ref ?: photos.firstOrNull()?.ref
+}
+
+/** One photo of a place and how it was made (upload, random, description, reference). */
+@Serializable
+data class PlaceImage(val asset: String? = null, val url: String? = null, val source: String = "upload") {
+    val ref: ImageRef get() = ImageRef(asset, url)
+    val caption: String get() = when (source) {
+        "random" -> "Generated, random view"; "description" -> "Generated from a description"; "reference" -> "Generated from a reference"; else -> "Uploaded"
+    }
+}
+
+@Serializable
+data class PlaceCreate(val name: String, val modelId: String? = null, val tag: String? = null, val description: String? = null, val image: ImageRef? = null)
+@Serializable
+data class PlacePatch(val name: String? = null, val tag: String? = null, val description: String? = null, val cover: Int? = null)
+@Serializable
+data class PlaceImageBody(val image: ImageRef)
+@Serializable
+data class PlaceCopyBody(val modelId: String)
+/** One place photo: [mode] random · description · reference. [maxUsd] = the price approved; never charged above it. */
+@Serializable
+data class PlacePhotoRequest(val mode: String, val description: String? = null, val reference: ImageRef? = null, val maxUsd: Double? = null)
+@Serializable
+data class PlacePhotoEstimate(val estimate: Double = 0.0, val buttonLabel: String = "", val priceLine: String = "")
+@Serializable
+data class PlacePhotoResult(val place: SuiteLocation, val chargedUsd: Double = 0.0)
+
+/** Her world helpers, as the server makes them (server/api/src/suite/locations.ts). */
+object Places {
+    const val MAX_IMAGES = 8
+    val STARTERS = listOf("Apartment", "Bedroom", "Gym", "Café")
+    /** The three ways to make one photo, in the Add photo sheet's order. */
+    val MODES = listOf("random", "description", "reference")
+
+    /** "Café by the gym" → "cafe-by-the-gym". */
+    fun tagFrom(name: String): String {
+        val folded = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFKD).replace(Regex("\\p{M}+"), "").lowercase()
+        return folded.replace(Regex("[^a-z0-9]+"), "-").trim('-').take(30).trimEnd('-').ifEmpty { "place" }
+    }
+
+    /** Her places (newest first), then the studio's; another model's are left out. */
+    fun forModel(modelId: String?, all: List<SuiteLocation>): Pair<List<SuiteLocation>, List<SuiteLocation>> {
+        val sorted = all.sortedByDescending { it.createdAt }
+        return (if (modelId == null) emptyList() else sorted.filter { it.modelId == modelId }) to sorted.filter { it.isStudio }
+    }
+
+    fun title(mode: String) = when (mode) { "random" -> "A random view"; "description" -> "From a description"; else -> "From a reference picture" }
+    fun line(mode: String) = when (mode) { "random" -> "Made from this place’s photos"; "description" -> "Words you type, or the place’s own"; else -> "A photo you like, rebuilt as this place" }
+    fun icon(mode: String) = when (mode) { "random" -> "shuffle"; "description" -> "text-aa"; else -> "image" }
+    fun money(v: Double) = "$" + String.format(java.util.Locale.US, "%.2f", v)
+}
 
 @Serializable
 data class SuiteLocationCreate(val name: String, val image: ImageRef)

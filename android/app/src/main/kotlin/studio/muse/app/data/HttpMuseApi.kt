@@ -196,6 +196,13 @@ interface MuseService {
     @GET("v1/suite/locations") suspend fun suiteLocations(): List<SuiteLocation>
     @POST("v1/suite/locations") suspend fun createSuiteLocation(@Body r: SuiteLocationCreate): SuiteLocation
     @DELETE("v1/suite/locations/{id}") suspend fun deleteSuiteLocation(@Path("id") id: String): retrofit2.Response<Unit>
+    @POST("v1/suite/locations") suspend fun createPlace(@Body r: PlaceCreate): SuiteLocation
+    @PATCH("v1/suite/locations/{id}") suspend fun updatePlace(@Path("id") id: String, @Body r: PlacePatch): SuiteLocation
+    @POST("v1/suite/locations/{id}/images") suspend fun addPlaceImage(@Path("id") id: String, @Body r: PlaceImageBody): SuiteLocation
+    @DELETE("v1/suite/locations/{id}/images/{index}") suspend fun removePlaceImage(@Path("id") id: String, @Path("index") index: Int): SuiteLocation
+    @POST("v1/suite/locations/{id}/generate/estimate") suspend fun placePhotoEstimate(@Path("id") id: String, @Body r: PlacePhotoRequest): PlacePhotoEstimate
+    @POST("v1/suite/locations/{id}/generate") suspend fun makePlacePhoto(@Path("id") id: String, @Body r: PlacePhotoRequest): PlacePhotoResult
+    @POST("v1/suite/locations/{id}/copy") suspend fun copyPlace(@Path("id") id: String, @Body r: PlaceCopyBody): SuiteLocation
     // AI suite build step 2: saved rigs, a model's default rig, the takes feed
     @GET("v1/suite/rigs") suspend fun suiteRigs(): List<SuiteRigView>
     @POST("v1/suite/rigs") suspend fun createSuiteRig(@Body r: SuiteRigCreate): SuiteRigView
@@ -749,8 +756,15 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     override suspend fun suiteCompile(req: SuiteCompileRequest) = call { suiteCompile(req) }
     override suspend fun suiteSettings() = shared("suite/settings", CATALOG_TTL) { call { suiteSettings() } }
     override suspend fun patchSuiteSettings(req: SuiteSettingsPatch) = call { patchSuiteSettings(req) }.also { reads.invalidate("suite/") }
-    override suspend fun suiteLocations() = shared("suite/locations", CATALOG_TTL) { call { suiteLocations() }.map { it.copy(image = it.image.abs()) } }
-    override suspend fun createSuiteLocation(req: SuiteLocationCreate) = call { createSuiteLocation(req) }.let { it.copy(image = it.image.abs()) }.also { reads.invalidate("suite/locations") }
+    override suspend fun suiteLocations() = shared("suite/locations", CATALOG_TTL) { call { suiteLocations() }.map { it.abs() } }
+    override suspend fun createSuiteLocation(req: SuiteLocationCreate) = call { createSuiteLocation(req) }.abs().also { reads.invalidate("suite/locations") }
+    override suspend fun createPlace(req: PlaceCreate) = call { createPlace(req) }.abs().also { reads.invalidate("suite/locations") }
+    override suspend fun updatePlace(id: String, patch: PlacePatch) = call { updatePlace(id, patch) }.abs().also { reads.invalidate("suite/locations") }
+    override suspend fun addPlaceImage(id: String, image: ImageRef) = call { addPlaceImage(id, PlaceImageBody(image)) }.abs().also { reads.invalidate("suite/locations") }
+    override suspend fun removePlaceImage(id: String, index: Int) = call { removePlaceImage(id, index) }.abs().also { reads.invalidate("suite/locations") }
+    override suspend fun placePhotoEstimate(id: String, req: PlacePhotoRequest) = call { placePhotoEstimate(id, req.copy(maxUsd = null)) }
+    override suspend fun makePlacePhoto(id: String, req: PlacePhotoRequest) = call { makePlacePhoto(id, req) }.let { it.copy(place = it.place.abs()) }.also { reads.invalidate("suite/locations") }
+    override suspend fun copyPlace(id: String, modelId: String) = call { copyPlace(id, PlaceCopyBody(modelId)) }.abs().also { reads.invalidate("suite/locations") }
     override suspend fun deleteSuiteLocation(id: String) { call { deleteSuiteLocation(id) }; reads.invalidate("suite/locations") }
     // AI suite build step 2: saved rigs (changing ones read fresh), a model's default rig, the takes feed (never cached: it moves).
     override suspend fun suiteRigs() = shared("suite/rigs") { call { suiteRigs() } }
@@ -796,6 +810,7 @@ class HttpMuseApi(baseUrl: String, private val uploadMode: UploadMode = UploadMo
     /** Relative "/uploads/x" refs → absolute, so Coil and ExoPlayer can load them. */
     private fun String.absUrl(): String = if (startsWith("/")) base.trimEnd('/') + this else this
     private fun ImageRef.abs(): ImageRef = if (url != null && url.startsWith("/")) copy(url = url.absUrl()) else this
+    private fun SuiteLocation.abs() = copy(image = image.abs(), images = images.map { p -> p.ref.abs().let { r -> p.copy(asset = r.asset, url = r.url) } })
     private fun Lora.abs() = copy(candidates = candidates.map { it.copy(image = it.image.abs()) })
     private fun Post.abs() = copy(thumb = thumb?.abs())
     private fun Model.abs() = copy(slots = slots.map { it.copy(image = it.image?.abs()) })

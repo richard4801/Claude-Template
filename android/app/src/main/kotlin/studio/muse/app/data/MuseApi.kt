@@ -378,6 +378,16 @@ interface MuseApi {
     suspend fun suiteLocations(): List<SuiteLocation> = throw ApiException("not_found", "This server doesn't have locations yet")
     suspend fun createSuiteLocation(req: SuiteLocationCreate): SuiteLocation = throw ApiException("not_found", "This server doesn't have locations yet")
     suspend fun deleteSuiteLocation(id: String): Unit = throw ApiException("not_found", "This server doesn't have locations yet")
+    // Her world, phase 1 (plans/model-world.md): her places and the studio's.
+    suspend fun createPlace(req: PlaceCreate): SuiteLocation = throw ApiException("not_found", "This server doesn't have places yet")
+    suspend fun updatePlace(id: String, patch: PlacePatch): SuiteLocation = throw ApiException("not_found", "This server doesn't have places yet")
+    suspend fun addPlaceImage(id: String, image: ImageRef): SuiteLocation = throw ApiException("not_found", "This server doesn't have places yet")
+    suspend fun removePlaceImage(id: String, index: Int): SuiteLocation = throw ApiException("not_found", "This server doesn't have places yet")
+    /** One place photo's price, before anything is made ("Generate · $0.03"). */
+    suspend fun placePhotoEstimate(id: String, req: PlacePhotoRequest): PlacePhotoEstimate = throw ApiException("not_found", "This server doesn't have places yet")
+    /** Makes one photo; never charged above [PlacePhotoRequest.maxUsd] (409 `price_changed` with the new price). */
+    suspend fun makePlacePhoto(id: String, req: PlacePhotoRequest): PlacePhotoResult = throw ApiException("not_found", "This server doesn't have places yet")
+    suspend fun copyPlace(id: String, modelId: String): SuiteLocation = throw ApiException("not_found", "This server doesn't have places yet")
 
     // AI suite build step 2 (plans/api.md "The new Suite's server pieces"): saved rigs, a model's default rig, the takes feed.
     /** A member's own rigs; the owner gets every rig in the studio, theirs first ([SuiteRigView.mine]). Ordered by last change. */
