@@ -298,6 +298,9 @@ extension EditV2 {
         public mutating func adoptRemote(_ next: Project) {
             let base = current
             guard next != base else { return }
+            // Nothing of this Mac's own to carry over (no local undo or redo steps): no diff to work out (build 704, run 718:
+            // the encode → diff round trip ran on every one of Claude's patches).
+            if undoStack.isEmpty && redoStack.isEmpty { current = next; return }
             let patch = try? JSONPatch.diff(JSONPatch.encode(base), JSONPatch.encode(next))
             func moved(_ s: Project) -> Project? {
                 guard let patch, let doc = try? JSONPatch.apply(JSONPatch.encode(s), patch) else { return nil }

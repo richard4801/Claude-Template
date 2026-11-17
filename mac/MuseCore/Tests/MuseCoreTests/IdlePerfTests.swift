@@ -81,4 +81,24 @@ final class IdlePerfTests: XCTestCase {
         XCTAssertEqual(ChatTextCache.userText("hi"), ChatLeakFilter.userText("hi"))
         XCTAssertEqual(ChatTextCache.toolSummary("ls", name: "Bash"), ChatLeakFilter.toolSummary("ls", name: "Bash"))
     }
+
+    func testRemoteChangesShowAtOnceAfterQuietThenAtMostOncePerGap() {
+        var th = RemoteChangeThrottle(gap: 1)
+        XCTAssertEqual(th.delay(at: 10), 0) // first after a quiet moment: at once
+        th.shown(at: 10)
+        XCTAssertEqual(th.delay(at: 10.5), 0.5, accuracy: 1e-9) // held to the end of the gap
+        XCTAssertEqual(th.delay(at: 10.9), 0.1, accuracy: 1e-9)
+        th.shown(at: 11)
+        XCTAssertEqual(th.delay(at: 12.5), 0) // quiet again
+    }
+
+    func testAdoptRemoteWithNothingToRebaseKeepsStacksAndTakesTheProject() {
+        let a = EditV2.Project.blank()
+        var b = a
+        b.canvas.width = 720
+        var h = EditV2.History(a)
+        h.adoptRemote(b)
+        XCTAssertEqual(h.current, b)
+        XCTAssertFalse(h.canUndo)
+    }
 }
