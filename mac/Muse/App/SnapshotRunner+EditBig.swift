@@ -187,51 +187,69 @@ extension SnapshotRunner {
         let rebuilds0 = s.rebuildCount
         let sampleFile = dir.appendingPathComponent("edit-big-patches-sample.txt")
         async let sampled: Void = sampleApp(to: sampleFile, seconds: 6)
-        var cpu: [Double] = []
-        var late: [String] = []
-        var worst = 0.0
         let n = 20
+        // One attempt: 20 patches at 2 a second; returns the slowest show time and the patches not shown within 1.5 s.
+        // Each attempt writes values of its own, so a patch never "lands" on a value an earlier attempt left.
+        func attempt(_ a: Int) async -> (worst: Double, late: [String]) {
+            var late: [String] = []
+            var worst = 0.0
+            for k in 0..<n {
+                let started = Date()
+                let label = "Claude · patch \(k + 1)"
+                let landed: () -> Bool
+                if k % 2 == 0 {
+                    let i = (k / 2) % texts
+                    let want = a == 0 ? "Beat \(k + 1)" : "Beat \(k + 1) · \(a + 1)"
+                    _ = try? await fake.fakeClaudePatch(sessionId: sessionId, [.replace("/tracks/\(txt)/items/\(i)/text", .string(want))], label: label)
+                    landed = {
+                        if case .text(let t)? = s.project.tracks[txt].items.indices.contains(i) ? s.project.tracks[txt].items[i] : nil { return t.text == want }
+                        return false
+                    }
+                } else {
+                    let i = (k * 5) % shots
+                    let x = [0.45, 0.55][(k / 2) % 2] + 0.01 * Double(a)
+                    _ = try? await fake.fakeClaudePatch(sessionId: sessionId, [.replace("/tracks/\(main)/items/\(i)/transform/x", .number(x))], label: label)
+                    landed = {
+                        guard s.project.tracks[main].items.indices.contains(i), case .video(let c) = s.project.tracks[main].items[i] else { return false }
+                        return c.transform?.x == x
+                    }
+                }
+                var ok = landed()
+                while !ok && Date().timeIntervalSince(started) < 1.5 { try? await Task.sleep(for: .seconds(0.05)); ok = landed() }
+                let took = Date().timeIntervalSince(started)
+                worst = max(worst, took)
+                if !ok { late.append("\(k + 1)") }
+                try? await Task.sleep(for: .seconds(max(0, 0.5 - took)))
+            }
+            return (worst, late)
+        }
+        // Attempt 1 carries the CPU windows and the main-thread sample.
         let measuring = Task { @MainActor in
             var xs: [Double] = []
             for _ in 0..<5 { xs.append(await cpuPercent(over: 2)) }
             return xs
         }
-        for k in 0..<n {
-            let started = Date()
-            let label = "Claude · patch \(k + 1)"
-            let landed: () -> Bool
-            if k % 2 == 0 {
-                let i = (k / 2) % texts
-                let want = "Beat \(k + 1)"
-                _ = try? await fake.fakeClaudePatch(sessionId: sessionId, [.replace("/tracks/\(txt)/items/\(i)/text", .string(want))], label: label)
-                landed = {
-                    if case .text(let t)? = s.project.tracks[txt].items.indices.contains(i) ? s.project.tracks[txt].items[i] : nil { return t.text == want }
-                    return false
-                }
-            } else {
-                let i = (k * 5) % shots
-                let x = [0.45, 0.55][(k / 2) % 2]
-                _ = try? await fake.fakeClaudePatch(sessionId: sessionId, [.replace("/tracks/\(main)/items/\(i)/transform/x", .number(x))], label: label)
-                landed = {
-                    guard s.project.tracks[main].items.indices.contains(i), case .video(let c) = s.project.tracks[main].items[i] else { return false }
-                    return c.transform?.x == x
-                }
-            }
-            var ok = landed()
-            while !ok && Date().timeIntervalSince(started) < 1.5 { try? await Task.sleep(for: .seconds(0.05)); ok = landed() }
-            let took = Date().timeIntervalSince(started)
-            worst = max(worst, took)
-            if !ok { late.append("\(k + 1)") }
-            try? await Task.sleep(for: .seconds(max(0, 0.5 - took)))
-        }
-        cpu = await measuring.value
+        var runs = [await attempt(0)]
+        let cpu = await measuring.value
         _ = await sampled
         let med = median(cpu)
         let rebuilds = s.rebuildCount - rebuilds0
+        // Coordinator 2026-11-17: the CI runners are noisy (the release alone measured 4.91 s in run 747 after 0.86 s in run
+        // 743, with no app change), so the gate is the median of 3 attempts' slowest show times, still 1 s. Each attempt's
+        // numbers are logged, so a real regression (every attempt slow) still fails.
+        for a in 1..<3 {
+            try? await Task.sleep(for: .seconds(2))
+            runs.append(await attempt(a))
+        }
+        let worsts = runs.map(\.worst)
+        let medWorst = median(worsts)
+        let each = runs.map { r in
+            String(format: "%.2f s", r.worst) + (r.late.isEmpty ? "" : " (not shown within 1.5 s: \(r.late.joined(separator: ", ")))")
+        }
         // Coordinator, after run 722: the show time is the lag the owner feels, a hard gate (each patch within 1 s).
-        line(late.isEmpty && worst <= 1.0, "Claude patches show within 1 s",
-             String(format: "%d patches at 2 a second: slowest to show %.2f s (fails above 1 s), ", n, worst)
-             + "\(rebuilds) preview rebuilds" + (late.isEmpty ? "" : ", not shown within 1.5 s: \(late.joined(separator: ", "))"))
+        line(medWorst <= 1.0, "Claude patches show within 1 s",
+             String(format: "%d patches at 2 a second, 3 attempts: median slowest to show %.2f s (fails above 1 s); ", n, medWorst)
+             + "attempts \(each.joined(separator: ", ")); \(rebuilds) preview rebuilds in attempt 1")
         // Coordinator, after run 728 (85 % with patches showing in 0.84 s): 85 % accepted for this release, aim 83 %; INFO up
         // to 86 % (85 plus a point of noise), fails above, so a real regression shows. The Canvas-drawn interactive lanes wait
         // for a session on a real Mac.
