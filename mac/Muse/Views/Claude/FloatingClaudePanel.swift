@@ -32,10 +32,12 @@ struct FloatingClaudePanel: View {
             .background { if SnapshotRunner.probing { ComposerBarFrame(key: "one claude panel") } }
             .background(t.roles.canvas)
             .clipShape(shape)
+            // A soft shadow lifts it off the page (the one `float` shadow; dark themes get a deeper, neutral one).
+            // Performance (build 704): cast by a plain shape behind the panel, not by the whole panel and its glowing edge,
+            // so streaming text and the edge's frames no longer make the 32 pt shadow be worked out again every frame.
+            .background(shape.fill(t.roles.canvas).shadow(color: .black.opacity(t.isDark ? 0.55 : 0.18), radius: 32, y: 16))
             .overlay(ClaudeLivingEdge(cornerRadius: radius))
             .overlay(alignment: .bottomLeading) { resizeHandle(in: g.size) }
-            // A soft shadow lifts it off the page (the one `float` shadow; dark themes get a deeper, neutral one).
-            .shadow(color: .black.opacity(t.isDark ? 0.55 : 0.18), radius: 32, y: 16)
             .position(x: g.size.width - f.right - f.width / 2, y: f.top + f.height / 2)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: g.size)
         }

@@ -44,7 +44,12 @@ struct ComposerFeed: View {
 
     var body: some View {
         let list = items
-        let viewTakes = list.compactMap { store.feedTake($0) }
+        // Performance (build 704): only built while the viewer is open, through one id table (it was a linear search of
+        // every take for every card, on every job progress event).
+        let viewTakes: [Take] = store.suite.viewerTakeId == nil ? [] : {
+            let byId = Dictionary(store.takes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            return list.compactMap { $0.takeId.flatMap { byId[$0] } }
+        }()
         ZStack {
             VStack(alignment: .leading, spacing: Space.s3) {
                 header

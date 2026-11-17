@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import AVKit
+import ImageIO
 import MuseCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -644,7 +645,13 @@ enum RecreateMediaLoader {
         }
     }
 
-    @MainActor private static var images: [URL: NSImage] = [:]
+    /// Stills, bounded (build 704: it was a dictionary that never let go of a full-size picture).
+    @MainActor private static let images: NSCache<NSURL, NSImage> = {
+        let c = NSCache<NSURL, NSImage>()
+        c.totalCostLimit = 96 * 1024 * 1024
+        c.countLimit = 300
+        return c
+    }()
     @MainActor private static var videos: [URL: URL] = [:]
 
     private static func request(_ m: (url: URL, token: String?)) -> URLRequest {
@@ -655,10 +662,22 @@ enum RecreateMediaLoader {
 
     @MainActor static func image(_ m: (url: URL, token: String?)?) async -> NSImage? {
         guard let m else { return nil }
-        if let hit = images[m.url] { return hit }
+        if let hit = images.object(forKey: m.url as NSURL) { return hit }
         guard let got = try? await URLSession.shared.data(for: request(m), delegate: Redirects()),
-              ((got.1 as? HTTPURLResponse)?.statusCode ?? 200) < 300, let img = NSImage(data: got.0) else { return nil }
-        images[m.url] = img
+              ((got.1 as? HTTPURLResponse)?.statusCode ?? 200) < 300 else { return nil }
+        // Decoded off the main thread, at most 2048 px on its long side (the player frame's own cap): it used to be decoded
+        // full size on the main thread at first draw.
+        let data = got.0
+        guard let cg = await Task.detached(priority: .userInitiated, operation: { () -> CGImage? in
+            guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+                  let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                                                        kCGImageSourceCreateThumbnailWithTransform: true,
+                                                                        kCGImageSourceShouldCacheImmediately: true,
+                                                                        kCGImageSourceThumbnailMaxPixelSize: 2048] as CFDictionary) else { return nil }
+            return cg
+        }).value else { return nil }
+        let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        images.setObject(img, forKey: m.url as NSURL, cost: cg.bytesPerRow * cg.height)
         return img
     }
 

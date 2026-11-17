@@ -408,10 +408,8 @@ struct RecreateLanes: View {
             GeometryReader { g in
                 ZStack(alignment: .topLeading) {
                     content(g.size.width)
-                    Rectangle().fill(t.roles.accent)
-                        .frame(width: 2, height: g.size.height)
-                        .offset(x: x(store.recreate.time, g.size.width) - 1)
-                        .allowsHitTesting(false)
+                    // Its own view (build 704): only the line follows the 30 fps clock while playing, not the lane's content.
+                    RecreatePlayheadLine(width: g.size.width, height: g.size.height)
                 }
                 .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
                 .background(probe.map { SnapshotFrame(key: $0) })
@@ -633,5 +631,20 @@ struct RecreateTextChip: View {
             Circle().fill(t.roles.ink2).frame(width: 4, height: 4)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+/// The accent playhead line over one Recreate lane: the only part that reads the playing time.
+private struct RecreatePlayheadLine: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    var width: CGFloat
+    var height: CGFloat
+
+    var body: some View {
+        Rectangle().fill(t.roles.accent)
+            .frame(width: 2, height: height)
+            .offset(x: CGFloat(RecreateLaneLayout.x(store.recreate.time, duration: store.recreate.duration, width: Double(width))) - 1)
+            .allowsHitTesting(false)
     }
 }

@@ -135,23 +135,26 @@ final class ClaudeCodeService: ObservableObject {
 
     /// `claude --version` + `claude auth status` (Re-check, app activation, after Install / Sign in).
     func recheck() async {
+        // Performance (build 704): this runs on every app activation, and each @Published set re-renders every view watching
+        // the service even when the value is the same: only changes are set.
         if isDemo {
-            info = ClaudeCodeInfo(installed: true, signedIn: true, version: "demo", model: info.model ?? "claude-sonnet-demo")
-            checkedOnce = true
+            let demo = ClaudeCodeInfo(installed: true, signedIn: true, version: "demo", model: info.model ?? "claude-sonnet-demo")
+            if info != demo { info = demo }
+            if !checkedOnce { checkedOnce = true }
             return
         }
         guard !checking else { return }
         checking = true
         defer {
             checking = false
-            checkedOnce = true
+            if !checkedOnce { checkedOnce = true }
         }
         let exe = ClaudeCodeLocator.find(home: NSHomeDirectory(), path: ProcessInfo.processInfo.environment["PATH"])
-        executable = exe
+        if executable != exe { executable = exe }
         var next = await ClaudeShell.probe(executable: exe, environment: environment)
         next.model = info.model
         let changed = next.installed != info.installed || next.signedIn != info.signedIn
-        info = next
+        if info != next { info = next }
         if changed, let api, configured { _ = try? await api.heartbeat(info) }
     }
 
@@ -703,7 +706,9 @@ final class ClaudeCodeService: ObservableObject {
 
     // MARK: Claude's orb (one state machine, MuseCore ClaudeOrb): fed by real events only
 
-    @Published private(set) var orb = ClaudeOrb()
+    /// Not @Published (build 704): only the orbs and the panel's edge draw it, through ClaudeOrbBox, so its changes no longer
+    /// re-render every view that watches this service.
+    private(set) var orb = ClaudeOrb() { didSet { ClaudeOrbBox.shared.set(orb) } }
     /// Claude's finished turns in the open chat (live chips ask again after each reply).
     @Published private(set) var turnsEnded = 0
     static var now: Double { Date().timeIntervalSinceReferenceDate }
@@ -713,7 +718,9 @@ final class ClaudeCodeService: ObservableObject {
         let now = Self.now
         switch e {
         case .user: orb.turnStarted()
-        case .text, .assistant, .tool, .image: orb.chunk(at: now)
+        case .text, .assistant, .tool, .image:
+            // Every token used to publish `orb`: every view watching this service re-rendered per token.
+            if orb.chunkChangesAnything(at: now) { orb.chunk(at: now) }
         case .done(let ok, _, _):
             orb.turnEnded(ok: ok, at: now)
             turnsEnded &+= 1
@@ -733,9 +740,9 @@ final class ClaudeCodeService: ObservableObject {
     func orbTyping(_ on: Bool) { if orb.typing != on { orb.typing = on } }
     /// The error tint ends on its own after its hold: redraw then (the orb's timeline is paused while it is still).
     private func orbErrorEnds() {
-        Task { [weak self] in
+        Task {
             try? await Task.sleep(nanoseconds: UInt64((ClaudeOrb.errorHold + 0.1) * 1_000_000_000))
-            self?.objectWillChange.send()
+            ClaudeOrbBox.shared.redraw()
         }
     }
 
