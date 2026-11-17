@@ -118,7 +118,16 @@ final class OrbVisibility: ObservableObject {
         update()
     }
 
+    /// Review mode only: the idle check measures the working orb with the window counted as visible, since a CI runner's
+    /// window can read as occluded (then the orb never draws and its cost reads 0 %).
+    private(set) var forced = false
+    func force(_ on: Bool) {
+        forced = on
+        update()
+    }
+
     private func update() {
+        if forced { if !visible { visible = true }; return }
         let shown = !NSApp.isHidden && NSApp.occlusionState.contains(.visible)
             && (NSApp.mainWindow ?? NSApp.windows.first { $0.isVisible && !$0.isMiniaturized }).map { $0.occlusionState.contains(.visible) && !$0.isMiniaturized } ?? true
         if shown != visible { visible = shown }
