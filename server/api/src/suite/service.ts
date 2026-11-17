@@ -22,6 +22,7 @@ import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
 import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixGroup, REMIX_GROUPS, remixIncomplete, remixModels, remixSpan, remixView, sourceLimits, togglesOn } from './remix.js';
 import { z } from 'zod';
+import { placeSetting, resolvePlace } from './locations.js';
 import { billedSeconds, buildPlan, FALLBACK_KEY, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { FalProvider, HiggsfieldProvider, MockProvider, ReplicateProvider, type VideoProvider } from './providers.js';
 import { customModelsOf, DEFAULT_LADDER, EXTEND_LADDER, familyOf, refFor, inputSlotsOf, isRoute, MODELS, NO_INPUTS, modelById, modelView, MOCK_MODEL, publicModels, routesOf, TIER_INFO, TIERS, type ModelSpec, type ProviderId, type Tier } from './registry.js';
@@ -406,6 +407,10 @@ export class SuiteService {
     if (r.mode === 'extend' || r.extend) return this.extendPlan(u, r, choice);
     const prefs = await this.prefs(u.studioId);
     const character = await this.character(u.studioId, r.modelId, r.outfitId);
+    // Her world (plans/model-world.md §1): `placeId` or an @tag in the prompt → the place's photo (or words) in the plan.
+    const placed = await resolvePlace(this.ctx, u, { placeId: r.placeId, prompt: r.prompt, modelId: r.modelId });
+    r.prompt = placed.prompt;
+    const place = placed.place ? { name: placed.place.name, image: placed.place.image, words: placeSetting(placed.place) } : null;
     const need = needOf(r, character);
     if (need.mode === 'image' && !need.start && !need.end) throw badRequest('Keyframe shots need a start or end frame');
     if (need.mode === 'reference' && !character?.images.length && !need.extraImages) throw badRequest('Reference shots need a character with a sheet, or reference images');
@@ -431,7 +436,7 @@ export class SuiteService {
     const talk = await this.resolveSpeaking(u.studioId, got.request);
     const sent = await sentImagesOf(this.ctx).forRequest(u, r);
     const { plan, pick } = await this.cheapestRoute(got.pick, pk => buildPlan(got.request, got.need, pk, character, { texts, priceScale: prefs.models?.[pk.model.id]?.priceScale, speaking: talk.speaking,
-      separationUsd: SEPARATION_ESTIMATE_USD, sent }), prefs);
+      separationUsd: SEPARATION_ESTIMATE_USD, sent, place }), prefs);
     if (got.notes.length) { plan.notes.unshift(...got.notes); plan.adapted = got.adapted; }
     if (skipped) plan.notes.push(STUDIO_DEFAULT_SKIPPED);
     return { swap: false as const, plan, pick, prefs, tried: pick.tried, talk };

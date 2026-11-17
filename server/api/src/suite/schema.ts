@@ -1,5 +1,5 @@
 // AI suite tables (migrations 0007, 0013, 0014, 0020, 0022). Re-exported from db/schema.ts.
-import { bigint, doublePrecision, index, jsonb, pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
+import { bigint, doublePrecision, index, integer, jsonb, pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
 import type { LadderStep, Tier } from './registry.js';
 
 /**
@@ -18,15 +18,29 @@ export const suiteSettings = pgTable('suite_settings', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 });
 
-/** The studio's locations (composer `@location`): a named place with a reference image, sent as a "location" reference. */
+/** How a place photo was made (plans/model-world.md §1). */
+export type PlaceImageSource = 'upload' | 'random' | 'description' | 'reference';
+export type PlaceImage = { asset?: string; url?: string; source: PlaceImageSource; at?: number };
+/**
+ * The studio's locations (composer `@location`): a named place with reference photos, sent as a "location" reference.
+ * Migration 0040 (plans/model-world.md, "her world"): a place can belong to one character (`modelId`; null = a studio
+ * place, shared as before), with an @tag, a description (sent in words when there's no room for its photo) and up to 8
+ * photos, one of them the cover. `image` stays the cover (older apps read it).
+ */
 export const suiteLocations = pgTable('suite_locations', {
   id: text('id').primaryKey(),
   studioId: text('studio_id').notNull(),
   name: text('name').notNull(),
   image: jsonb('image').$type<{ asset?: string; url?: string }>().notNull(),
+  modelId: text('model_id'),
+  tag: text('tag'),
+  description: text('description').notNull().default(''),
+  images: jsonb('images').$type<PlaceImage[]>().notNull().default([]),
+  cover: integer('cover').notNull().default(0),
   createdBy: text('created_by'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
-}, t => [index('suite_locations_studio_idx').on(t.studioId)]);
+  updatedAt: bigint('updated_at', { mode: 'number' }),
+}, t => [index('suite_locations_studio_idx').on(t.studioId), index('suite_locations_model_idx').on(t.studioId, t.modelId)]);
 
 /** Saved rigs (migration 0014): a named set of rig rows. Each member sees their own; the owner sees the studio's. */
 export const suiteRigs = pgTable('suite_rigs', {

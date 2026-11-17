@@ -42,6 +42,7 @@ import { CatalogError } from '../replicate/catalog.js';
 import { photoLook } from '../editor/photo.js'; // Editor v2 (workstream 3)
 import type { Look } from '../editor/look.js';
 import { previewLayouts } from '../suite/previewLayouts.js'; // the take viewer's safe zones
+import { placeSetting, resolvePlace } from '../suite/locations.js';
 import { freePhotoPrompt, PhotoRequestSchema, photoAspects, photoButton, photoSize, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
 import { assistOf, referencesOf } from '../suite/assist.js';
@@ -1112,13 +1113,18 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   const photoPlan = async (u: AuthUser, body: unknown) => {
     const r = PhotoRequestSchema.safeParse(body ?? {});
     if (!r.success) throw badRequest(`Invalid photo: ${r.error.issues[0]?.path.join('.')} ${r.error.issues[0]?.message}`);
-    const p = r.data, still = stillRig(p), graded = photoFilter(p);
+    const p = r.data, graded = photoFilter(p);
+    // Her world (plans/model-world.md §1): `placeId` or an @tag → the place's photo as the scene reference (refs.scene).
+    const placed = await resolvePlace(ctx, u, { placeId: p.placeId, prompt: p.prompt, modelId: p.modelId });
+    p.prompt = placed.prompt;
+    let still = stillRig(p);
     // References Claude added to the composer's draft (suite_add_reference) count too, after the ones sent (max 3).
     const fromDraft = referencesOf((draftOf(body) ?? {}) as Draft).map(r => ({ image: { url: r.url }, guides: [r.use === 'pose' ? 'pose' : r.use === 'location' ? 'scene' : 'look'] as ('pose' | 'look' | 'scene')[] }));
     const refsAll = [...(p.references ?? []), ...fromDraft.filter(d => !(p.references ?? []).some(x => x.image?.url === d.image.url))].slice(0, 3);
-    const shoot = { modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: refsAll.length ? refsAll : undefined, templateId: p.presetId, aspect: p.aspect,
+    const shootOf = (refs: typeof refsAll) => ({ modelId: p.modelId, outfitId: p.outfitId, count: p.count, seed: p.seed, lockSeed: p.lockSeed, refs: refs.length ? refs : undefined, templateId: p.presetId, aspect: p.aspect,
       shuffleSeed: p.shuffleSeed, productImage: p.productImage, presets: true,
-      ...(sentOfBody(p) ? { sentImages: p.sentImages, addImages: p.addImages, excludeImages: p.excludeImages, sentImagesBy: p.sentImagesBy } : p.draft ? { draft: p.draft } : {}) };
+      ...(sentOfBody(p) ? { sentImages: p.sentImages, addImages: p.addImages, excludeImages: p.excludeImages, sentImagesBy: p.sentImagesBy } : p.draft ? { draft: p.draft } : {}) });
+    const shoot = shootOf(refsAll);
     // WS5: a custom image model the user may use replaces the studio's image engine for this run.
     // `imageModel` picks the image model for this run (a Replicate "owner/name" or a custom "c_…"): the owner any; 4c: a
     // member any model shown to members (checked, 403 otherwise).
@@ -1130,8 +1136,28 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const engine = custom ? (await ctx.suite.byo.checkUse(u, custom, 'image'), { provider: 'byo' as const, model: custom }) : undefined;
     if (imageModel && !custom && !MODEL_ID_RE.test(imageModel)) throw badRequest('imageModel: use owner/name or a custom model id');
     // Priced and run on that model (planShoot); passed as checked step models so a member can run on the studio default.
-    const s = await planShoot(u, shoot, p.presetId ? undefined : still, engine, imageModel && !custom ? { shot: imageModel } : undefined);
-    const notes = [...still.notes, ...(p.presetId && (still.camera || still.light || still.grade || still.direction) ? ['The preset sets its own camera and light'] : [])];
+    const steps = imageModel && !custom ? { shot: imageModel } : undefined;
+    let s = await planShoot(u, shoot, p.presetId ? undefined : still, engine, steps);
+    const placeNotes: string[] = [];
+    if (placed.place) {
+      // The place goes after her images and your references; it gives way first: no room (or it would push one of her
+      // images out) → it is described in words instead.
+      const pl = placed.place, img = pl.image;
+      const already = !!img && refsAll.some(x => sameImage(x.image as ImageRef, img));
+      let sent = already;
+      if (img && !already && refsAll.length < 3) {
+        const withPlace = await planShoot(u, shootOf([...refsAll, { image: img, guides: ['scene'] }]), p.presetId ? undefined : still, engine, steps);
+        const ids = (x: typeof s) => x.plan.images.length - x.plan.sent.length;
+        if (withPlace.plan.refs.at(-1)?.index != null && ids(withPlace) >= ids(s)) { s = withPlace; sent = true; }
+      }
+      if (!sent) {
+        p.prompt = `${p.prompt.trim()} ${placeSetting(pl)}`.trim();
+        still = stillRig(p);
+        s = await planShoot(u, shoot, p.presetId ? undefined : still, engine, steps);
+        placeNotes.push(img ? `${pl.name} is described in words: no room for its photo (her own images come first)` : `${pl.name} is described in words (it has no photo yet)`);
+      }
+    }
+    const notes = [...still.notes, ...placeNotes, ...(p.presetId && (still.camera || still.light || still.grade || still.direction) ? ['The preset sets its own camera and light'] : [])];
     // The photo model (owner 2026-11-14): the bar's "Auto · <model>", the shapes it makes, and words alone only on a model
     // that can make a photo without an image.
     const shape = await ctx.images.shotShape(u.studioId, s.b.imageEngine, s.stepModels);

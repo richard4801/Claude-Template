@@ -195,7 +195,20 @@ These reuse the Photo engine (images/service.ts). The prices are today's config 
 - **No fal key.** Without `FAL_KEY`, the only two-person options are the unverified Kling ones.
 - **Migration.** Existing studio locations must stay usable: they become "Studio places" in `@`.
 
-## Open questions for the owner (each with a recommended answer)
+## Owner decisions (2026-11-16)
+1. **A place is hers alone**, with "Copy to another model". The studio's existing locations stay shared, as "Studio places".
+2. **People do not appear in the Models list.**
+3. **No fal account.** The two-person Swap (phase 4) stays general across models and **defaults to Higgsfield Genjutsu**, which the owner says handles several people well. Nothing is built for it now; fal Recast stays as it is (no `FAL_KEY`).
+4. **Her plus 1 person per Shot** to start.
+5. **One photo per Generate click**, the price on the button ("Generate · $0.03"), Approve for spend, and never charged above the estimate.
+
+## Phase 1 as built (server)
+- Migration `0040_places.sql`: `suite_locations` gains `model_id`, `tag`, `description`, `images` (≤ 8, each with its `source`), `cover` and `updated_at`. The old `image` became `images[0]` and stays the cover for older apps.
+- Routes (`/v1/suite/locations`): `GET ?modelId=` (hers first, then the studio's), `POST` (a studio place still needs a photo; hers may start empty), `GET/PATCH/DELETE /:id` (rename, tag, describe, cover), `POST /:id/images`, `DELETE /:id/images/:index`, `POST /:id/generate/estimate` and `/:id/generate` (`mode` random · description · reference, `maxUsd` = the price approved), `POST /:id/copy {modelId}`.
+- Shot and Photo take `placeId`, and an `@tag` in the prompt picks the place too (hers first, then the studio's). Its cover goes after her images as the location (Shot) or scene (Photo) reference; with no room, or no photo, it is described in words and the estimate says so. Extra paid images (H3 · Higgsfield over 5) show in the estimate's notes.
+- Claude: `places` (list, create, update, add_photo, copy; free), `place_make_photo` (Approve, priced) and `place_remove_photo` (Approve).
+
+## Open questions for the owner (each with a recommended answer; answered above)
 1. **Should a place belong to her alone, or be shared across models?** Recommended: hers alone, with "Copy to another model". The studio's current locations stay shared, as "Studio places".
 2. **Should people (sister, friends) also show in the Models list?** Recommended: no. Show them only on her page, in `@`, and in Swap, so the Models list stays hers.
 3. **Should we add the fal account (`FAL_KEY`) for the two-person Swap?** Recommended: yes. It is the only model documented to swap two people in one pass. Until then, the Kling options are labelled "not tested".

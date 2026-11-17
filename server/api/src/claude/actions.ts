@@ -401,6 +401,21 @@ export const ACTION_TOOLS: GatedTool[] = [
       if (typeof a.locationId === 'string' && a.locationId) return { summary: 'Delete a location', method: 'DELETE', url: `/v1/suite/locations/${enc(id(a.locationId, 'locationId'))}` };
       throw badRequest('rigId or locationId');
     } }),
+  // Her world (plans/model-world.md §5): one place photo per go-ahead, priced first; never charged above the price approved.
+  gated({ name: 'place_make_photo', title: 'Make a place photo', scope: 'edit:write', gate: 'spend',
+    description: 'Makes ONE photo for a place (Add photo on the place): random = another view of it from its photos; description = from words (description, or the place\'s own); reference = rebuilt from a picture (referenceUrl), people removed. Paid: without confirm it gives the price; it is never charged above it.',
+    props: { placeId: str('The place', 80), mode: { type: 'string', enum: ['random', 'description', 'reference'] }, description: str('The words (description mode)', 600), referenceUrl: str('The picture (reference mode): an https link or an upload\'s url', 2000) }, required: ['placeId', 'mode'],
+    plan: async (env, a) => {
+      const pl = enc(id(a.placeId, 'placeId'));
+      const body = compact({ mode: a.mode, description: typeof a.description === 'string' ? a.description : undefined, reference: typeof a.referenceUrl === 'string' && a.referenceUrl ? { url: a.referenceUrl } : undefined });
+      const e = await appCall(env.ctx, env.user, 'POST', `/v1/suite/locations/${pl}/generate/estimate`, body);
+      const words = a.mode === 'random' ? 'a random view' : a.mode === 'reference' ? 'from a reference' : 'from a description';
+      return { summary: `Make a place photo (${words})`, method: 'POST', url: `/v1/suite/locations/${pl}/generate`, body: { ...body, maxUsd: priceOf(e) ?? undefined }, ...priced(e) };
+    } }),
+  gated({ name: 'place_remove_photo', title: 'Remove a place photo', scope: 'edit:write', gate: 'delete',
+    description: 'Removes one photo from a place (index, 0-based as places list shows them). Needs the person\'s go-ahead.',
+    props: { placeId: str('The place', 80), index: { type: 'integer', minimum: 0, maximum: 7, description: 'The photo (0-based)' } }, required: ['placeId', 'index'],
+    plan: async (_env, a) => ({ summary: 'Remove a place photo', method: 'DELETE', url: `/v1/suite/locations/${enc(id(a.placeId, 'placeId'))}/images/${Number(a.index) | 0}` }) }),
   gated({ name: 'edit_kit_delete', title: 'Delete a style kit', scope: 'edit:write', gate: 'delete',
     description: 'Deletes an Edit style kit. Needs the person\'s go-ahead.',
     props: { kitId: str('The kit', 80) }, required: ['kitId'],
