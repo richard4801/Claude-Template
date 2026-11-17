@@ -5,7 +5,7 @@ import SwiftUI
 // Claude's orb (owner, 2026-11-12, Option C2 "alive"; plans/design/claude-panel/orb-alive-*.png, orb-alive-preview.mp4):
 // a glass ball with luminous 3D smoke inside, the glass wobbling, breathing and turning a little with it. Drawn on the GPU
 // by ClaudeOrb.metal (SwiftUI colorEffect), with uniforms from MuseCore's ClaudeOrb (real events only) and
-// ClaudeOrbShader. A TimelineView redraws at the orb's own rate (12 fps idle or error, 30 at most) and pauses when
+// ClaudeOrbShader. OrbClock redraws it at the orb's own rate (one still frame in idle, 20 fps while Claude works) and stops when
 // nothing moves (Reduce Motion) or the window is hidden.
 
 struct ClaudeOrbView: View {
@@ -19,6 +19,8 @@ struct ClaudeOrbView: View {
     /// false: drawn as one still frame (the small orbs beside a reply or on a card), so only the header's orb (and the
     /// overlay's) keeps a clock (build 704).
     var live = true
+    /// The orb's clock (OrbClock): bumped `fps` times a second while it animates.
+    @State private var tick = 0
 
     private var page: Color { behind ?? t.roles.raised }
 
@@ -26,9 +28,10 @@ struct ClaudeOrbView: View {
         let orb = box.orb
         let now = Date().timeIntervalSinceReferenceDate
         let fps = visibility.visible && live ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
-        TimelineView(OrbSchedule(fps: fps)) { ctx in
+        let _ = tick // each tick of the clock below redraws
+        Group {
             let _ = SnapshotRunner.noteOrbFrame() // review mode only: the idle check counts the frames drawn
-            let time = ctx.date.timeIntervalSinceReferenceDate
+            let time = Date().timeIntervalSinceReferenceDate
             let look = orb.look(at: time, reduceMotion: reduceMotion)
             let state = orb.state(at: time)
             let u = ClaudeOrbShader.uniforms(state, look: look, time: time, pulse: orb.pulse(at: time, reduceMotion: reduceMotion), reduceMotion: reduceMotion)
@@ -41,6 +44,7 @@ struct ClaudeOrbView: View {
                                                      .float(Float(u.wobble)), .float(Float(u.pop)), .color(page)))
         }
         .frame(width: size, height: size)
+        .task(id: fps) { await OrbClock.run(fps: fps) { tick &+= 1 } }
         // The shader's frames stay in the orb's own small layer instead of making the panel around it composite again.
         .drawingGroup()
         .allowsHitTesting(false)
@@ -86,21 +90,21 @@ final class ClaudeOrbBox: ObservableObject {
     func redraw() { objectWillChange.send() }
 }
 
-/// The orb's clock: `fps` frames a second on a plain timer, or one frame and nothing more at 0. Build 704, run 718: the
-/// `.animation` schedule follows the display's refresh, which a headless CI runner doesn't have, so the working orb drew one
-/// frame in 12 s there and its cost couldn't be measured; a timer ticks the same on any Mac.
-struct OrbSchedule: TimelineSchedule {
-    var fps: Double
-
-    func entries(from start: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
-        guard fps > 0 else {
-            var done = false
-            return AnyIterator { defer { done = true }; return done ? nil : start }
+/// The orb's and the edge's clock: calls `tick` `fps` times a second until the view's task is cancelled (the frame rate
+/// changed, or the view went away); at 0 it returns at once, so the view stays one still frame. Build 704, runs 718 and
+/// 722: TimelineView ticked neither with `.animation` nor with a custom timer schedule on the headless runner (1 frame in
+/// 12 s while "thinking"), so the working orb was never measured; a main-actor task that changes view state redraws the
+/// way every other view update does.
+@MainActor
+enum OrbClock {
+    static func run(fps: Double, tick: () -> Void) async {
+        guard fps > 0 else { return }
+        let step = UInt64(1_000_000_000 / fps)
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: step)
+            if Task.isCancelled { return }
+            tick()
         }
-        // The system's low-frequency mode (a window in the background, low power): at most 4 a second.
-        let step = 1 / (mode == .lowFrequency ? min(fps, 4) : fps)
-        var next = start
-        return AnyIterator { defer { next = next.addingTimeInterval(step) }; return next }
     }
 }
 
@@ -160,6 +164,7 @@ struct ClaudeLivingEdge: View {
     @ObservedObject private var box: ClaudeOrbBox = .shared
     @ObservedObject private var visibility: OrbVisibility = .shared
     var cornerRadius: CGFloat
+    @State private var tick = 0
 
     var body: some View {
         let orb = box.orb
@@ -168,8 +173,9 @@ struct ClaudeLivingEdge: View {
         // open panel with nothing happening no longer redraws the whole edge and its 12 pt blur 12 times a second. Any
         // real activity changes `orb`, which re-runs this body and starts the timeline again.
         let fps = visibility.visible && orb.state(at: now) != .idle ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
-        TimelineView(OrbSchedule(fps: fps)) { ctx in
-            let time = ctx.date.timeIntervalSinceReferenceDate
+        let _ = tick
+        Group {
+            let time = Date().timeIntervalSinceReferenceDate
             let look = orb.look(at: time, reduceMotion: reduceMotion)
             let e = orb.edge(at: time, reduceMotion: reduceMotion)
             // The orb's own colours flowing round the border (the same phase as the orb, so they move together).
@@ -184,6 +190,7 @@ struct ClaudeLivingEdge: View {
                 shape.stroke(flow, lineWidth: 8).blur(radius: 12).opacity(0.7 * e)
             }
         }
+        .task(id: fps) { await OrbClock.run(fps: fps) { tick &+= 1 } }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

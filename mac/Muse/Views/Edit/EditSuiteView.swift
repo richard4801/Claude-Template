@@ -287,6 +287,8 @@ struct EditSuiteEditor: View {
     static let mediaWidth: CGFloat = 304
     static let inspectorWidth: CGFloat = 328
     static let timelineHeight: CGFloat = 268
+    /// The top bar's height (its own `.frame(height: 56)`).
+    static let topBarHeight: CGFloat = 56
     /// Editor widths under which the media panel, then the inspector, collapse (a window of about 1180 and 950 pt with
     /// the 72 pt sidebar rail).
     static let mediaFits: CGFloat = 1108
@@ -338,42 +340,50 @@ struct EditSuiteEditor: View {
             // 1000 × 700 the panel ran off the right edge): the editor keeps at least `editorMin`, the panel at least 300.
             let claudeW: CGFloat = max(Self.claudeMin, min(full >= 1300 ? 360 : 320, full - 1 - Self.editorMin))
             let w = claudeOpen ? max(0, full - claudeW - 1) : full
+            // Performance (build 704, run 718/722): every region gets its exact size from the window (the same sizes the
+            // stacks worked out before). Four levels of flexible stacks re-measured every panel at several sizes on each
+            // change (Claude's patches: ~75 % of the main thread in SwiftUI layout); a fixed frame answers without asking.
+            let rowH = max(0, g.size.height - Self.topBarHeight - 1)
+            let upperH = max(0, rowH - Self.timelineHeight - 1)
+            let previewW = max(320, w - (showMedia ? Self.mediaWidth + 1 : 0) - (showInspector ? Self.inspectorWidth + 1 : 0))
             VStack(spacing: 0) {
                 topBar(width: w)
+                    .frame(width: full, height: Self.topBarHeight)
                 SuiteRule()
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         if session.mode == .captions {
                             EditSuiteCaptionsMode(session: session)
+                                .frame(width: w, height: rowH)
                         } else {
                             HStack(spacing: 0) {
                                 if showMedia {
                                     EditSuiteBin(session: session) { setMedia(false) }
-                                        .frame(width: Self.mediaWidth)
+                                        .frame(width: Self.mediaWidth, height: upperH)
                                     SuiteRule(vertical: true)
                                 }
                                 EditSuitePreview(session: session, mediaHidden: !showMedia, showMedia: { setMedia(true) })
-                                    .frame(minWidth: 320, maxWidth: .infinity)
+                                    .frame(width: previewW, height: upperH)
                                 if showInspector {
                                     SuiteRule(vertical: true)
                                     // A template picked in the media panel takes the inspector (mockup 1) until it's closed.
                                     if session.binTab == .templates, let tpl = session.templates.pickedTemplate {
                                         EditTemplateInspector(session: session, template: tpl)
-                                            .frame(width: Self.inspectorWidth)
+                                            .frame(width: Self.inspectorWidth, height: upperH)
                                     } else {
                                         EditSuiteInspector(session: session) { setInspector(false) }
-                                            .frame(width: Self.inspectorWidth)
+                                            .frame(width: Self.inspectorWidth, height: upperH)
                                     }
                                 }
                             }
-                            .frame(maxHeight: .infinity)
+                            .frame(width: w, height: upperH, alignment: .leading)
                             SuiteRule()
                             EditSuiteTimeline(session: session, wide: w >= 1360, narrow: w < 760)
-                                .frame(height: Self.timelineHeight)
+                                .frame(width: w, height: Self.timelineHeight)
                         }
                     }
                     // The editor gets exactly its share, so the panel beside it always ends at the window's edge.
-                    .frame(width: w)
+                    .frame(width: w, height: rowH)
                     .clipped()
                     if claudeOpen {
                         SuiteRule(vertical: true)
@@ -382,10 +392,12 @@ struct EditSuiteEditor: View {
                             onClose()
                             store.openLearn(.playbook)
                         }) { showClaude = false }
-                            .frame(width: claudeW)
+                            .frame(width: claudeW, height: rowH)
                     }
                 }
+                .frame(width: full, height: rowH, alignment: .leading)
             }
+            .frame(width: full, height: g.size.height, alignment: .top)
             .onChange(of: w < Self.mediaFits, initial: true) { _, narrow in
                 if narrow, showMedia { showMedia = false; mediaAutoHidden = true }
                 else if !narrow, mediaAutoHidden { showMedia = true; mediaAutoHidden = false }
