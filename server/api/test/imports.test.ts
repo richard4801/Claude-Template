@@ -115,6 +115,10 @@ describe.skipIf(!hasFfmpeg)('Import a video from a link', () => {
     expect(((await a.ctx.db.execute(sql`select count(*)::int as n from uploads where id = ${second}`)) as any).rows[0].n).toBe(0);
     // Known by its link now: the device can skip the download.
     expect((await member.req('POST', '/v1/links/check', { url: link })).body.cached).toMatchObject({ id: r.body.id, cached: true });
+    // A small vertical import from before the 2026-11-17 format fix isn't reused: the link downloads the original again.
+    await a.ctx.db.execute(sql`update clips set created_at = ${Date.UTC(2026, 10, 16)} where id = ${r.body.id}`);
+    expect((await member.req('POST', '/v1/links/check', { url: link })).body.cached).toBeUndefined();
+    await a.ctx.db.execute(sql`update clips set created_at = ${Date.now()} where id = ${r.body.id}`);
     // Another member's import from the same link is their own.
     const theirs = await other.req('POST', '/v1/imports', { uploadId: await upload(other), sourceUrl: link, name: 'Mine' });
     expect(theirs.body).toMatchObject({ name: 'Mine' });

@@ -24,6 +24,8 @@ import { MAX_REFERENCE_SEC, recreateOf } from '../recreate/references.js';
 import { limitText, requireTempSpace, SUITE_SOURCE_MAX_SEC, tooBigError, tooLongError } from './limits.js';
 
 type ClipRow = typeof clips.$inferSelect;
+/** Link imports made before this kept a vertical video's small rendition (fixed 2026-11-17 17:50 UTC). */
+export const LOW_RES_IMPORTS_BEFORE = Date.UTC(2026, 10, 17, 17, 50);
 /** What an import keeps in `clips.meta` (no migration: the clip row is the Library item the swap already takes). */
 export type ImportMeta = { source: 'import'; sourceUrl?: string | null; platform?: AnyPlatform | null; bytes: number; posterKey?: string | null; uploadId: string; userId: string; via: 'device' | 'server' };
 
@@ -99,7 +101,11 @@ export class Imports {
   private async cached(u: AuthUser, url: string) {
     const [c] = await this.ctx.db.select().from(clips).where(and(eq(clips.studioId, u.studioId), eq(clips.createdBy, u.id),
       sql`${clips.meta}->>'source' = 'import'`, sql`${clips.meta}->>'sourceUrl' = ${url}`)).orderBy(desc(clips.createdAt)).limit(1);
-    return c?.storageKey ? c : null;
+    if (!c?.storageKey) return null;
+    // Before 2026-11-17 a vertical link import kept the platform's small rendition (540x960): that import isn't reused,
+    // so the same link fetches the original now (recreate/links.ts FORMAT_ARGS).
+    if (c.createdAt < LOW_RES_IMPORTS_BEFORE && Math.min(c.width ?? 0, c.height ?? 0) < 720) return null;
+    return c;
   }
 
   // ------------------------------------------------------------------ CRUD
