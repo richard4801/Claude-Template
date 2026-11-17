@@ -86,7 +86,7 @@ public enum PlacePhotoMode: String, Codable, Hashable, Sendable, CaseIterable, I
         switch self {
         case .random: return "From its photos"
         case .description: return "Words you type, or the place’s own"
-        case .reference: return "A photo you like, rebuilt as this place"
+        case .reference: return "A photo you like, rebuilt here"
         }
     }
 }

@@ -151,29 +151,38 @@ struct ComposerPromptBox: View {
             }
         }
         let lead = store.composerCharacter
-        // Her world (mockup 4): her first, then her outfits, then her places and the studio's, each under its heading.
+        // Her world (mockup 4): her, then her places and the studio's (with their @tags), then her outfits, then the rest
+        // of the cast. Another model's places aren't hers to use.
         let cast = store.suiteCharacters.filter { q.isEmpty || $0.name.lowercased().contains(q) }
-        var out = (cast.filter { $0.id == lead?.id } + cast.filter { $0.id != lead?.id }).prefix(6).map {
-                Suggestion(id: "c:\($0.id)", title: $0.name, line: "Character · \($0.niche)", kind: "character", image: $0.cover,
-                           group: lead == nil ? "Characters" : "Her", trailing: $0.id == lead?.id ? "in the prompt" : nil)
-            }
-        if let lead {
-            out += store.outfits(for: lead).filter { q.isEmpty || $0.name.lowercased().contains(q) }.prefix(4).map {
-                Suggestion(id: "o:\($0.id)", title: $0.name, line: "\(lead.shortName)’s outfit", kind: "outfit", image: $0.angles.compactMap { $0 }.first, group: "Outfits")
-            }
+        let her = cast.filter { $0.id == lead?.id }, others = cast.filter { $0.id != lead?.id }
+        var out = her.map {
+            Suggestion(id: "c:\($0.id)", title: $0.name, line: "Character · \($0.niche)", kind: "character", image: $0.cover, group: "Her", trailing: "in the prompt")
         }
-        // Her places first, then the studio's; another model's places aren't hers to use.
         out += Places.suggestions(lead?.id, store.suite.locations, query: q).map {
             Suggestion(id: "l:\($0.id)", title: $0.name, line: $0.isStudio ? "Studio place" : $0.coverImage == nil ? "No photo yet · sent in words" : "Her place",
                        kind: "location", image: $0.coverImage, group: "Places", trailing: "@\($0.tag)")
         }
         out.append(Suggestion(id: "new-location", title: "New studio place", line: "A photo of a place, shared with the studio", kind: "newLocation", group: "Places"))
+        if let lead {
+            out += store.outfits(for: lead).filter { q.isEmpty || $0.name.lowercased().contains(q) }.prefix(4).map {
+                Suggestion(id: "o:\($0.id)", title: $0.name, line: "\(lead.shortName)’s outfit", kind: "outfit", image: $0.angles.compactMap { $0 }.first, group: "Outfits")
+            }
+        }
+        out += others.prefix(6).map {
+            Suggestion(id: "c:\($0.id)", title: $0.name, line: "Character · \($0.niche)", kind: "character", image: $0.cover, group: lead == nil ? "Characters" : "Other characters")
+        }
         return out
+    }
+
+    /// The list's natural height: 40 pt rows, a heading per group, the bottom inset.
+    private func suggestionHeight(_ list: [Suggestion], _ typed: TypedTrigger) -> CGFloat {
+        let groups = list.indices.filter { i in list[i].group != nil && (i == 0 || list[i - 1].group != list[i].group) }.count
+        return CGFloat(list.count) * 40 + CGFloat(groups) * 30 + (typed.trigger.char == "#" ? 32 : 0) + 6
     }
 
     private func suggestionList(_ typed: TypedTrigger) -> some View {
         let list = matches
-        return VStack(alignment: .leading, spacing: 0) {
+        return ScrollViewReader { proxy in ScrollView { VStack(alignment: .leading, spacing: 0) {
             if typed.trigger.char == "#" {
                 Text("Camera moves, up to \(PromptTokens.maxMoves)").font(t.body(11.5)).foregroundStyle(t.muted)
                     .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
@@ -211,6 +220,11 @@ struct ComposerPromptBox: View {
             }
         }
         .padding(.bottom, 6)
+        }
+        // Never taller than the room a prompt bar leaves: the list scrolls, and the arrow keys bring the highlight into view.
+        .frame(height: min(360, suggestionHeight(list, typed)))
+        .onChange(of: highlight) { _, h in if list.indices.contains(h) { proxy.scrollTo(list[h].id) } }
+        }
         .frame(width: 340, alignment: .leading)
         .background(t.surface)
         .overlay(Rectangle().strokeBorder(t.line, lineWidth: 1))

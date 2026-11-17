@@ -294,7 +294,7 @@ struct AddPlacePhotoList: View {
                 .padding(.horizontal, Space.s3).padding(.top, Space.s3)
         }
         .padding(Space.s2)
-        .frame(width: 340)
+        .frame(width: 360)
         .task(id: place.id) {
             for m in PlacePhotoMode.allCases where !(m == .random && place.images.isEmpty) {
                 if let e = await store.placePhotoPrice(place, PlacePhotoRequest(mode: m)) { prices[m] = e.estimate }
