@@ -10,7 +10,7 @@ import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { accounts, clips, invites, jobs, ledger, loras, models, outfits, posts, sessions, studioSettings, takes, uploads, users, wallets, type ImageRef, type SheetSlot, type SheetVersion } from '../db/schema.js';
+import { accounts, clips, invites, jobs, ledger, loras, models, outfits, posts, sessions, studioSettings, takes, uploads, users, wallets, type ImageRef, type OutfitReplaced, type OutfitSlot, type SheetSlot, type SheetVersion } from '../db/schema.js';
 import { ApiError, badRequest, notFound, ownerOrCreator } from '../errors.js';
 import { compact, dayStart, monthStart, uid } from '../lib/util.js';
 import { whoOf } from '../money/money.js';
@@ -31,6 +31,7 @@ import { LocalStorage, PART_BYTES, contentTypeFor } from '../storage/index.js';
 import { registerMultipartRoutes } from './multipart.js';
 import { cleanUploadedPhoto, objectInfo, putFile, putObject } from '../storage/objects.js';
 import { cleanMemberPhoto } from '../storage/clean.js';
+import { outfitPicture, storedBytes } from '../images/outfitUpload.js';
 import { seedDev, SLOT_SAMPLE } from '../seed.js';
 import { buildTemplatePrompt, randomImageSeed, randomSeed } from '../templates/prompt.js';
 import { analyzeClip, audioView } from '../audio/service.js';
@@ -89,6 +90,8 @@ export function outfitMade(o: Pick<typeof outfits.$inferSelect, 'angles' | 'face
 export const outfitView = (o: typeof outfits.$inferSelect) =>
   compact({ id: o.id, modelId: o.modelId, name: o.name, mode: o.mode, description: o.description, angles: o.angles, faces: o.faces ?? undefined, /* made from a photo: its reference photo(s) */ photos: o.photos ?? undefined, state: o.state, prompt: o.prompt, cost: o.cost ?? undefined,
     /* a set that came out partly (owner 2026-11-12) */ partial: outfitMade(o) ?? undefined,
+    /* pictures put in by hand (POST /v1/outfits/:id/slot): { side: 'upload' }; others are generated */ sources: o.sources && Object.keys(o.sources).length ? o.sources : undefined,
+    /* the pictures those uploads replaced, newest last (put one back with the same route) */ replaced: o.replaced?.length ? o.replaced : undefined,
     /* outfit page (plans/outfit-head-looks.md §4/§5): the folder's date; who may rename/delete it */ createdAt: o.createdAt, createdBy: o.createdBy ?? undefined });
 setViews(modelView, outfitView);
 const clipView = (c: typeof clips.$inferSelect) => compact({ id: c.id, name: c.name, durationSec: c.durationSec, width: c.width, height: c.height, fps: P.wireFps(c.fps), checks: c.checks,
@@ -728,7 +731,10 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
       const angles = cur.angles.map((x, i) => made.get(i) ?? x ?? null);
       const curFaces = [0, 1, 2].map(i => cur.faces?.[i] ?? null);
       const nextFaces = curFaces.map((x, i) => faces[i] ?? x);
-      const [u] = await db.update(outfits).set({ angles, faces: nextFaces.some(Boolean) ? nextFaces : cur.faces ?? null, cost: (cur.cost ?? 0) + bill.spent }).where(eq(outfits.id, o.id)).returning();
+      // A picture made again is a generated one (no longer marked as an upload).
+      const remade = [...[...made.entries()].filter(([, x]) => x).map(([i]) => REDO[i]!), ...faces.map((x, i) => (x ? REDO[i + 4]! : null)).filter((x): x is OutfitSlot => !!x)];
+      const sources = cur.sources ? Object.fromEntries(Object.entries(cur.sources).filter(([k]) => !remade.includes(k as OutfitSlot))) : cur.sources ?? null;
+      const [u] = await db.update(outfits).set({ angles, faces: nextFaces.some(Boolean) ? nextFaces : cur.faces ?? null, cost: (cur.cost ?? 0) + bill.spent, sources }).where(eq(outfits.id, o.id)).returning();
       if (u) emitOutfit(u);
     }, 0);
     return { outfit: outfitView(o), cost, images };
@@ -769,9 +775,73 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
     const changed = REDO.filter((_, i) => after[i] !== before[i]);
     if (b.dryRun) return { dryRun: true, before: view(before), after: view(after), changed };
     const faces = after.slice(4);
-    const [u] = await db.update(outfits).set({ angles: after.slice(0, 4), faces: faces.some(Boolean) || o.faces ? faces : null }).where(eq(outfits.id, o.id)).returning();
+    // An uploaded picture stays marked as one in its new slot.
+    const srcAfter = REDO.map(k => o.sources?.[k]);
+    for (const m of b.moves) { const f = REDO.indexOf(m.from), t = REDO.indexOf(m.to); [srcAfter[f], srcAfter[t]] = [srcAfter[t], srcAfter[f]]; }
+    const sources = o.sources ? Object.fromEntries(REDO.map((k, i) => [k, srcAfter[i]] as const).filter(([, v]) => v)) : null;
+    const [u] = await db.update(outfits).set({ angles: after.slice(0, 4), faces: faces.some(Boolean) || o.faces ? faces : null, sources }).where(eq(outfits.id, o.id)).returning();
     emitOutfit(u!);
     return { outfit: outfitView(u!), changed };
+  });
+  /**
+   * Put a picture the person already has into one of an outfit's 7 slots (owner 2026-11-17: "upload image manually to
+   * already generated outfits. I shouldn't need to generate if I already have it"), empty or filled. Free.
+   * Body: { slot, uploadId | image, dryRun? }: an upload of this studio (POST /v1/uploads/images gives `url`, presign +
+   * confirm gives `uploadId`) or another stored picture of the studio (a Library still). It must be a photo (JPEG, PNG,
+   * WebP or HEIC) and is saved like a generated outfit picture: upright, no metadata, JPEG, long edge ≤ 2048. The slot is
+   * marked `sources[slot] = 'upload'`. A picture it replaces goes to `replaced` (newest last); sending one of those
+   * pictures as `image` puts it back as it was. Anyone in the studio (owner or member). `dryRun`: what it would replace.
+   */
+  app.post<{ Params: { id: string } }>('/v1/outfits/:id/slot', async req => {
+    const b = parse(z.object({ slot: z.enum(REDO), uploadId: z.string().max(100).optional(), image: ImageRefSchema.optional(), dryRun: z.boolean().optional() }).passthrough()
+      .refine(x => !!x.uploadId !== !!(x.image && (x.image.url || x.image.asset)), { message: 'send one picture: uploadId or image' }), req.body ?? {});
+    const o = await outfitToChange(req.user, req.params.id);
+    if (stillMaking(o)) throw new ApiError(409, 'outfit_busy', 'This outfit is still being made · add the picture when it finishes');
+    const k = REDO.indexOf(b.slot);
+    const current = k < 4 ? o.angles[k] ?? null : o.faces?.[k - 4] ?? null;
+    // A picture this outfit had before (in `replaced`): put back as it was, nothing to read or store.
+    const back = b.image ? (o.replaced ?? []).findIndex(r => sameImage(r.image, b.image as ImageRef)) : -1;
+    let key: string | null = null;
+    if (back < 0) {
+      if (b.uploadId) {
+        const [up] = await db.select().from(uploads).where(and(eq(uploads.id, b.uploadId), eq(uploads.studioId, req.user.studioId)));
+        if (!up) throw notFound('Upload');
+        if (up.state !== 'ready') throw new ApiError(409, 'upload_missing', 'That upload hasn’t finished · confirm it first');
+        key = up.storageKey;
+      } else {
+        key = ctx.images.keyOf(b.image as ImageRef);
+        if (!key) throw badRequest('Pick a picture you uploaded or one from the Library');
+        const [up] = await db.select({ id: uploads.id }).from(uploads).where(and(eq(uploads.storageKey, key), eq(uploads.studioId, req.user.studioId)));
+        if (!up) throw notFound('Upload');
+      }
+    }
+    if (b.dryRun) return { dryRun: true, slot: b.slot, replaces: current, restores: back >= 0, cost: 0 };
+    let image: ImageRef, source: 'upload' | 'generated' = 'upload';
+    if (back >= 0) ({ image, source } = o.replaced![back]!);
+    else {
+      const buf = await storedBytes(ctx, key!);
+      if (!buf) throw badRequest('That picture can’t be read (missing, or over 40 MB)');
+      const pic = await outfitPicture(buf);
+      if (!pic) throw badRequest('That file isn’t a photo · use a JPEG, PNG, WebP or HEIC');
+      const out = `u/${uid('outfit')}.jpg`;
+      await putObject(ctx, { key: out, body: pic, studioId: req.user.studioId, kind: 'image', userId: req.user.id, contentType: 'image/jpeg', keepMetadata: true });
+      image = { url: uploadUrl(out) };
+    }
+    // The latest row (a rename or another slot may have changed meanwhile); still refused while it's being made.
+    const [cur] = await db.select().from(outfits).where(eq(outfits.id, o.id));
+    if (!cur) throw notFound('Outfit');
+    if (stillMaking(cur)) throw new ApiError(409, 'outfit_busy', 'This outfit is still being made · add the picture when it finishes');
+    const angles = [0, 1, 2, 3].map(i => cur.angles[i] ?? null);
+    const faces = [0, 1, 2].map(i => cur.faces?.[i] ?? null);
+    const old = k < 4 ? angles[k] : faces[k - 4];
+    if (k < 4) angles[k] = image; else faces[k - 4] = image;
+    const replaced = (cur.replaced ?? []).filter(r => !sameImage(r.image, image));
+    if (old && !sameImage(old, image)) replaced.push({ slot: b.slot, image: old, source: cur.sources?.[b.slot] ?? 'generated', at: Date.now(), by: req.user.id } satisfies OutfitReplaced);
+    const sources = { ...(cur.sources ?? {}) };
+    if (source === 'upload') sources[b.slot] = 'upload'; else delete sources[b.slot];
+    const [u] = await db.update(outfits).set({ angles, faces: faces.some(Boolean) || cur.faces ? faces : null, sources, replaced: replaced.slice(-30) }).where(eq(outfits.id, o.id)).returning();
+    emitOutfit(u!);
+    return { outfit: outfitView(u!), slot: b.slot, replaced: old ?? null };
   });
   app.post<{ Params: { id: string } }>('/v1/outfits/:id/save', async req => {
     // §5: the name chosen in the preview (optional; the set keeps its name without one).

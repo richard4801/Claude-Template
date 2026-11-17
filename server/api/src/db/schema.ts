@@ -156,9 +156,17 @@ export const outfits = pgTable('outfits', {
   faces: jsonb('faces').$type<(ImageRef | null)[]>(),
   /** An outfit made "From a photo": the reference photo(s) it was made from, so Redo sends the original (owner 2026-11-17). */
   photos: jsonb('photos').$type<ImageRef[]>(),
+  /** Pictures the person put in a slot themselves (owner 2026-11-17: "upload image manually"), by slot name; absent = generated. */
+  sources: jsonb('sources').$type<Partial<Record<OutfitSlot, 'upload'>>>(),
+  /** Pictures an upload replaced, newest last, so one can be put back (POST /v1/outfits/:id/slot with that image). */
+  replaced: jsonb('replaced').$type<OutfitReplaced[]>(),
   createdBy: text('created_by'),
   createdAt: ms('created_at').notNull(),
 }, t => [index('outfits_studio_idx').on(t.studioId)]);
+/** An outfit's 7 picture slots (4 body angles, 3 face close-ups), as redo, reorder and slot name them. */
+export const OUTFIT_SLOTS = ['front', 'tq', 'side', 'back', 'face', 'faceTq', 'profile'] as const;
+export type OutfitSlot = (typeof OUTFIT_SLOTS)[number];
+export type OutfitReplaced = { slot: OutfitSlot; image: ImageRef; source: 'upload' | 'generated'; at: number; by: string };
 
 /** Every object we store (uploads, generated images, bundled stills copied to storage), with size and hash. */
 export const uploads = pgTable('uploads', {
