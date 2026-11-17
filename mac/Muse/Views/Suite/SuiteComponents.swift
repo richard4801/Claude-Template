@@ -172,10 +172,13 @@ struct SuiteResultPane: View {
         let j = job
         let takeLine = j.map { $0.isPhoto ? Job.memberPhase($0.phase) : $0.request.takes > 1 ? "Rendering take \($0.take) of \($0.request.takes)" : "Rendering" } ?? "Rendering"
         let step: Int = { if case .rendering(_, let s) = state { return s } else { return -1 } }()
-        return ZStack {
-            MuseImage(ref: art ?? character?.cover)
-                .blur(radius: state.blur, opaque: true)
-                .overlay(Color.black.opacity(0.18))
+        // The card's size is its picture's (the stage gives it); what is written on it is an overlay, so it can never make the
+        // card, the stage or the page wider (runs 728–737: a portrait card at 1000 pt is ~160 pt, and the 180 pt progress bar
+        // and the one-line caption inside a ZStack pushed the Video suite page past the window, cutting Generate).
+        return MuseImage(ref: art ?? character?.cover)
+            .blur(radius: state.blur, opaque: true)
+            .overlay(Color.black.opacity(0.18))
+            .overlay {
             VStack(spacing: 14) {
                 if let p = percent {
                     Text(takeLine).font(t.scale.label.font).foregroundStyle(.white)
@@ -187,7 +190,7 @@ struct SuiteResultPane: View {
                             Rectangle().fill(t.rec).frame(width: g.size.width * CGFloat(p) / 100)
                         }
                     }
-                    .frame(width: 180, height: 3)
+                    .frame(maxWidth: 180).frame(height: 3)
                     if j?.isPhoto != true { VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(SuiteResultState.steps(character: character?.shortName).enumerated()), id: \.offset) { i, s in
                             HStack(spacing: 10) {
@@ -203,13 +206,13 @@ struct SuiteResultPane: View {
                         // Wraps at the progress bar's width (run 728: on one line it was wider than a portrait stage card and pushed
                         // the whole Video suite page 38 pt past a 1000 pt window, cutting Generate).
                         Text("About \(Job.aboutTime(j.secondsLeft)) left · you can leave this screen").font(t.body(11.5)).foregroundStyle(.white.opacity(0.9))
-                            .multilineTextAlignment(.center).lineLimit(2).frame(maxWidth: 180)
+                            .multilineTextAlignment(.center).lineLimit(2).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 180)
                     }
                 } else {
                     Text(state.queueLine).font(t.scale.label.font).foregroundStyle(.white)
                         .padding(.horizontal, 10).frame(height: 24).background(Color.black.opacity(0.8))
                     Text("Leaving is safe · we'll tell you when it's ready").font(t.body(11.5)).foregroundStyle(.white.opacity(0.9))
-                        .multilineTextAlignment(.center).lineLimit(2).frame(maxWidth: 180) // as the line above (run 728)
+                        .multilineTextAlignment(.center).lineLimit(2).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 180) // as the line above (run 728)
                 }
             }
             .padding(16)
