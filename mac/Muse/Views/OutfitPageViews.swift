@@ -150,12 +150,18 @@ struct OutfitOpenView: View {
                     }
                     }
                     // Review screenshots only: a popover is its own window (the capture misses it), so the asked tile's
-                    // Redo box is drawn over the grid, above every tile.
-                    .overlay(alignment: .bottomLeading) {
+                    // Redo box is drawn over the grid, above every tile: in that tile's column, from halfway down its picture
+                    // (row 1 for the angles, so it stays inside the sheet).
+                    .overlay(alignment: .topLeading) {
                         if SnapshotRunner.state.overlay == "outfit_redo", let k = store.outfitRedoAsk, OutfitPictures.keys.indices.contains(k) {
-                            OutfitRedoBox(title: OutfitRedoBox.title(k), estimate: "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))",
-                                          price: { await store.outfitRedoPrice(o, k) }, onCancel: { store.outfitRedoAsk = nil }, onRedo: { _ in })
-                                .background(t.roles.raised).museFloat(t).fixedSize()
+                            GeometryReader { g in
+                                let colW = (g.size.width - 3 * Space.s4) / 4
+                                let col = CGFloat(k < 4 ? k : k - 4)
+                                OutfitRedoBox(title: OutfitRedoBox.title(k), estimate: "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))",
+                                              price: { await store.outfitRedoPrice(o, k) }, onCancel: { store.outfitRedoAsk = nil }, onRedo: { _ in })
+                                    .background(t.roles.raised).museFloat(t).fixedSize()
+                                    .offset(x: min(col * (colW + Space.s4), max(0, g.size.width - 360)), y: colW / 0.75 / 2)
+                            }
                         }
                     }
                     let remaking = store.remakingOutfit[o.id] != nil
@@ -374,7 +380,7 @@ struct OutfitRedoBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
             Text(title).scaled(t.scale.body, t.roles.ink)
-            RTextField(placeholder: "Note for this picture (optional), e.g. sneakers on", text: $note, onSubmit: { onRedo(note) })
+            RTextField(placeholder: "Optional note, e.g. sneakers on", text: $note, onSubmit: { onRedo(note) })
                 .frame(width: 320)
             HStack(spacing: Space.s2) {
                 Spacer()
