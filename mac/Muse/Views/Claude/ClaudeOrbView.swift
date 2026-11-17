@@ -26,6 +26,8 @@ struct ClaudeOrbView: View {
     var body: some View {
         let orb = box.orb
         let now = Date().timeIntervalSinceReferenceDate
+        // Review mode measures the working orb as it moves (visibility.forced); Reduce Motion is on on the CI runner.
+        let reduceMotion = self.reduceMotion && !visibility.forced
         // A live orb redraws on each tick of the shared clock (OrbTicker); a still one never reads it, so never redraws for it.
         let _ = live ? OrbTicker.shared.frame : 0
         Group {
@@ -107,7 +109,9 @@ final class OrbTicker {
     /// The orb's state, the window's visibility or Reduce Motion may have changed: start, re-pace or stop the clock.
     func update() {
         let now = Date().timeIntervalSinceReferenceDate
-        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        // Reduce Motion stops it (the orb holds still), except while review mode measures the working orb (forced visible):
+        // run 735 read 0 ticks, and Reduce Motion on the runner is the likely reason every clock tried read 1 frame.
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && !OrbVisibility.shared.forced
         let want = OrbVisibility.shared.visible ? ClaudeOrbBox.shared.orb.frameRate(at: now, reduceMotion: reduce) : 0
         guard want != fps else { return }
         fps = want
@@ -189,6 +193,7 @@ struct ClaudeLivingEdge: View {
     var body: some View {
         let orb = box.orb
         let now = Date().timeIntervalSinceReferenceDate
+        let reduceMotion = self.reduceMotion && !visibility.forced
         // In idle the edge holds still (build 704): the shared clock doesn't run then (the orb's idle rate is 0).
         let _ = OrbTicker.shared.frame
         Group {
