@@ -234,6 +234,11 @@ public struct PromptTrigger: Hashable, Sendable {
     public var char: Character
     public var query: String
     public var start: Int
+    public init(char: Character, query: String, start: Int) {
+        self.char = char
+        self.query = query
+        self.start = start
+    }
 }
 
 public struct PromptTokens: Hashable, Sendable {

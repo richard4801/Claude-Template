@@ -106,6 +106,18 @@ enum SnapshotRunner {
                 ("queue", { store.go(.queue) }),
                 ("models", { store.go(.models) }),
                 ("cast", { store.openProfile(SampleData.demo) }),
+                // Her world, phase 1 (plans/model-world.md mockups 1, 2, 6): Wardrobe, Places with Café by the gym open, People.
+                ("cast_profile_world", { store.openProfile(SampleData.demo); store.profileTab = .profile; Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1)); state.scrollTo = "profile.world" } }),
+                ("cast_wardrobe", { store.openProfile(SampleData.demo); store.profileTab = .wardrobe }),
+                ("cast_places", { store.openProfile(SampleData.demo); store.profileTab = .places; store.profilePlaceId = "loc_demo_cafe" }),
+                ("cast_people", { store.openProfile(SampleData.demo); store.profileTab = .people }),
+                // Spending UI for review (mockup 2): the Add photo menu with its prices and the priced Generate sheet, drawn
+                // inline (a popover and a sheet are their own windows); the empty Places tab (mockup 6); the @ menu (mockup 4).
+                ("cast_places_add_photo", { store.openProfile(SampleData.demo); store.profileTab = .places; store.profilePlaceId = "loc_demo_cafe"; state.overlay = "place_add_photo" }),
+                ("cast_places_generate", { store.openProfile(SampleData.demo); store.profileTab = .places; store.profilePlaceId = "loc_demo_cafe"; state.overlay = "place_generate:description" }),
+                ("cast_places_empty", { store.openProfile(SampleData.demoB); store.profileTab = .places }),
+                ("composer_at_menu", { store.openTool(.shot); fillDemoDraft(store); state.overlay = "at_menu" }),
                 ("lora", { store.go(.lora) }),
                 ("settings", { store.openSettings(.account) }),
                 ("settings_prompts", { store.openSettings(.studio); store.settingsPrompts = true }),
@@ -1193,6 +1205,7 @@ enum SnapshotRunner {
 /// The Claude chat panel as it sits beside a camera session, for the review screenshots only.
 struct SnapshotOverlay: View {
     @Environment(\.theme) private var t
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         // "Before" for the owner's Connections report: the old sheet exactly as it was presented (SuiteConnectionsRow).
@@ -1207,6 +1220,28 @@ struct SnapshotOverlay: View {
                 }
                 .frame(minWidth: 720, minHeight: 520)
             }
+        // Her world (review only): the Add photo menu and the Generate sheet over the opened place, as they appear.
+        if let o = SnapshotRunner.state.overlay, o.hasPrefix("place_"), let p = store.suite.locations.first(where: { $0.id == "loc_demo_cafe" }) {
+            if o == "place_add_photo" {
+                VStack {
+                    HStack {
+                        Spacer()
+                        AddPlacePhotoList(place: p) { _ in }
+                            .background(t.roles.raised)
+                            .museFloat(t)
+                    }
+                    Spacer()
+                }
+                .padding(.top, 330).padding(.trailing, 40)
+            } else if o.hasPrefix("place_generate:"), let mode = PlacePhotoMode(rawValue: String(o.dropFirst("place_generate:".count))) {
+                ZStack {
+                    Color.black.opacity(0.25)
+                    PlacePhotoSheet(place: p, mode: mode) {}
+                        .background(t.roles.raised)
+                        .museFloat(t)
+                }
+            }
+        }
         if SnapshotRunner.state.overlay == "chat" {
             HStack(spacing: 0) {
                 Spacer()

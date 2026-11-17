@@ -755,6 +755,9 @@ public struct ShotRequest: Codable, Hashable, Sendable {
     public var title: String?
     public var modelId: String?
     public var outfitId: String?
+    /// Her world: the @place in the prompt. The server sends its photo after her images, or describes it in words when
+    /// there's no room (or it has no photo yet). Left out without one.
+    public var placeId: String?
     public var prompt: String
     public var direction: String?
     public var frames: SuiteFrames?

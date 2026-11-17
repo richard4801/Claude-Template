@@ -164,22 +164,38 @@ extension ComposerWheels {
 
 // MARK: @location
 
-/// GET /v1/suite/locations: a place saved to the studio, used in a prompt as @name.
+/// GET /v1/suite/locations: a place, used in a prompt as @tag. Her own (`modelId`, the Places tab on her page) or the
+/// studio's ("Studio places", `modelId` nil). Up to 8 photos; the cover is the one sent (plans/model-world.md §1).
 public struct SuiteLocation: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
+    /// The cover photo (older servers: the one photo).
     public var image: ImageRef
     /// Milliseconds since 1970 (an ISO date is read too).
     public var createdAt: Double
+    /// Her place; nil = a studio place.
+    public var modelId: String?
+    /// "cafe" (typed as @cafe). Older servers send none: one is made from the name.
+    public var tag: String
+    public var description: String
+    public var images: [PlaceImage]
+    /// Which of `images` is the cover.
+    public var cover: Int
 
-    public init(id: String, name: String, image: ImageRef, createdAt: Double = 0) {
+    public init(id: String, name: String, image: ImageRef, createdAt: Double = 0, modelId: String? = nil, tag: String? = nil, description: String = "",
+                images: [PlaceImage]? = nil, cover: Int = 0) {
         self.id = id
         self.name = name
         self.image = image
         self.createdAt = createdAt
+        self.modelId = modelId
+        self.tag = tag ?? Places.tag(from: name)
+        self.description = description
+        self.images = images ?? (image.asset != nil || image.url != nil ? [PlaceImage(image: image, source: .upload)] : [])
+        self.cover = cover
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, image, createdAt }
+    enum CodingKeys: String, CodingKey { case id, name, image, createdAt, modelId, tag, description, images, cover }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -192,7 +208,17 @@ public struct SuiteLocation: Codable, Hashable, Sendable, Identifiable {
         } else {
             createdAt = 0
         }
+        modelId = c.o(.modelId)
+        tag = c.o(.tag) ?? Places.tag(from: name)
+        description = c.v(.description, "")
+        let list: [PlaceImage]? = c.o(.images)
+        images = list ?? (image.asset != nil || image.url != nil ? [PlaceImage(image: image, source: .upload)] : [])
+        cover = min(max(0, c.v(.cover, 0)), max(0, images.count - 1))
     }
+
+    public var isStudio: Bool { modelId == nil }
+    /// The cover photo, nil while the place has none.
+    public var coverImage: ImageRef? { images.indices.contains(cover) ? images[cover].image : images.first?.image ?? (image.asset != nil || image.url != nil ? image : nil) }
 }
 
 /// POST /v1/suite/locations.
@@ -230,21 +256,26 @@ public enum ComposerLocations {
     /// Adds an @location, or refuses it (with the line) when the References limit is reached.
     public static func add(_ loc: SuiteLocation, to tokens: PromptTokens, at caret: Caret? = nil, slots: InputSlots, inputs: SuiteInputs) -> (PromptTokens, String?) {
         if ids(tokens).contains(loc.id) { return (tokens, "\(loc.name) is already in the shot") }
-        if let no = refusal(tokens, slots: slots, inputs: inputs) { return (tokens, no) }
+        // Her world: the first place always goes in. With no room for its photo the server describes it in words
+        // (placeId); a second place still needs a free reference.
+        if !ids(tokens).isEmpty, let no = refusal(tokens, slots: slots, inputs: inputs) { return (tokens, no) }
         return tokens.addMention(kind: "location", id: loc.id, label: loc.name, at: caret)
     }
 
     /// `references.images += {image, role: "location", label: name}` for each @location the library knows, while the
     /// quality's References limit has room after the reference slots.
     public static func apply(_ r: ShotRequest, tokens: PromptTokens, locations: [SuiteLocation], inputs: SuiteInputs) -> ShotRequest {
-        let wanted = ids(tokens).compactMap { id in locations.first { $0.id == id } }
-        guard !wanted.isEmpty else { return r }
         var out = r
+        // The first @place also goes as `placeId`: the server words it when its photo can't go (her world, phase 1).
+        if let first = ids(tokens).first, first.hasPrefix("loc_") { out.placeId = first }
+        // A place with no photo yet has nothing to send as an image.
+        let wanted = ids(tokens).compactMap { id in locations.first { $0.id == id } }.filter { $0.coverImage != nil }
+        guard !wanted.isEmpty else { return out }
         var refs = out.references ?? SuiteReferences()
         var images = refs.images ?? []
         let room = max(0, SlotKind.image.capacity(inputs) - images.count)
-        for l in wanted.prefix(room) { images.append(SuiteRefImage(image: l.image, role: "location", label: String(l.name.prefix(80)))) }
-        guard !images.isEmpty else { return r }
+        for l in wanted.prefix(room) { images.append(SuiteRefImage(image: l.coverImage ?? l.image, role: "location", label: String(l.name.prefix(80)))) }
+        guard !images.isEmpty else { return out }
         refs.images = images
         out.references = refs
         return out
