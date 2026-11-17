@@ -244,4 +244,8 @@ Static read of the path: a patch from the live session lands in `showRemote` →
   - `RemoteChangeThrottle` (MuseCore): a change from the live session shows at once after a quiet moment. While changes keep coming, the newest is shown at most once a second; each carries the whole project, so nothing is lost. A held change is shown before any local edit or drag starts, so a local edit always lands on top of it.
   - `adoptRemote` skips the diff when there are no local undo or redo steps to carry over.
   - `liveHistory` is set only when it changes.
+- **Coordinator's target, ≤ 1 s per patch (follow-up commit):**
+  - The throttle's gap is 0.75 s.
+  - Each clip's filmstrip and waveform on the timeline are Equatable views (`TimelineClipStrip`, `TimelineClipWave`): a patch re-diffs only the clips it changed, not every tile of every clip. Before, each block drew its strip inline, an `HStack` of image tiles, inside `TimelineCanvas`'s body.
+  - The step now fails if a patch takes more than 1 s to show.
 - **Orb:** run 718 logged state thinking, wants 20 fps, window visible, but only 1 frame drawn in 12 s. The `.animation` TimelineView schedule follows the display's refresh, which the headless runner doesn't have, so the 0.0 % for the working orb measured nothing. The orb and the edge now run on `OrbSchedule`, a plain timer (one frame and stop at 0 fps; at most 4 fps in the system's low-frequency mode), so CI measures the real cost.
