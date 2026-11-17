@@ -17,11 +17,13 @@ extension AppStore {
 
     func openOutfit(_ o: Outfit) {
         openOutfitViewing = nil
+        outfitRedoAsk = nil
         withAnimation(.easeOut(duration: 0.15)) { openOutfitId = o.id }
     }
 
     func closeOutfit() {
         openOutfitViewing = nil
+        outfitRedoAsk = nil
         withAnimation(.easeOut(duration: 0.15)) { openOutfitId = nil }
     }
 

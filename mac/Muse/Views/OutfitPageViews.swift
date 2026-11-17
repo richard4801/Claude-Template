@@ -232,6 +232,7 @@ struct OutfitOpenView: View {
             OutfitPictureTile(ref: ref, label: label,
                               redo: free ? "Redo · \(Pricing.money(store.outfitRedoEstimate(k)))" : nil,
                               redoing: redoing,
+                              asking: Binding(get: { store.outfitRedoAsk == k }, set: { store.outfitRedoAsk = $0 ? k : nil }),
                               price: { await store.outfitRedoPrice(o, k) },
                               moves: free ? OutfitPictures.moveTargets(o, from: k).map { OutfitMoveTarget(index: $0.index, title: $0.title) } : [],
                               dragPayload: free ? Self.payload(o.id, k) : nil,
@@ -286,8 +287,10 @@ struct OutfitPictureTile: View {
     /// Set when it may be dragged to another slot.
     var dragPayload: String?
     var onMove: (Int) -> Void = { _ in }
-    /// Being made again: the old picture stays, veiled, until the new one arrives.
+    /// Being made again: the old picture stays, dimmed, until the new one arrives.
     var redoing = false
+    /// Its Redo box is open (the store holds which one, so one box at a time).
+    @Binding var asking: Bool
     /// The server's price for a redo (dryRun), asked when the Redo box opens.
     var price: () async -> Double = { 0 }
     var open: () -> Void
@@ -295,24 +298,19 @@ struct OutfitPictureTile: View {
     var onRedo: (String) -> Void
     @Environment(\.theme) private var t
     @State private var hover = false
-    @State private var asking = false
     @State private var note = ""
     @State private var cost: Double?
 
     var body: some View {
-        withDrag(Button(action: open) { MediaFrame(ref: ref, ratio: 0.75) }
+        withDrag(Button(action: open) { MediaFrame(ref: ref, ratio: 0.75).opacity(redoing ? 0.45 : 1) }
             .buttonStyle(.plain)
-            .help("View \(label.lowercased()) full size")
-            .accessibilityLabel("View \(label.lowercased()) full size")
-            .overlay {
-                if redoing {
-                    RoundedRectangle(cornerRadius: t.radii.container, style: .continuous).fill(.black.opacity(0.35))
-                        .overlay { ProgressView().controlSize(.small) }
-                        .accessibilityLabel("Making \(label.lowercased()) again")
-                }
-            }
+            .help(redoing ? "Making \(label.lowercased()) again" : "View \(label.lowercased()) full size")
+            .accessibilityLabel(redoing ? "Making \(label.lowercased()) again" : "View \(label.lowercased()) full size")
             .overlay(alignment: .topTrailing) {
-                if let redo, hover || asking {
+                // Being redone: the old picture, dimmed, with a small progress mark where Redo sits.
+                if redoing {
+                    ProgressView().controlSize(.small).frame(width: 28, height: 28).padding(Space.s2)
+                } else if let redo, hover || asking {
                     RIconButton(systemName: "arrow.clockwise", help: redo) { ask() }.padding(Space.s2)
                         .popover(isPresented: $asking, arrowEdge: .bottom) { redoBox }
                 }
@@ -344,10 +342,11 @@ struct OutfitPictureTile: View {
             RTextField(placeholder: "Note for this picture (optional), e.g. sneakers on", text: $note, onSubmit: go)
                 .frame(width: 280)
             HStack(spacing: Space.s2) {
-                Text(cost.map { Pricing.money($0) } ?? "Pricing…").scaled(t.scale.caption, t.roles.ink2)
                 Spacer()
                 RButton("Cancel", small: true) { asking = false }
-                RButton("Redo", kind: .action, small: true) { go() }.keyboardShortcut(.defaultAction)
+                // The server's price once it answers; the local estimate ("Redo · $0.03") until then.
+                RButton(cost.map { "Redo · \(Pricing.money($0))" } ?? (redo ?? "Redo"), kind: .action, small: true) { go() }
+                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(Space.s3)
