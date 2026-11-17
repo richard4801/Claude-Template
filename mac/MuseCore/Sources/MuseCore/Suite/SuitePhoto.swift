@@ -274,10 +274,11 @@ extension ComposerDraft {
     /// The Photo request for this draft: the character and outfit, the prompt (no #moves), the chips as a still's camera
     /// (no movement, no tempo), the photo count, the preset and the slots. Without a character (owner 2026-11-11) only
     /// with a reference image or words, and no preset (an image is the photo to work from; words alone, text-to-image).
-    /// nil otherwise.
-    public func photoRequest(_ photo: PhotoDraft, product: ImageRef? = nil) -> PhotoRequest? {
+    /// nil otherwise. `claudeImages`: reference images Claude added in the chat (they ride in the draft), which count as images.
+    public func photoRequest(_ photo: PhotoDraft, product: ImageRef? = nil, claudeImages: Int = 0) -> PhotoRequest? {
         let model = tokens.characterId
-        if model == nil && (photo.presetId != nil || (!photo.references.contains(where: \.isValid) && !hasPhotoWords)) { return nil }
+        let hasImage = photo.references.contains(where: \.isValid) || claudeImages > 0
+        if model == nil && (photo.presetId != nil || (!hasImage && !hasPhotoWords)) { return nil }
         let preset = photo.presetId
         let s = settings
         // With a preset only the Look rides along; otherwise the owner's Directed camera (as a still) or the chips.
@@ -296,10 +297,11 @@ extension ComposerDraft {
     }
 
     /// What the Photo tool still needs before Generate, as a line to show; nil when it can go.
-    public func photoMissing(_ photo: PhotoDraft, uploading: Bool = false) -> String? {
+    public func photoMissing(_ photo: PhotoDraft, uploading: Bool = false, claudeImages: Int = 0) -> String? {
         if tokens.characterId == nil {
             if photo.presetId != nil { return "Presets need a character · pick one with @" }
-            if !photo.references.contains(where: \.isValid) && !hasPhotoWords && !uploading { return "Describe the photo or add an image" }
+            let hasImage = photo.references.contains(where: \.isValid) || claudeImages > 0
+            if !hasImage && !hasPhotoWords && !uploading { return "Describe the photo or add an image" }
         }
         if uploading { return "Wait for the upload to finish" }
         return nil

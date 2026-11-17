@@ -464,7 +464,7 @@ extension AppStore {
     /// Why Photo's Generate can't go now (nil: it can, at the estimate's price), shown beside it.
     var photoBlocker: String? {
         let uploading = suite.photoRefsUploading > 0 || suite.composerSlots.slots.uploading
-        if let need = suite.composer.photoMissing(suite.photo, uploading: uploading) { return need }
+        if let need = suite.composer.photoMissing(suite.photo, uploading: uploading, claudeImages: photoClaudeImages) { return need }
         if let e = suite.photoError { return e }
         if let e = suite.photoEstimate, !e.ok { return e.warnings.first ?? "These photos can't be made as set" }
         return nil
