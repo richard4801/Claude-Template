@@ -340,7 +340,7 @@ struct NewSwapBar: View {
     private var spec: String? {
         guard let c = store.clip else { return nil }
         let secs = d.range.map { $0.to - $0.from } ?? min(c.durationSec, row?.limits.maxSeconds ?? c.durationSec)
-        let res = row?.price.resolution
+        let res = d.resolution ?? row?.price.resolution
         return ["\(Pricing.trimNum(secs)) s", res].compactMap { $0 }.joined(separator: ", ")
     }
 
@@ -367,7 +367,7 @@ struct NewSwapBar: View {
             info("length", icon: "clock", value: seconds.map { "\(Pricing.trimNum($0)) s" } ?? "—", help: "Length of the take: the part of the clip used")
             info("shape", icon: "device-mobile", value: store.clip.flatMap { ShotStageTake.shape($0.width, $0.height) } ?? (store.clip == nil ? "9:16" : "Clip"),
                  help: "Shape: the clip's own")
-            info("resolution", icon: "stack", value: row?.price.resolution ?? "—", help: "Resolution the model makes")
+            NewSwapResolutionPill()
             Text(why).font(t.scale.caption.font).foregroundStyle(d.missing != nil ? t.roles.caution : t.roles.ink2)
                 .lineLimit(1).truncationMode(.tail)
                 .help(why)
@@ -397,6 +397,55 @@ struct NewSwapBar: View {
             .help(help)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(help): \(value)")
+    }
+}
+
+/// Resolution: what the model in use makes, picked from its list (owner bug 2026-11-17: the pill was read-only). The
+/// server takes it as `resolution`; the price follows (the draft is in the price key). Read-only until the list is in.
+struct NewSwapResolutionPill: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.theme) private var t
+    @State private var open = false
+
+    var body: some View {
+        let row = store.remixRow
+        let options = row?.limits.resolutions ?? []
+        let shown = store.suite.remix.resolution ?? row?.price.resolution
+        Button { open.toggle() } label: {
+            SuitePillLabel(icon: "stack", value: shown ?? "—", open: open)
+        }
+        .buttonStyle(.plain)
+        .disabled(options.count < 2)
+        .fitProbe("composer pill resolution") // CI fit check: a wrapped or cut label is a CUT line
+        .fixedSize()
+        .background { if SnapshotRunner.probing { ComposerBarFrame(key: "pill resolution") } }
+        .help(options.count < 2 ? "Resolution the model makes" : "Resolution: \(shown ?? "the model's default")")
+        .accessibilityLabel("Resolution: \(shown ?? "not set")")
+        .popover(isPresented: $open, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Resolution").font(t.body(13, .medium)).foregroundStyle(t.roles.ink2).padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
+                ForEach(options, id: \.self) { r in
+                    let on = r == shown
+                    Button {
+                        store.suite.remix.resolution = r == row?.price.resolution ? nil : r
+                        open = false
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(r).font(t.body(13, on ? .semibold : .regular)).foregroundStyle(t.roles.ink).lineLimit(1)
+                            Spacer(minLength: 0)
+                            if on { Ph("check", 12).foregroundStyle(t.roles.ink) }
+                        }
+                        .padding(.horizontal, 12).frame(minHeight: 32)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(r)\(on ? ", selected" : "")")
+                }
+            }
+            .padding(.bottom, 6)
+            .frame(width: 180, alignment: .leading)
+            .environment(\.theme, t)
+        }
     }
 }
 

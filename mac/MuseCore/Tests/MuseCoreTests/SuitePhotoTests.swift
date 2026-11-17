@@ -126,6 +126,10 @@ final class SuitePhotoTests: XCTestCase {
         XCTAssertNil(free.productImage)
         XCTAssertNil(try json(free)["modelId"], "left out of the JSON")
         XCTAssertNil(ComposerDraft(tool: .photo).photoMissing(PhotoDraft(references: [ref(.look)])))
+        // Claude's chat references count as images (they ride in the draft).
+        XCTAssertNil(ComposerDraft(tool: .photo).photoMissing(PhotoDraft(), claudeImages: 1))
+        XCTAssertNotNil(ComposerDraft(tool: .photo).photoRequest(PhotoDraft(), claudeImages: 1))
+        XCTAssertEqual(ComposerDraft(tool: .photo).photoMissing(PhotoDraft(presetId: "t1"), claudeImages: 1), "Presets need a character · pick one with @")
         XCTAssertEqual(ComposerDraft(tool: .photo).photoMissing(PhotoDraft(presetId: "t1", references: [ref(.look)])), "Presets need a character · pick one with @")
         XCTAssertNil(ComposerDraft(tool: .photo).photoRequest(PhotoDraft(presetId: "t1", references: [ref(.look)])))
         XCTAssertNil(d.photoMissing(PhotoDraft()))
