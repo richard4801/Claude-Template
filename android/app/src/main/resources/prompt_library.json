@@ -2697,8 +2697,8 @@
    "title": "New Swap · keep",
    "description": "Always: what stays from the clip ({kept} lists the toggles that are off).",
    "kind": "text",
-   "default": "KEEP: {kept}the motion, timing, camera moves, framing and crop of {source}. Any on-screen text is removed.",
-   "current": "KEEP: {kept}the motion, timing, camera moves, framing and crop of {source}. Any on-screen text is removed.",
+   "default": "KEEP: {kept}the motion, timing, camera moves, framing and crop of {source}, including the body's natural physics: when she turns, steps or stops, her body, hips, hair and clothing move with real weight and momentum and settle with the same timing and bounce as in {source}. Any on-screen text is removed.",
+   "current": "KEEP: {kept}the motion, timing, camera moves, framing and crop of {source}, including the body's natural physics: when she turns, steps or stops, her body, hips, hair and clothing move with real weight and momentum and settle with the same timing and bounce as in {source}. Any on-screen text is removed.",
    "overridden": false,
    "allowEmpty": false,
    "placeholders": [

@@ -123,7 +123,7 @@ export const SUITE_PROMPT_DEFS: PromptDef[] = [
   def('suite.remix.look', 'New Swap · look & light', 'Look & light is on (time of day, light, colour grade; under CHANGE).',
     'LOOK & LIGHT: relight and grade the whole scene as written under CHANGE; nothing else changes.'),
   def('suite.remix.keep', 'New Swap · keep', 'Always: what stays from the clip ({kept} lists the toggles that are off).',
-    'KEEP: {kept}the motion, timing, camera moves, framing and crop of {source}. Any on-screen text is removed.',
+    'KEEP: {kept}the motion, timing, camera moves, framing and crop of {source}, including the body\'s natural physics: when she turns, steps or stops, her body, hips, hair and clothing move with real weight and momentum and settle with the same timing and bounce as in {source}. Any on-screen text is removed.',
     [['kept', 'what is kept, e.g. "the background, the light and colour; "'], ['source', 'the source clip token']], { allowEmpty: false }),
   def('suite.remix.change', 'New Swap · the person’s words', 'The change, in the person’s own words (one part per toggle).', 'CHANGE: {direction}',
     [['direction', 'the person’s words, per toggle', true]], { allowEmpty: false }),
