@@ -113,8 +113,8 @@ describe('New Swap · prompt, pictures, trimmer and prices (unit)', () => {
     expect(p.images.refs.map(r => r.label)).toEqual(['face, front', 'face, profile', 'outfit, front', 'outfit, back', 'outfit, side', 'outfit, ¾', 'outfit, face, front', 'background']);
     expect(p.notes.join()).toMatch(/takes 8 pictures here: left out outfit, face, profile, outfit, face, ¾/);
     expect(p.prompt).toMatch(/^Edit <Video 1>\. Change only what is listed below/);
-    expect(p.prompt).toContain('FIGURE LOCK: her face, hair and skin come only from <Image 1> and <Image 2>, and her body shape and proportions only from <Image 3>, <Image 4>, <Image 5> and <Image 6>, unchanged. From <Video 1> take only the motion, timing and facial gestures');
-    expect(p.prompt).toContain('never the face, body, figure or proportions of the person in it');
+    expect(p.prompt).toContain('FIGURE LOCK: her face, hair and skin come only from <Image 1> and <Image 2>, and her body shape and proportions only from <Image 3>, <Image 4>, <Image 5> and <Image 6>, unchanged. From <Video 1> take all of the motion, exactly: every movement, gesture and step');
+    expect(p.prompt).toContain('Never take the face, body shape, figure or proportions of the person in <Video 1>: the same motion plays out on her own body.');
     expect(p.prompt).toContain('PERSON: the person in <Video 1> becomes Mia, shown in <Image 1> and <Image 2>.');
     expect(p.prompt).toContain('OUTFIT: she wears the outfit shown in <Image 3>, <Image 4>, <Image 5>, <Image 6> and <Image 7>, exactly');
     expect(p.prompt).toContain('BACKGROUND: replace the place with the place in <Image 8>.');

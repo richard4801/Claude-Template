@@ -95,7 +95,7 @@ export const SUITE_PROMPT_DEFS: PromptDef[] = [
   def('suite.remix.head', 'New Swap · task', 'First line of every New Swap prompt.',
     'Edit {source}. Change only what is listed below; everything else stays exactly as in {source}.', [['source', 'the source clip token', true]], { allowEmpty: false }),
   def('suite.remix.lock.model', 'New Swap · figure lock (her)', 'Character is her: her figure only from her images (owner rule, strict).',
-    'FIGURE LOCK: her face, hair and skin come only from {refs}, and her body shape and proportions only from {figureRefs}, unchanged. From {source} take only the motion, timing and facial gestures (expressions, eye and mouth movements), never the face, body, figure or proportions of the person in it.',
+    'FIGURE LOCK: her face, hair and skin come only from {refs}, and her body shape and proportions only from {figureRefs}, unchanged. From {source} take all of the motion, exactly: every movement, gesture and step, the timing, the facial gestures (expressions, eye and mouth movements), and how the body moves with it, down to the jiggle, bounce and sway of the hips, buttocks, chest and hair and how they settle. Never take the face, body shape, figure or proportions of the person in {source}: the same motion plays out on her own body.',
     [['refs', 'her image tokens', true], ['figureRefs', 'the images her figure comes from'], ['source', 'the source clip token']], { allowEmpty: false }),
   def('suite.remix.lock.face', 'New Swap · figure lock (face swap)', 'Face swap: only the face changes.',
     'FIGURE LOCK: only the face changes. The body, figure, proportions, hair and skin of the person in {source} stay exactly as they are; never slimmer, taller or reshaped.',
