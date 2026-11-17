@@ -90,8 +90,8 @@ extension EditSuiteSession {
         liveTasks = [events, presence]
     }
 
-    /// A change from the live session: shown now after a quiet moment; while Claude's patches keep coming, at most once per
-    /// second, the newest (each holds the whole project). Build 704, run 718: every patch re-diffed the whole editor.
+    /// A change from the live session: shown now after a quiet moment; while Claude's patches keep coming, at most once every
+    /// 0.75 s, the newest (each holds the whole project). Build 704, run 718: every patch re-diffed the whole editor.
     func queueRemote(_ p: E.Project, entry: EditHistoryEntry?) {
         let keep = (entry?.byClaude == true) ? entry : remotePending?.entry
         remotePending = (p, keep)

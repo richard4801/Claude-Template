@@ -167,7 +167,7 @@ extension SnapshotRunner {
 
         // 7. Coordinator, build 704 ("mostly when Claude is working or during edits"): Claude applies a series of patches to
         // the open big edit, two a second for 10 s (a text change, then a main shot's framing, alternately), as
-        // apply_edit_ops does. Each must show within 2 s; the CPU meanwhile (median of 2 s windows), the preview rebuilds it
+        // apply_edit_ops does. Each must show within 1 s (coordinator's target); the CPU meanwhile (median of 2 s windows), the preview rebuilds it
         // caused, and the CPU once it settles are logged, with the main thread's heaviest frames.
         await claudePatchSeries(s, fake: fake, sessionId: es.id, dir: dir, line: line)
         store.go(.home)
@@ -218,7 +218,7 @@ extension SnapshotRunner {
                 }
             }
             var ok = landed()
-            while !ok && Date().timeIntervalSince(started) < 2 { try? await Task.sleep(for: .seconds(0.05)); ok = landed() }
+            while !ok && Date().timeIntervalSince(started) < 1.5 { try? await Task.sleep(for: .seconds(0.05)); ok = landed() }
             let took = Date().timeIntervalSince(started)
             worst = max(worst, took)
             if !ok { late.append("\(k + 1)") }
@@ -228,10 +228,10 @@ extension SnapshotRunner {
         _ = await sampled
         let med = median(cpu)
         let rebuilds = s.rebuildCount - rebuilds0
-        line(late.isEmpty && med <= 80, "Claude patches into the big edit",
-             String(format: "%d patches at 2 a second: CPU median %.0f %% of one core (fails above 80 %%; windows %@), slowest to show %.2f s, ",
+        line(late.isEmpty && worst <= 1.0 && med <= 80, "Claude patches into the big edit",
+             String(format: "%d patches at 2 a second: CPU median %.0f %% of one core (fails above 80 %%; windows %@), slowest to show %.2f s (fails above 1 s), ",
                     n, med, cpu.map { String(format: "%.0f", $0) }.joined(separator: " "), worst)
-             + "\(rebuilds) preview rebuilds" + (late.isEmpty ? "" : ", not shown within 2 s: \(late.joined(separator: ", "))"))
+             + "\(rebuilds) preview rebuilds" + (late.isEmpty ? "" : ", not shown within 1.5 s: \(late.joined(separator: ", "))"))
         for f in mainThreadTop(sampleFile, count: 25) { line(nil, "main (patches)", f) }
         try? await Task.sleep(for: .seconds(3))
         let after = await cpuMedian(over: 8)

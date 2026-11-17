@@ -573,49 +573,20 @@ struct TimelineCanvas: View {
         }
     }
 
-    /// Frames of the clip's source across the block.
+    /// Frames of the clip's source across the block. Build 704 (run 718): an Equatable view, so a patch that leaves this clip as
+    /// it was skips its tiles instead of re-diffing every tile of every clip.
     private func strip(_ c: EditV2.VideoClip, width: CGFloat, height: CGFloat) -> some View {
-        // Owner blocker 2026-11-07: a 0 / NaN duration made `Int(src / dur …)` trap. The index math is in MuseCore (tested).
-        let frames = session.strips[c.asset] ?? []
-        let dur = session.project.asset(c.asset)?.durationSec
-        let tileW = max(16, height.isFinite ? height * 0.75 : 16)
-        let n = EditSuite.tileCount(width: Double(width), tileWidth: Double(tileW))
-        return HStack(spacing: 0) {
-            ForEach(0..<n, id: \.self) { k in
-                let src = c.inSec + (Double(k) + 0.5) / Double(n) * (c.outSec - c.inSec)
-                let i = EditSuite.frameIndex(source: src, durationSec: dur, fallbackSec: c.outSec, count: frames.count) ?? -1
-                Group {
-                    if i >= 0 && i < frames.count {
-                        Image(decorative: frames[i], scale: 1).resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        Color(hex: 0x33302C)
-                    }
-                }
-                .frame(width: tileW, height: height)
-                .clipped()
-            }
-        }
-        .frame(width: width, height: height, alignment: .leading)
+        TimelineClipStrip(frames: session.strips[c.asset] ?? [], inSec: c.inSec, outSec: c.outSec,
+                          durationSec: session.project.asset(c.asset)?.durationSec, width: width, height: height)
+            .equatable()
     }
 
-    /// The asset's peaks between in and out.
+    /// The asset's peaks between in and out (an Equatable view, as the strip).
     private func wave(asset: String, inSec: Double, outSec: Double, width: CGFloat, height: CGFloat, kind: EditV2.TrackKind) -> some View {
-        let peaks = session.waves[asset] ?? []
-        let dur = session.project.asset(asset)?.durationSec
         let tint: Color = kind == .music ? Color(hex: 0x2F9E57) : kind == .voice ? Color(hex: 0x6E6AE0) : kind == .main ? t.roles.ink2.opacity(0.7) : Color(hex: 0xB45A00)
-        return Canvas { ctx, size in
-            guard !peaks.isEmpty else { return }
-            let bars = EditSuite.tileCount(width: Double(size.width), tileWidth: 3)
-            for k in 0..<bars {
-                let src = inSec + (Double(k) + 0.5) / Double(bars) * (outSec - inSec)
-                guard let i = EditSuite.frameIndex(source: src, durationSec: dur, fallbackSec: outSec, count: peaks.count) else { return }
-                let pk = Double(peaks[i])
-                let v = CGFloat(pk.isFinite ? min(1, max(0, pk)) : 0) * max(0, size.height - 4)
-                let x = CGFloat(k) * 3 + 1
-                ctx.fill(Path(CGRect(x: x, y: (size.height - v) / 2, width: 2, height: max(1, v))), with: .color(tint))
-            }
-        }
-        .frame(width: width, height: height)
+        return TimelineClipWave(peaks: session.waves[asset] ?? [], inSec: inSec, outSec: outSec,
+                                durationSec: session.project.asset(asset)?.durationSec, tint: tint, width: width, height: height)
+            .equatable()
     }
 
     // MARK: Gestures
@@ -717,5 +688,70 @@ struct MaskBadge {
         guard let first = on.first else { return nil }
         text = ListFormatter.localizedString(byJoining: on)
         icon = mask?.invert == true ? "selection-background" : mask != nil ? "selection" : first == "Green screen" ? "drop" : "scissors"
+    }
+}
+
+/// A clip's filmstrip on the timeline: equal inputs (the same frames, in/out, length and size) draw the same, so SwiftUI
+/// skips it when a change elsewhere re-renders the timeline.
+struct TimelineClipStrip: View, Equatable {
+    let frames: [CGImage]
+    let inSec: Double
+    let outSec: Double
+    let durationSec: Double?
+    let width: CGFloat
+    let height: CGFloat
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.inSec == b.inSec && a.outSec == b.outSec && a.durationSec == b.durationSec && a.width == b.width && a.height == b.height
+            && a.frames.count == b.frames.count && zip(a.frames, b.frames).allSatisfy { $0 === $1 }
+    }
+
+    var body: some View {
+        // Owner blocker 2026-11-07: a 0 / NaN duration made `Int(src / dur …)` trap. The index math is in MuseCore (tested).
+        let tileW = max(16, height.isFinite ? height * 0.75 : 16)
+        let n = EditSuite.tileCount(width: Double(width), tileWidth: Double(tileW))
+        HStack(spacing: 0) {
+            ForEach(0..<n, id: \.self) { k in
+                let src = inSec + (Double(k) + 0.5) / Double(n) * (outSec - inSec)
+                let i = EditSuite.frameIndex(source: src, durationSec: durationSec, fallbackSec: outSec, count: frames.count) ?? -1
+                Group {
+                    if i >= 0 && i < frames.count {
+                        Image(decorative: frames[i], scale: 1).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Color(hex: 0x33302C)
+                    }
+                }
+                .frame(width: tileW, height: height)
+                .clipped()
+            }
+        }
+        .frame(width: width, height: height, alignment: .leading)
+    }
+}
+
+/// A clip's waveform on the timeline (Equatable, as the strip).
+struct TimelineClipWave: View, Equatable {
+    let peaks: [Float]
+    let inSec: Double
+    let outSec: Double
+    let durationSec: Double?
+    let tint: Color
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        Canvas { ctx, size in
+            guard !peaks.isEmpty else { return }
+            let bars = EditSuite.tileCount(width: Double(size.width), tileWidth: 3)
+            for k in 0..<bars {
+                let src = inSec + (Double(k) + 0.5) / Double(bars) * (outSec - inSec)
+                guard let i = EditSuite.frameIndex(source: src, durationSec: durationSec, fallbackSec: outSec, count: peaks.count) else { return }
+                let pk = Double(peaks[i])
+                let v = CGFloat(pk.isFinite ? min(1, max(0, pk)) : 0) * max(0, size.height - 4)
+                let x = CGFloat(k) * 3 + 1
+                ctx.fill(Path(CGRect(x: x, y: (size.height - v) / 2, width: 2, height: max(1, v))), with: .color(tint))
+            }
+        }
+        .frame(width: width, height: height)
     }
 }
