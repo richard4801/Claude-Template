@@ -42,6 +42,24 @@ extension SnapshotRunner {
             }
         }
         store.outfitSheet = nil
+        // An opened outfit: the Redo box on its ¾ picture (price, optional note, Cancel / Redo), then that picture
+        // mid-redo (the old one dimmed, a small progress mark where Redo sits). Themes A and C, for the design review.
+        if let o = store.outfits(for: store.character(SampleData.demo)).first(where: { $0.front != nil }) ?? store.outfits.first(where: { $0.front != nil }) {
+            for theme in [ThemeID.a, .c] {
+                store.themeID = theme
+                store.openOutfit(o)
+                try? await Task.sleep(for: .seconds(1.2))
+                store.outfitRedoAsk = 1
+                try? await Task.sleep(for: .seconds(1.2))
+                capture(dir.appendingPathComponent("mac_\(theme.rawValue)_outfit_redo_popover.png"))
+                store.outfitRedoAsk = nil
+                store.remakingOutfit[o.id] = [1]
+                try? await Task.sleep(for: .seconds(1.2))
+                capture(dir.appendingPathComponent("mac_\(theme.rawValue)_outfit_redo_veil.png"))
+                store.remakingOutfit[o.id] = nil
+                store.closeOutfit()
+            }
+        }
         store.themeID = .a
     }
 
