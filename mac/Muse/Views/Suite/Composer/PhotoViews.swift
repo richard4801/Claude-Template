@@ -318,7 +318,7 @@ struct PhotoPresetsRow: View {
                 Text("No photo presets yet. Save a photo as a template and it shows up here.").font(t.body(13)).foregroundStyle(t.muted)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 16) {
+                    LazyHStack(alignment: .top, spacing: 16) { // lazy: one card per template (build 704)
                         ForEach(list) { tpl in PhotoPresetTile(template: tpl, selected: store.suite.photo.presetId == tpl.id) { store.choosePhotoPreset(tpl) } }
                     }
                     .padding(4)

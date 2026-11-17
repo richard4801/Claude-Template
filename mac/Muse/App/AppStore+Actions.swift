@@ -394,7 +394,15 @@ extension AppStore {
 
     func retakeSlot(_ m: MuseModel, _ angle: SheetAngle) {
         perform { [self] in
-            // No single-slot endpoint: clear the slot, then "fill missing angles" regenerates just that one ($0.02).
+            // The server retakes the current photo (her figure and pose come from it); it changes only when the new one comes out.
+            if let http = api as? HTTPMuseAPI {
+                let r = try await http.retakeSlot(modelId: m.id, slot: angle.rawValue, imageModel: enginePick(.character)?.model)
+                replaceModel(r.model)
+                balance = try await api.balance()
+                showToast("Retaking \(angle.label.lowercased()) · keeps her figure · \(PhotoPricing.label(r.cost))")
+                return
+            }
+            // Demo mode: clear the slot, then "fill missing angles" makes just that one.
             _ = try await api.setSlot(modelId: m.id, slot: angle.rawValue, SetSlotRequest(image: nil, source: "generated"))
             let r = try await fillAnglesWithPick(m.id)
             replaceModel(r.model)
