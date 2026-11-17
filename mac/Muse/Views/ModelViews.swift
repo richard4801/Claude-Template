@@ -291,7 +291,7 @@ struct ProfileView: View {
                         .padding(.top, Space.s4)
                 }
                 herWorld(m).id("profile.world")
-                ProfileAccounts(model: m)
+                accounts(m)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             about(m).frame(width: 300, alignment: .leading)
@@ -381,6 +381,20 @@ struct ProfileView: View {
             }
             if let o = outfit {
                 MediaTile(ref: o.angles.compactMap { $0 }.first, ratio: 0.75, caption: "Outfit, \(o.name)")
+            }
+        }
+    }
+
+    /// Her accounts as a list, one row each (icon, name, status, its action), like the Her world rows: names never wrap.
+    private func accounts(_ m: MuseModel) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SectionTitle("Accounts") {
+                Text("\(store.accounts(for: m).count) of \(Platform.allCases.count) connected").scaled(t.scale.caption, t.roles.ink2)
+            }
+            ForEach(Platform.allCases) { p in
+                AccountCard(model: m, platform: p, allowDisconnect: true)
+                    .padding(.vertical, Space.s1)
+                    .overlay(alignment: .top) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
             }
         }
     }
