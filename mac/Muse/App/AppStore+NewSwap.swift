@@ -73,6 +73,17 @@ extension AppStore {
         }
         let req = RemixModelsRequest(remix: d.toggles, clipId: clip?.id, range: d.range.map { [$0.from, $0.to] })
         suite.remixModels = try? await api.suiteRemixModels(req)
+        // A picked resolution the model in use doesn't make goes back to the model's default.
+        if suite.remix.resolution != nil, let row = remixRow {
+            let kept = suite.remix.resolutionKept(in: row.limits.resolutions)
+            if kept != suite.remix.resolution { suite.remix.resolution = kept }
+        }
+    }
+
+    /// The model New Swap uses now: the picked one, else Auto's.
+    var remixRow: RemixModels.Row? {
+        let d = suite.remix
+        return suite.remixModels?.models.first { d.engineModel == nil ? $0.auto : $0.model == d.engineModel }
     }
 
     func generateRemix() {
