@@ -200,7 +200,12 @@ final class SuiteComposerExtrasTests: XCTestCase {
         let (same, full) = ComposerLocations.add(roof, to: t, slots: slots, inputs: two)
         XCTAssertEqual(full, "References are full (2/2) · remove one to add a location")
         XCTAssertEqual(same, t)
-        XCTAssertEqual(ComposerLocations.add(roof, to: .text("x"), slots: InputSlots(), inputs: .none).1, "This quality doesn't take references · try Standard or HD")
+        // Her world: a first place goes in even with no room for its photo (the server describes it in words).
+        let (words, note) = ComposerLocations.add(roof, to: .text("x"), slots: InputSlots(), inputs: .none)
+        XCTAssertNil(note)
+        let wr = ComposerDraft(tokens: words).request(InputSlots(), .none, locations: [living, roof])
+        XCTAssertEqual(wr.placeId, "loc_2")
+        XCTAssertNil(wr.references?.images)
         // A quality with less room sends only what fits.
         var many = PromptTokens.text("From ")
         many = many.addMention(kind: "location", id: "loc_1", label: "Living room").0
@@ -221,14 +226,15 @@ final class SuiteComposerExtrasTests: XCTestCase {
         let a = FakeMuseAPI(speed: 0, genDelay: 0.01)
         _ = try await a.signIn(SignInRequest(email: "owner@studio.com", password: "x"))
         let list = try await a.suiteLocations()
-        XCTAssertEqual(list.count, 2)
+        XCTAssertEqual(list.count, 4, "the studio's two and the demo model's two")
+        XCTAssertEqual(list.filter(\.isStudio).count, 2)
         let made = try await a.createSuiteLocation(NewSuiteLocation(name: "  rooftop ", image: ImageRef(url: "https://x/r.jpg")))
         XCTAssertEqual(made.name, "Rooftop")
         let after = try await a.suiteLocations()
-        XCTAssertEqual(after.count, 3)
+        XCTAssertEqual(after.count, 5)
         try await a.deleteSuiteLocation(id: made.id)
         let gone = try await a.suiteLocations()
-        XCTAssertEqual(gone.count, 2)
+        XCTAssertEqual(gone.count, 4)
         do {
             _ = try await a.createSuiteLocation(NewSuiteLocation(name: " ", image: ImageRef(url: "https://x/r.jpg")))
             XCTFail("a name is needed")

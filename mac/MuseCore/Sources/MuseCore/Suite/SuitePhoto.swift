@@ -36,6 +36,9 @@ public struct PhotoRequest: Codable, Hashable, Sendable {
     /// The photo's shape (owner 2026-11-14): "4:5", "1:1", "9:16"…; nil = the server's 9:16 (left out, so an older server
     /// that doesn't know it is never sent it).
     public var aspect: String?
+    /// Her world: the @place in the prompt, sent as the scene photo after her images (or in words when there's no room).
+    /// Left out without one, so an older server is never sent it.
+    public var placeId: String?
 
     public init(modelId: String?, outfitId: String? = nil, prompt: String = "", camera: CameraSpec? = nil, gradeLook: Bool? = nil, count: Int = PhotoRequest.maxCount,
                 presetId: String? = nil, productImage: ImageRef? = nil, references: [ShootRef]? = nil, seed: Int64? = nil, lockSeed: Bool? = nil,
@@ -288,6 +291,7 @@ extension ComposerDraft {
         r.title = words.isEmpty ? nil : words
         r.imageModel = photo.imageModel
         r.aspect = photo.aspect
+        r.placeId = ComposerLocations.ids(tokens).first
         return r
     }
 

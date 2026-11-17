@@ -102,6 +102,21 @@ struct HoverChip: View {
     }
 }
 
+/// Her page's tabs (plans/model-world.md, mockup 1). People and Pets come in later phases; their tabs say what they'll hold.
+enum ProfileTab: String, CaseIterable, Identifiable {
+    case profile, wardrobe, places, people, pets
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .profile: return "Profile"
+        case .wardrobe: return "Wardrobe"
+        case .places: return "Places"
+        case .people: return "People"
+        case .pets: return "Pets"
+        }
+    }
+}
+
 struct ProfileView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -113,20 +128,28 @@ struct ProfileView: View {
         if let m = store.profileModel {
             ScreenPage {
                 Crumb(parent: "Models", title: m.name) { store.go(.models) }
-                HStack(alignment: .top, spacing: Space.s6) {
-                    left(m).frame(width: 280)
-                    right(m).frame(maxWidth: .infinity, alignment: .leading) // the outfit folders fill the width (§4)
+                header(m)
+                tabs(m)
+                switch store.profileTab {
+                case .profile: profileTab(m)
+                case .wardrobe: wardrobeTab(m)
+                case .places: PlacesTab(model: m, openId: Binding(get: { store.profilePlaceId }, set: { store.profilePlaceId = $0 }))
+                case .people:
+                    WorldEmpty(icon: "users", title: "No people yet",
+                               message: "Her sister, a brother, a best friend. Each gets a few photos and their own outfits, and you can @tag them.")
+                case .pets:
+                    WorldEmpty(icon: "paw-print", title: "No pets yet", message: "Her dog or cat: a few photos and a name to @tag in a prompt.")
                 }
             }
+            .task(id: m.id) { await store.reloadPlaces() }
         } else if store.loading {
             ScreenPage {
-                HStack(alignment: .top, spacing: Space.s6) {
-                    SkeletonBlock(ratio: 0.75, radius: t.radii.container).frame(width: 280)
-                    VStack(alignment: .leading, spacing: Space.s4) {
-                        SkeletonBlock(width: 220, height: 24)
-                        SkeletonGrid(columns: 4, count: 8, ratio: 0.75)
-                    }
+                HStack(alignment: .center, spacing: Space.s4) {
+                    SkeletonBlock(width: 72, height: 72, radius: 36)
+                    SkeletonBlock(width: 220, height: 24)
                 }
+                .padding(.bottom, Space.s5)
+                SkeletonGrid(columns: 5, count: 5, ratio: 0.75)
             }
         } else {
             ScreenPage {
@@ -135,47 +158,206 @@ struct ProfileView: View {
         }
     }
 
-    private func left(_ m: MuseModel) -> some View {
-        VStack(alignment: .leading, spacing: Space.s4) {
-            if let c = m.cover {
-                MediaFrame(ref: c, ratio: 0.75)
-            } else {
-                let shape = RoundedRectangle(cornerRadius: t.radii.container, style: .continuous)
-                Color.clear.aspectRatio(0.75, contentMode: .fit).background(shape.fill(t.roles.field))
-                    .overlay(Text(m.initial).font(t.scale.display.font).foregroundStyle(t.roles.ink2))
-            }
-            HStack(spacing: Space.s2) {
-                // The AI Suite's Shot tool with her as the character (the classic studio is gone, owner 2026-11-08).
-                RButton("Shot", kind: .action, fill: true) {
-                    store.selectModel(m)
-                    store.openTool(.shot)
-                    store.setComposerCharacter(m)
-                }
-                // Photoshoot is the AI suite's Photo tool now (workstream 3): it opens with her preselected.
-                RButton("Photo", fill: true) {
-                    store.selectModel(m)
-                    store.openPhoto(model: m.id)
-                }
-                MoreMenu {
-                    Button("Edit character sheet") { store.uploadSheet(m) }
-                    Button("Identity LoRA") { store.openLora(m.id) }
-                    Button("Add outfit") { store.openOutfitSheet(for: m.id) }
-                    Button("Enhance character sheet") { store.openEnhance(m) }
-                    Button("Previous sheet versions") { store.openVersions(m.id) }
-                    Button("Duplicate model") { store.duplicate(m) }
-                    Button("Share profile card") { store.shareProfileCard(m) }
-                    Divider()
-                    if store.isOwner { Button("Archive model…") { store.archiveModel(m) } }
-                    Button("Delete model…", role: .destructive) { store.deleteModel(m) }
+    // MARK: Header and tabs
+
+    private func header(_ m: MuseModel) -> some View {
+        HStack(alignment: .center, spacing: Space.s4) {
+            Group {
+                if let c = m.cover {
+                    MuseImage(ref: c)
+                } else {
+                    t.roles.field.overlay(Text(m.initial).font(t.scale.heading.font).foregroundStyle(t.roles.ink2))
                 }
             }
-            VStack(alignment: .leading, spacing: Space.s3) {
-                detail("Niche", m.niche)
-                detail("Personality", m.personality)
-                detail("Notes", m.notes)
+            .frame(width: 72, height: 72)
+            .clipShape(Circle())
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(m.name).scaled(t.scale.display, t.roles.ink).lineLimit(1).accessibilityAddTraits(.isHeader)
+                Text(lookLine(m)).scaled(t.scale.caption, t.roles.ink2).lineLimit(2)
             }
-            .padding(.top, Space.s2)
+            Spacer(minLength: Space.s4)
+            // Photoshoot is the AI suite's Photo tool (workstream 3): it opens with her preselected.
+            Button {
+                store.selectModel(m)
+                store.openPhoto(model: m.id)
+            } label: { Label("Photo", ph: "camera") }
+                .buttonStyle(RButtonStyle(kind: .quiet))
+            // The AI Suite's Shot tool with her as the character (the one primary action on her page).
+            Button {
+                store.selectModel(m)
+                store.openTool(.shot)
+                store.setComposerCharacter(m)
+            } label: { Label("New shot", ph: "video-camera") }
+                .buttonStyle(RButtonStyle(kind: .action))
+            MoreMenu {
+                Button("Edit character sheet") { store.uploadSheet(m) }
+                Button("Identity LoRA") { store.openLora(m.id) }
+                Button("Add outfit") { store.openOutfitSheet(for: m.id) }
+                Button("Enhance character sheet") { store.openEnhance(m) }
+                Button("Previous sheet versions") { store.openVersions(m.id) }
+                Button("Duplicate model") { store.duplicate(m) }
+                Button("Share profile card") { store.shareProfileCard(m) }
+                Divider()
+                if store.isOwner { Button("Archive model…") { store.archiveModel(m) } }
+                Button("Delete model…", role: .destructive) { store.deleteModel(m) }
+            }
         }
+        .padding(.bottom, Space.s5)
+    }
+
+    private func lookLine(_ m: MuseModel) -> String {
+        let look = m.look.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sheet = m.isLocked ? "Identity locked, \(ScreenCopy.count(m.filled, "photo"))" : ScreenCopy.count(m.filled, "photo")
+        return look.isEmpty ? sheet : "\(look.hasSuffix(".") ? look : look + "."). \(sheet)"
+    }
+
+    private func count(_ tab: ProfileTab, _ m: MuseModel) -> Int? {
+        switch tab {
+        case .wardrobe: let n = store.outfits(for: m).count; return n > 0 ? n : nil
+        case .places: let n = store.places(for: m).count; return n > 0 ? n : nil
+        default: return nil
+        }
+    }
+
+    private func tabs(_ m: MuseModel) -> some View {
+        HStack(spacing: Space.s5) {
+            ForEach(ProfileTab.allCases) { k in
+                let on = store.profileTab == k
+                Button { store.profileTab = k } label: {
+                    VStack(spacing: Space.s2) {
+                        HStack(spacing: Space.s1) {
+                            Text(k.title).scaled(t.scale.label, on ? t.roles.ink : t.roles.ink2)
+                            if let n = count(k, m) { Text("\(n)").monospacedDigit().scaled(t.scale.caption, t.roles.ink2) }
+                        }
+                        Rectangle().fill(on ? t.roles.accent : .clear).frame(height: 2)
+                    }
+                    .fixedSize()
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+            Spacer()
+            if store.profileTab == .places && !store.places(for: m).isEmpty {
+                Button {
+                    guard let name = store.askPlaceName() else { return }
+                    Task { if let l = await store.newPlace(for: m, name: name) { store.profilePlaceId = l.id } }
+                } label: { Label("Add a place", ph: "plus") }
+                    .buttonStyle(RButtonStyle(kind: .plain, small: true))
+                    .padding(.bottom, Space.s2)
+            }
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
+    }
+
+    // MARK: Profile tab: her photos, her world, and about her
+
+    private func profileTab(_ m: MuseModel) -> some View {
+        HStack(alignment: .top, spacing: Space.s6) {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionTitle("Her photos", top: Space.s5) {
+                    HStack(spacing: Space.s2) {
+                        RButton("Upload images", kind: .plain, small: true) { store.uploadSheet(m) }
+                        if store.toolsFeatures?.enhance.available ?? false {
+                            RButton("Enhance", kind: .plain, small: true) { store.openEnhance(m) }
+                        }
+                        RButton("Versions", kind: .plain, small: true) { store.openVersions(m.id) }
+                    }
+                }
+                Text("Hover a shot to replace it, or drop an image on it.").scaled(t.scale.caption, t.roles.ink2)
+                    .padding(.bottom, Space.s4)
+                VStack(alignment: .leading, spacing: Space.s5) {
+                    sheetGroup(m, "Face close-ups", SheetAngle.faceGroup)
+                    sheetGroup(m, "Full body", SheetAngle.bodyGroup)
+                }
+                .dropDestination(for: URL.self) { urls, _ in
+                    store.uploadSheet(m, urls: urls)
+                    return true
+                }
+                if !m.hasBothFaces && m.filled > 0 {
+                    InlineNotice("No \(m.slot("face")?.image == nil ? "face" : "profile") close-up yet. Faces come out softer without both close-ups.", tone: .caution,
+                                 actionTitle: "Upload images") { store.uploadSheet(m) }
+                        .padding(.top, Space.s4)
+                }
+                herWorld(m)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            about(m).frame(width: 300, alignment: .leading)
+        }
+    }
+
+    /// "Her world": a row each for places, people and pets; a row opens its tab.
+    private func herWorld(_ m: MuseModel) -> some View {
+        let places = store.places(for: m)
+        return VStack(alignment: .leading, spacing: 0) {
+            SectionTitle("Her world")
+            Text("Places, people and pets keep her videos consistent. Type @ in any prompt to use them.").scaled(t.scale.caption, t.roles.ink2)
+                .padding(.bottom, Space.s3)
+            worldRow(icon: "map-pin", title: "Places", summary: Places.summary(places), thumbs: places.prefix(4).compactMap(\.coverImage)) { store.profileTab = .places }
+            worldRow(icon: "users", title: "People", summary: "None yet", thumbs: []) { store.profileTab = .people }
+            worldRow(icon: "paw-print", title: "Pets", summary: "None yet", thumbs: []) { store.profileTab = .pets }
+        }
+    }
+
+    private func worldRow(icon: String, title: String, summary: String, thumbs: [ImageRef], open: @escaping () -> Void) -> some View {
+        Button(action: open) {
+            HStack(spacing: Space.s4) {
+                Ph(icon, 15).foregroundStyle(t.roles.ink2).frame(width: 20)
+                Text(title).scaled(t.scale.label, t.roles.ink).frame(width: 72, alignment: .leading)
+                Text(summary).scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
+                Spacer(minLength: Space.s3)
+                HStack(spacing: Space.s1) {
+                    ForEach(Array(thumbs.enumerated()), id: \.offset) { _, r in
+                        MuseImage(ref: r).frame(width: 40, height: 40)
+                            .clipShape(RoundedRectangle(cornerRadius: t.radii.chip, style: .continuous))
+                    }
+                }
+                Ph("caret-right", 12).foregroundStyle(t.roles.ink2)
+            }
+            .frame(minHeight: 56)
+            .overlay(alignment: .top) { Rectangle().fill(t.roles.hairline).frame(height: 1) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title): \(summary)")
+        .accessibilityHint("Opens the \(title) tab")
+    }
+
+    /// The right column: niche, personality, notes, never add, then her LoRA and accounts.
+    private func about(_ m: MuseModel) -> some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            detail("Niche", m.niche)
+            detail("Personality", m.personality)
+            if !m.notes.isEmpty { detail("Notes", m.notes) }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                Text("Never add").scaled(t.scale.caption, t.roles.ink2)
+                FlowLayout(spacing: Space.s2) {
+                    ForEach(Array(store.neverList(m).enumerated()), id: \.offset) { i, item in
+                        RemovableTag(text: item) { store.removeNever(m, at: i) }
+                    }
+                    if addingNever {
+                        TextField("e.g. necklaces", text: $newNever)
+                            .focused($neverFocused)
+                            .frame(width: 140)
+                            .roleField(focused: neverFocused)
+                            .onAppear { neverFocused = true }
+                            .onSubmit {
+                                store.addNever(m, newNever)
+                                newNever = ""
+                                addingNever = false
+                            }
+                            .onExitCommand { addingNever = false }
+                    } else {
+                        RIconButton(systemName: "plus", help: "Add something she never has") { addingNever = true }
+                    }
+                }
+                Text("Removed from every render").scaled(t.scale.micro, t.roles.ink2)
+            }
+            ProfileLoraCard(model: m)
+            ProfileAccounts(model: m)
+        }
+        .padding(.top, Space.s5)
     }
 
     private func detail(_ label: String, _ value: String) -> some View {
@@ -185,66 +367,20 @@ struct ProfileView: View {
         }
     }
 
-    private func right(_ m: MuseModel) -> some View {
+    // MARK: Wardrobe tab: her outfit folders
+
+    private func wardrobeTab(_ m: MuseModel) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(m.name).scaled(t.scale.display, t.roles.ink).accessibilityAddTraits(.isHeader)
-            SectionTitle("Character sheet", top: Space.s5) { RButton("Versions", kind: .plain, small: true) { store.openVersions(m.id) } }
-            HStack(spacing: Space.s2) {
-                Text("Hover a shot to replace it, or drop an image on it.").scaled(t.scale.caption, t.roles.ink2)
-                Spacer(minLength: Space.s2)
-                RButton("Upload images", small: true) { store.uploadSheet(m) }
-                if store.toolsFeatures?.enhance.available ?? false {
-                    RButton("Enhance", small: true) { store.openEnhance(m) }
-                }
-            }
-            .padding(.bottom, Space.s4)
-            VStack(alignment: .leading, spacing: Space.s5) {
-                sheetGroup(m, "Face close-ups", SheetAngle.faceGroup)
-                sheetGroup(m, "Full body", SheetAngle.bodyGroup)
-            }
-            .dropDestination(for: URL.self) { urls, _ in
-                store.uploadSheet(m, urls: urls)
-                return true
-            }
-            if !m.hasBothFaces && m.filled > 0 {
-                InlineNotice("No \(m.slot("face")?.image == nil ? "face" : "profile") close-up yet. Faces come out softer without both close-ups.", tone: .caution,
-                             actionTitle: "Upload images") { store.uploadSheet(m) }
-                    .padding(.top, Space.s4)
-            }
-
-            ProfileLoraCard(model: m)
-            ProfileAccounts(model: m)
-
-            SectionTitle("Outfits") {
+            SectionTitle("Outfits", top: Space.s5) {
                 RButton("Add outfit", small: true) { store.openOutfitSheet(for: m.id) }
             }
-            let fits = store.outfits(for: m)
-            if fits.isEmpty {
-                Text("No outfits yet. Describe one, use a product photo, or upload your own four angles.").scaled(t.scale.body, t.roles.ink2)
-            }
-            // Folders (plans/outfit-head-looks.md §4): the front only, 8 per page across the full width, "‹ 1 of 3 ›".
-            if !fits.isEmpty { OutfitFolders(model: m) }
-
-            SectionTitle("Never add") { Text("Removed from every render").scaled(t.scale.caption, t.roles.ink2) }
-            FlowLayout(spacing: Space.s2) {
-                ForEach(Array(store.neverList(m).enumerated()), id: \.offset) { i, item in
-                    RemovableTag(text: item) { store.removeNever(m, at: i) }
+            if store.outfits(for: m).isEmpty {
+                EmptyState("No outfits yet", "Describe one, use a product photo, or upload your own four angles.", actionTitle: "Add outfit", actionKind: .action) {
+                    store.openOutfitSheet(for: m.id)
                 }
-                if addingNever {
-                    TextField("e.g. necklaces", text: $newNever)
-                        .focused($neverFocused)
-                        .frame(width: 160)
-                        .roleField(focused: neverFocused)
-                        .onAppear { neverFocused = true }
-                        .onSubmit {
-                            store.addNever(m, newNever)
-                            newNever = ""
-                            addingNever = false
-                        }
-                        .onExitCommand { addingNever = false }
-                } else {
-                    RButton("Add", small: true) { addingNever = true }
-                }
+            } else {
+                // Folders (plans/outfit-head-looks.md §4): the front only, 8 per page across the full width, "‹ 1 of 3 ›".
+                OutfitFolders(model: m)
             }
         }
     }

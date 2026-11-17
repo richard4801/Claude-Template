@@ -285,3 +285,8 @@ dots-three-vertical
 plus-square
 laptop
 check
+# Her world: places, people and pets on her page (plans/model-world.md)
+at
+paw-print
+users
+folder-simple

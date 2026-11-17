@@ -320,6 +320,21 @@ public protocol MuseAPI: AnyObject, Sendable {
     func createSuiteLocation(_ new: NewSuiteLocation) async throws -> SuiteLocation
     /// DELETE /v1/suite/locations/{id}
     func deleteSuiteLocation(id: String) async throws
+    // Her world, phase 1 (Suite/Places.swift): her places and the studio's.
+    /// POST /v1/suite/locations: her place (`modelId`, may start with no photo) or a studio place (a photo).
+    func createPlace(_ new: NewPlace) async throws -> SuiteLocation
+    /// PATCH /v1/suite/locations/{id}: rename, retag (409 `tag_taken`), describe, pick the cover.
+    func updatePlace(id: String, _ patch: PlacePatch) async throws -> SuiteLocation
+    /// POST /v1/suite/locations/{id}/images {image}: an uploaded photo (up to 8; 409 `place_full`).
+    func addPlaceImage(id: String, image: ImageRef) async throws -> SuiteLocation
+    /// DELETE /v1/suite/locations/{id}/images/{index}: the one who added the place or the owner.
+    func removePlaceImage(id: String, index: Int) async throws -> SuiteLocation
+    /// POST /v1/suite/locations/{id}/generate/estimate: one photo's price, before anything is made.
+    func placePhotoEstimate(id: String, _ req: PlacePhotoRequest) async throws -> PlacePhotoEstimate
+    /// POST /v1/suite/locations/{id}/generate: makes one photo (never charged above `maxUsd`; 409 `price_changed`).
+    func makePlacePhoto(id: String, _ req: PlacePhotoRequest) async throws -> PlacePhotoResult
+    /// POST /v1/suite/locations/{id}/copy {modelId}: Copy to another model.
+    func copyPlace(id: String, toModel modelId: String) async throws -> SuiteLocation
     // Build step 2 (plans/api.md "The new Suite's server pieces"). Types in Suite/SuiteRigsFeed.swift; the fake in
     // Suite/FakeMuseAPI+RigsFeed.swift. Drafts ride on ShotRequest / PhotoRequest (`draft`) and come back as Job / Take `draft`.
     /// GET /v1/suite/rigs: a member's own saved rigs; the owner gets every rig in the studio, theirs first.
