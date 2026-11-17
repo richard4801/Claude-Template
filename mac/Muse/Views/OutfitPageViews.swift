@@ -106,7 +106,7 @@ struct OutfitFolderTile: View {
 
 /// An outfit open: its 7 pictures (the four angles, then its three face close-ups with its own hair, make-up and face
 /// accessories; plans/outfit-faces.md) and its actions. Click the name to rename it (Enter saves, Escape cancels); click a
-/// picture to view it full size and slide between all 7; hover one to Redo it. Close returns to the same page of folders.
+/// picture to view it full size and slide between all 7; each has Replace and Redo on it. Close returns to the same page of folders.
 struct OutfitOpenView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.theme) private var t
@@ -237,7 +237,7 @@ struct OutfitOpenView: View {
         return "\(who), made \(d)"
     }
 
-    /// One of its 7 pictures (0–3 angles, 4–6 faces): click views it full size; hover (or right-click) to Redo.
+    /// One of its 7 pictures (0–3 angles, 4–6 faces): click views it full size; Replace and Redo sit on it (and in its menu).
     @ViewBuilder private func picture(_ o: Outfit, _ k: Int, items: [LightboxItem], filling: Bool) -> some View {
         let ref = OutfitPictures.refs(o)[k]
         let label = OutfitPictures.viewerLabels[k]
@@ -264,9 +264,9 @@ struct OutfitOpenView: View {
                               price: { await store.outfitRedoPrice(o, k) },
                               open: { withAnimation(.easeOut(duration: 0.15)) { store.openOutfitViewing = at } },
                               onRedo: { store.redoOutfitPicture(o, k, note: $0) })
-        } else if o.isMissing(k) && store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil {
-            // Missing from a set that came out partly: Redo it, priced (the rest of the set was kept and charged), or
-            // upload a picture she already has (free, so no price).
+        } else if store.canChange(o) && !filling && store.remakingOutfit[o.id] == nil && (k == 0 || o.front != nil) {
+            // Empty (missing from a partial set, or an older outfit's face): Redo it, priced, or upload a picture she
+            // already has (free, so no price).
             emptySlot(label) {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: Space.s2) { redoButton(o, k); uploadButton(o, k) }
@@ -331,15 +331,13 @@ struct OutfitOpenView: View {
     }
 }
 
-/// One outfit picture: the image, a Redo button on hover (owner or maker; its price in the tooltip), the same in its menu.
 /// A "Move to…" entry: the slot (0–6) and its title ("Swap with Back", "Move to Face side").
 struct OutfitMoveTarget: Hashable {
     var index: Int
     var title: String
 }
 
-/// One outfit picture: the image, Upload picture (free, anyone) and Redo (owner or maker; its price in the tooltip) on
-/// hover, and in its menu Redo, Upload picture…, Put back previous picture and "Move to…" (the other 6 slots). Drag it
+/// One outfit picture: the image with "Replace" (free, anyone) and "Redo · $x" (owner or maker) always on it, and in its menu Redo, Upload picture…, Put back previous picture and "Move to…" (the other 6 slots). Drag it
 /// onto another slot to swap them; drop a photo file on it to upload into that slot (it asks before replacing).
 struct OutfitPictureTile: View {
     var ref: ImageRef
@@ -379,16 +377,14 @@ struct OutfitPictureTile: View {
                 // Being redone or uploaded: the old picture, dimmed, with a small progress mark where the buttons sit.
                 if redoing || uploading {
                     ProgressView().controlSize(.small).frame(width: 28, height: 28).padding(Space.s2)
-                } else if hover || asking, redo != nil || onUpload != nil {
-                    HStack(spacing: Space.s1) {
-                        if let onUpload { RIconButton(systemName: "square.and.arrow.up", help: "Upload picture (free)") { onUpload() } }
-                        if let redo {
-                            RIconButton(systemName: "arrow.clockwise", help: redo) { ask() }
-                                .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) {
-                                    OutfitRedoBox(title: OutfitRedoBox.title(OutfitPictures.viewerLabels.firstIndex(of: label) ?? 0), estimate: redo,
-                                                  price: price, onCancel: { asking = false }, onRedo: go)
-                                }
-                        }
+                }
+            }
+            // The two choices, always on the tile (owner 2026-11-17): Replace (her own picture, free) and Redo · $x (generate).
+            .overlay(alignment: .bottom) {
+                if !redoing && !uploading && (onUpload != nil || redo != nil) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Space.s2) { choices }
+                        VStack(spacing: Space.s1) { choices }
                     }
                     .padding(Space.s2)
                 }
@@ -396,7 +392,7 @@ struct OutfitPictureTile: View {
             .onHover { hover = $0 }
             .contextMenu {
                 if let redo { Button(redo) { ask() } }
-                if let onUpload { Button(OutfitPictures.uploadTitle) { onUpload() } }
+                if let onUpload { Button(OutfitPictures.replaceTitle) { onUpload() } }
                 if let onPutBack { Button(OutfitPictures.putBackTitle) { onPutBack() } }
                 if !moves.isEmpty {
                     Menu("Move to…") {
@@ -404,6 +400,22 @@ struct OutfitPictureTile: View {
                     }
                 }
             })
+    }
+
+    /// "Replace" (upload a picture; asks first) and "Redo · $x" (its box with a note and the server's price).
+    @ViewBuilder private var choices: some View {
+        if let onUpload {
+            RButton("Replace", small: true) { onUpload() }
+                .help("Replace with a picture you already have (free). You can also drop a photo here.")
+        }
+        if let redo {
+            RButton(redo, small: true) { ask() }
+                .help("Make the \(label.lowercased()) picture again")
+                .popover(isPresented: Binding(get: { asking && !inlineBox }, set: { asking = $0 }), arrowEdge: .bottom) {
+                    OutfitRedoBox(title: OutfitRedoBox.title(OutfitPictures.viewerLabels.firstIndex(of: label) ?? 0), estimate: redo,
+                                  price: price, onCancel: { asking = false }, onRedo: go)
+                }
+        }
     }
 
     private var busyWords: String? {
