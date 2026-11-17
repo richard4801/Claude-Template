@@ -50,6 +50,7 @@ final class NewSwapTests: XCTestCase {
         XCTAssertEqual(o["keepAudio"] as? Bool, true)
         XCTAssertEqual(o["range"] as? [Double], [1.5, 9])
         XCTAssertNil(o["engineModel"], "Auto: no model sent")
+        XCTAssertNil(o["resolution"], "the model's default: no resolution sent")
         let x = try XCTUnwrap(o["remix"] as? [String: Any])
         XCTAssertEqual(Set(x.keys), ["background", "character"])
         XCTAssertEqual(x["background"] as? [String: String], ["mode": "describe", "words": "a rooftop"])
@@ -68,6 +69,12 @@ final class NewSwapTests: XCTestCase {
         XCTAssertEqual(out["name"] as? String, "Linen shirt")
         XCTAssertEqual((out["image"] as? [String: String])?["url"], "/uploads/u/p.jpg")
         XCTAssertNil(out["words"])
+        // The picked resolution (owner bug 2026-11-17) goes as `resolution`; one the model doesn't make falls back.
+        d.resolution = "480p"
+        XCTAssertEqual(try json(.remix(clipId: "clip_1", draft: d))["resolution"] as? String, "480p")
+        XCTAssertEqual(d.resolutionKept(in: ["480p", "720p"]), "480p")
+        XCTAssertNil(d.resolutionKept(in: ["720p", "1080p"]))
+        XCTAssertEqual(d.resolutionKept(in: nil), "480p", "kept until the list is in")
     }
 
     func testTheKeptLineNamesWhatIsOff() {
@@ -107,6 +114,18 @@ final class NewSwapTests: XCTestCase {
         XCTAssertEqual(f["clipId"], .string("clip_9"))
         XCTAssertEqual(f["range"], .array([.number(0), .number(10)]))
         XCTAssertEqual(RemixDraftSync.apply(f, to: r.draft).changed, [])
+        // The resolution rides in the shared draft; it's kept while the model stays, dropped when Claude changes it.
+        var p = r.draft
+        p.resolution = "480p"
+        XCTAssertEqual(RemixDraftSync.fields(p, clipId: "clip_9")["resolution"], .string("480p"))
+        XCTAssertEqual(RemixDraftSync.apply(RemixDraftSync.fields(p, clipId: "clip_9"), to: p).changed, [])
+        var noRes = RemixDraftSync.fields(p, clipId: "clip_9")
+        noRes["resolution"] = nil
+        XCTAssertEqual(RemixDraftSync.apply(noRes, to: p).draft.resolution, "480p")
+        noRes["engineModel"] = .string("kling-o1")
+        let moved = RemixDraftSync.apply(noRes, to: p)
+        XCTAssertNil(moved.draft.resolution)
+        XCTAssertEqual(moved.changed, ["Model", "Resolution"])
     }
 
     func testTheEstimateAndTheModelPillDecode() throws {

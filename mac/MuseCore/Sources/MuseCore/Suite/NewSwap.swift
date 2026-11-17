@@ -111,6 +111,8 @@ public struct RemixDraft: Hashable, Sendable {
     public var range: RemixRange?
     /// The picked model (nil = Auto).
     public var engineModel: String?
+    /// The picked resolution (nil = the model's default). Cleared when the model in use doesn't make it.
+    public var resolution: String?
     public var keepAudio = true
 
     public init() {}
@@ -184,7 +186,16 @@ extension ShotRequest {
         var r = ShotRequest(mode: "remix", title: title, prompt: "", quality: quality, takes: takes, clipId: clipId, keepAudio: d.keepAudio, engineModel: d.engineModel)
         r.remix = d.toggles
         if let g = d.range { r.range = [g.from, g.to] }
+        r.resolution = d.resolution
         return r
+    }
+}
+
+extension RemixDraft {
+    /// The resolution kept only if the model in use makes it (nil otherwise: the model's default).
+    public func resolutionKept(in resolutions: [String]?) -> String? {
+        guard let r = resolution, let list = resolutions else { return resolution }
+        return list.contains(r) ? r : nil
     }
 }
 
@@ -198,6 +209,7 @@ public enum RemixDraftSync {
         if let data = try? JSONEncoder().encode(d.toggles), let v = try? JSONDecoder().decode(JSONValue.self, from: data), case .object(let m) = v, !m.isEmpty { o["remix"] = v }
         if let g = d.range { o["range"] = .array([.number(g.from), .number(g.to)]) }
         if let m = d.engineModel { o["engineModel"] = .string(m) }
+        if let r = d.resolution { o["resolution"] = .string(r) }
         return o
     }
 
@@ -240,12 +252,15 @@ public enum RemixDraftSync {
         // The part of the clip and the model
         if case .array(let a)? = raw["range"], a.count == 2, case .number(let f) = a[0], case .number(let t) = a[1], t > f { d.range = RemixRange(from: f, to: t) } else { d.range = nil }
         d.engineModel = str(raw["engineModel"])
+        // The resolution: Claude's, else the panel's while the model stays the same.
+        d.resolution = str(raw["resolution"]) ?? (d.engineModel == base.engineModel ? base.resolution : nil)
         if d.backgroundOn != base.backgroundOn || d.backgroundMode != base.backgroundMode || d.backgroundWords != base.backgroundWords || d.backgroundImage != base.backgroundImage { changed.append("Background") }
         if d.outfitOn != base.outfitOn || d.outfitKind != base.outfitKind || d.outfitId != base.outfitId || d.outfitWords != base.outfitWords || d.productImage != base.productImage { changed.append("Outfit") }
         if d.characterOn != base.characterOn || d.characterKind != base.characterKind || d.modelId != base.modelId || d.faceImage != base.faceImage { changed.append("Character") }
         if d.lookOn != base.lookOn || d.lookWords != base.lookWords { changed.append("Look & light") }
         if d.range != base.range { changed.append("Trim") }
         if d.engineModel != base.engineModel { changed.append("Model") }
+        if d.resolution != base.resolution { changed.append("Resolution") }
         return (d, changed)
     }
 }
