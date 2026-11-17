@@ -78,7 +78,10 @@ public protocol MuseAPI: AnyObject, Sendable {
     /// "Add face close-ups": an older outfit's missing face close-ups, from her base faces and its front (paid).
     func addOutfitFaces(id: String, imageModel: String?) async throws -> OutfitFill
     /// Redo one of its 7 pictures (`OutfitPictures.keys`: front, tq, side, back, face, faceTq, profile; paid).
-    func redoOutfit(id: String, picture: String, imageModel: String?) async throws -> OutfitFill
+    /// `note`: the person's one-off words for this picture ("sneakers on"), sent as an extra line of its prompt.
+    func redoOutfit(id: String, picture: String, imageModel: String?, note: String?) async throws -> OutfitFill
+    /// What redoing that picture costs (the server's dryRun), before anything is made.
+    func redoOutfitPrice(id: String, picture: String, imageModel: String?) async throws -> Double
     /// Move pictures between its 7 slots (each move swaps `from` and `to`; free; owner or maker).
     func reorderOutfit(id: String, moves: [OutfitMove]) async throws -> OutfitReorder
 
