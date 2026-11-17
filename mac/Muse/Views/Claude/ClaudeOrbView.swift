@@ -27,6 +27,7 @@ struct ClaudeOrbView: View {
         let now = Date().timeIntervalSinceReferenceDate
         let fps = visibility.visible && live ? orb.frameRate(at: now, reduceMotion: reduceMotion) : 0
         TimelineView(.animation(minimumInterval: 1 / max(fps, 1), paused: fps == 0)) { ctx in
+            let _ = SnapshotRunner.noteOrbFrame() // review mode only: the idle check counts the frames drawn
             let time = ctx.date.timeIntervalSinceReferenceDate
             let look = orb.look(at: time, reduceMotion: reduceMotion)
             let state = orb.state(at: time)

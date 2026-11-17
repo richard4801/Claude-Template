@@ -219,7 +219,19 @@ Checked and fine: heartbeats (Claude Code, Blender relay, 20 s network calls), E
 
 MuseCore on Linux (Swift 6.0.3): 1046 tests, 0 failures (26 skipped). The 7 new ones are in `IdlePerfTests` (coalescer order and equivalence, the orb's chunk gap, the bounded memo, the cache matching the filter and parser).
 
-After numbers: from the first CI run of this branch (filled in by the report to the coordinator).
+### After (CI run 709 at a394792, all green)
+
+| Check | Build 704 | Run 709 |
+|---|---|---|
+| Idle, every page (Home after launch, Library, Queue, Models, Video suite Shot, Photo composer, Edit home, Settings) | not measured | **0.0 %** median, 0.5–0.6 main run-loop wake-ups/s |
+| Claude panel open, idle / after a turn | not measured | **0.0 % / 0.1 %** |
+| Window hidden | not measured | **0.0 %** |
+| Edit idle (big edit / real edit / after playback) | 0 % / 0 % / 0 % | 0 % / 0 % / 0 % |
+| Edit paused while Claude's reply streams | 33 % (single window) | 37 % (median of 2 s windows) |
+| Edit playback (big / real), playback while streaming | 103 % / 96 %, 113 % | 94 % / 97 %, 119 % |
+| Filmstrips and waveforms after open | 27 s, 40 % average | 33 s, 43 % average |
+
+"Claude panel open, Claude working" also read 0.0 %. That line sets the orb and edge to the working state but streams no reply text, so the integrator asked to confirm it really draws. The next commit logs the orb's state, its frame rate, whether the window counts as visible, and the orb frames drawn while measured. The streaming cost proper is "Edit paused while Claude's reply streams" (37 %); it shows the chat side isn't the dominant cost there now, and the Edit path is measured next.
 
 ### Edit while Claude patches (second commit)
 
