@@ -68,13 +68,15 @@ public enum RecreateDeviceFetch {
         return a
     }
 
-    /// The format: one mp4 file with sound when the Mac has no ffmpeg to merge with (the standalone yt-dlp has none),
-    /// else the best mp4 up to 1080p, merged into mp4.
+    /// The format: one file with sound when the Mac has no ffmpeg to merge with (the standalone yt-dlp has none), else
+    /// the best video + audio merged into mp4. Which one is picked is `sort`'s job: never a `height<=1080` filter, which
+    /// threw away every vertical original (720x1280 is 1280 tall) and kept the platform's 540x960 (owner 2026-11-17).
     public static func format(ffmpeg: String?) -> String {
-        ffmpeg == nil
-            ? "b[ext=mp4][height<=1080]/b[ext=mp4]/b[height<=1080]/b"
-            : "b[ext=mp4][height<=1080]/bv*[ext=mp4][height<=1080]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b"
+        ffmpeg == nil ? "b" : "bv*+ba/b"
     }
+
+    /// The order formats are ranked in: the largest up to 1080 on the SHORT side (`res`), mp4 / m4a first.
+    public static let sort = "res:1080,ext:mp4:m4a"
 
     /// The download's match filters (a backstop: the metadata is checked first). Filters joined with & must all pass;
     /// separate `--match-filter` flags pass if any one does. `?` lets a missing field pass (TikTok and Instagram don't
@@ -88,7 +90,7 @@ public enum RecreateDeviceFetch {
     /// Step 1: the video's metadata (one request to the platform), with the same format choice as the download so the
     /// reported size is the file's.
     public static func infoArgs(url: String, ffmpeg: String? = nil, jsRuntime: String? = nil) -> [String] {
-        baseArgs(jsRuntime: jsRuntime) + ["-f", format(ffmpeg: ffmpeg), "--skip-download", "--dump-single-json", "--", url]
+        baseArgs(jsRuntime: jsRuntime) + ["-f", format(ffmpeg: ffmpeg), "-S", sort, "--skip-download", "--dump-single-json", "--", url]
     }
 
     /// Step 2: the download from the metadata already read (`--load-info-json`: the page isn't fetched again), capped
@@ -96,7 +98,7 @@ public enum RecreateDeviceFetch {
     public static func downloadArgs(infoFile: String, dir: String, limits: Limits = Limits(), ffmpeg: String? = nil, jsRuntime: String? = nil) -> [String] {
         var a = baseArgs(jsRuntime: jsRuntime) + ["--no-part", "--no-mtime"]
         for f in matchFilters(limits) { a += ["--match-filter", f] }
-        a += ["--max-filesize", String(limits.maxBytes), "-f", format(ffmpeg: ffmpeg)]
+        a += ["--max-filesize", String(limits.maxBytes), "-f", format(ffmpeg: ffmpeg), "-S", sort]
         if let ffmpeg { a += ["--ffmpeg-location", ffmpeg, "--merge-output-format", "mp4"] }
         a += ["-o", (dir as NSString).appendingPathComponent("video.%(ext)s"), "--load-info-json", infoFile]
         return a

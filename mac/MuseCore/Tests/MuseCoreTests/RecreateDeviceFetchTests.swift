@@ -36,14 +36,17 @@ final class RecreateDeviceFetchTests: XCTestCase {
         XCTAssertEqual(Array(a.suffix(2)), ["--load-info-json", "/tmp/x/info.json"])
         XCTAssertTrue(a.contains("--no-cookies-from-browser"))
         // No ffmpeg: single-file formats only, nothing to merge.
-        XCTAssertEqual(a[a.firstIndex(of: "-f")! + 1], "b[ext=mp4][height<=1080]/b[ext=mp4]/b[height<=1080]/b")
+        XCTAssertEqual(a[a.firstIndex(of: "-f")! + 1], "b")
+        XCTAssertEqual(a[a.firstIndex(of: "-S")! + 1], "res:1080,ext:mp4:m4a")
+        XCTAssertFalse(a.joined(separator: " ").contains("height<="))
         XCTAssertFalse(a.contains("--merge-output-format"))
         XCTAssertFalse(a.contains("--ffmpeg-location"))
         // With ffmpeg: video and sound may be merged into mp4.
         let m = RecreateDeviceFetch.downloadArgs(infoFile: "/i.json", dir: "/d", ffmpeg: "/opt/homebrew/bin/ffmpeg")
         XCTAssertEqual(m[m.firstIndex(of: "--merge-output-format")! + 1], "mp4")
         XCTAssertEqual(m[m.firstIndex(of: "--ffmpeg-location")! + 1], "/opt/homebrew/bin/ffmpeg")
-        XCTAssertTrue(m[m.firstIndex(of: "-f")! + 1].contains("bv*[ext=mp4][height<=1080]+ba[ext=m4a]"))
+        XCTAssertEqual(m[m.firstIndex(of: "-f")! + 1], "bv*+ba/b")
+        XCTAssertEqual(m[m.firstIndex(of: "-S")! + 1], "res:1080,ext:mp4:m4a")
         // The server's caps.
         let c = RecreateDeviceFetch.downloadArgs(infoFile: "/i.json", dir: "/d", limits: .init(maxSec: 45, maxMb: 50))
         XCTAssertEqual(c[c.firstIndex(of: "--max-filesize")! + 1], String(50 * 1_048_576))
