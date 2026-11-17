@@ -117,3 +117,5 @@ This build is unsigned. To ship it outside the App Store you need:
    ```
 
 In CI, store the certificate (.p12) and the notary credentials as repository secrets and import them into a temporary keychain before archiving.
+
+<!-- CI control build 41 (2026-11-17): release only, to test whether the step 7 gate is flaky. Never merged. -->
