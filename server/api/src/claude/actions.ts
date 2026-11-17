@@ -287,6 +287,21 @@ export const ACTION_TOOLS: GatedTool[] = [
       const lines = e.changed.map(k => (e.after[k] ? `${SLOT_WORDS[k] ?? k} ← the picture now in ${SLOT_WORDS[from(k)] ?? from(k)}` : `${SLOT_WORDS[k] ?? k} becomes empty`));
       return { summary: `Reorder the outfit's pictures: ${lines.join('; ')}`, method: 'POST', url: `/v1/outfits/${o}/reorder`, body: { moves } };
     } }),
+  gated({ name: 'outfit_set_slot', title: 'Put a picture in an outfit slot', scope: 'edit:write', gate: 'settings',
+    description: 'Puts a picture the person already has into one of an outfit\'s 7 slots, empty or filled, instead of making it (Upload picture on the outfit): slot front, tq (¾), side, back (body) or face, faceTq, profile (face close-ups). The picture: image (a ref of an upload or a Library still of this studio, e.g. one the person attached in chat) or uploadId. It must be a photo (JPEG, PNG, WebP, HEIC); it is saved upright as a JPEG and the slot is marked as an upload. A picture it replaces is kept in the outfit\'s replaced list; sending that picture as image puts it back. Free, but it changes the stored outfit: without confirm it says what it replaces; with confirm the person approves it.',
+    props: { outfitId: str('The outfit', 80), slot: { type: 'string', enum: [...OUTFIT_SLOTS] },
+      image: { type: 'object', additionalProperties: false, description: 'The picture: { url } of an upload or Library still', properties: { url: str('Its link', 2000), asset: str('A bundled picture', 100) } },
+      uploadId: str('Or an upload id (presign + confirm)', 100) },
+    required: ['outfitId', 'slot'],
+    plan: async (env, a) => {
+      const o = enc(id(a.outfitId, 'outfitId')), slot = String(a.slot ?? '');
+      const pic = compact({ image: a.image && typeof a.image === 'object' ? a.image : undefined, uploadId: typeof a.uploadId === 'string' ? a.uploadId : undefined });
+      const e = await appCall(env.ctx, env.user, 'POST', `/v1/outfits/${o}/slot`, { slot, ...pic, dryRun: true }) as { replaces: unknown; restores: boolean };
+      const words = SLOT_WORDS[slot] ?? slot;
+      const summary = e.restores ? `Put the earlier picture back in the outfit's ${words} slot` + (e.replaces ? ' (the current one is kept to put back)' : '')
+        : e.replaces ? `Replace the outfit's ${words} picture with this one (the current one is kept to put back)` : `Put this picture in the outfit's empty ${words} slot`;
+      return { summary, method: 'POST', url: `/v1/outfits/${o}/slot`, body: { slot, ...pic } };
+    } }),
   gated({ name: 'outfit_make', title: 'Make a new outfit', scope: 'edit:write', gate: 'spend',
     description: 'Makes a new outfit for a character (7 pictures: front, ¾, side, back, and 3 face close-ups with its own hair, make-up and face accessories), as the Outfits sheet does: mode describe (from the description), photo (from product photos in images) or own. Name it. Paid: without confirm it gives the price.',
     props: { modelId: str('The character', 80), name: str('The outfit\'s name', 80), mode: { type: 'string', enum: ['describe', 'photo', 'own'] },

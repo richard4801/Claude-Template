@@ -295,6 +295,13 @@
       "when": 1794897415019,
       "tag": "0041_outfit_photos",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794946201389,
+      "tag": "0042_outfit_slot_sources",
+      "breakpoints": true
     }
   ]
 }
