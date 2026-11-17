@@ -106,11 +106,11 @@ describe('model choice · API (mock Suite, simulated GPU, fake Replicate)', () =
   });
 
   it('recast, extend, guide on any model: MUSE adapts and says what it did (owner 2026-11-12)', async () => {
-    // A one-person Recast on Veo runs as a New Swap with her as Character; Veo gets frames from the clip.
+    // A one-person Recast runs as a New Swap with her as Character. Veo takes only frames, never a picture of her, so it
+    // is refused before any charge (owner 2026-11-17: frames of the clip's person can never become her).
     const recast = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId: 'c_swap', cast: [{ characterId: char.id }], engineModel: 'veo-3.1-lite' });
-    expect(recast.status, JSON.stringify(recast.body)).toBe(200);
-    expect(recast.body).toMatchObject({ mode: 'remix', remix: { route: 'frames' } });
-    expect(recast.body.warnings[0]).toBe('Veo 3.1 Lite · Replicate isn’t a Recast model: MUSE runs it as a New Swap with her as Character');
+    expect(recast.status, JSON.stringify(recast.body)).toBe(400);
+    expect(recast.body.error).toMatch(/can’t put her in: it takes no pictures of her/);
     // Several people need a model that tells them apart.
     const two = await owner.req('POST', '/v1/suite/shots/estimate', { mode: 'recast', clipId: 'c_swap', cast: [{ characterId: char.id, personHint: 'left' }, { characterId: char.id, personHint: 'right' }], engineModel: 'veo-3.1-lite' });
     expect(two.body.error).toMatch(/can’t tell several people in a clip apart/);
