@@ -61,6 +61,8 @@ extension SnapshotRunner {
                 capture(dir.appendingPathComponent("mac_\(theme.rawValue)_outfit_redo_veil.png"))
                 store.remakingOutfit[o.id] = nil
                 store.closeOutfit()
+                // Let the close finish before the next theme opens it again (run 762: theme C caught the Models page).
+                try? await Task.sleep(for: .seconds(1))
             }
         }
         store.themeID = .a
