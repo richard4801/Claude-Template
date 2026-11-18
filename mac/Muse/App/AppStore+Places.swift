@@ -93,6 +93,36 @@ extension AppStore {
         }
     }
 
+    /// Save to Mac (ci_2cc7832459f5): the place photo in original quality to ~/Downloads/MUSE, never over another file,
+    /// as Library's Download saves a take. A bundled demo picture is rendered as a PNG.
+    func savePlacePhoto(_ l: SuiteLocation, index: Int) {
+        guard l.images.indices.contains(index) else { return }
+        let ref = l.images[index].image
+        let number = index + 1
+        func done(_ file: URL?) {
+            showToast(file == nil ? "Couldn't save the photo to Downloads" : "Saved to Downloads › MUSE", action: file == nil ? nil : "Show in Finder") {
+                if let file { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+            }
+        }
+        if let u = ref.url, let src = URL(string: u), let scheme = src.scheme, ["http", "https", "file"].contains(scheme) {
+            let name = SaveFileName.forPlacePhoto(place: l.name, id: l.id, number: number, ext: src.pathExtension)
+            perform { [self] in
+                done(try await downloadVideo(src, fileName: name, what: "photo"))
+            }
+            return
+        }
+        let fm = FileManager.default
+        guard let dir = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE", isDirectory: true) else { return done(nil) }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dst = SaveFileName.unique(SaveFileName.forPlacePhoto(place: l.name, id: l.id, number: number, ext: "png"), in: dir)
+        let size = CGSize(width: 1600, height: 1200)
+        let r = ImageRenderer(content: MuseImage(ref: ref).frame(width: size.width, height: size.height))
+        r.proposedSize = ProposedViewSize(size)
+        guard let cg = r.cgImage, let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]),
+              (try? png.write(to: dst, options: .withoutOverwriting)) != nil else { return done(nil) }
+        done(dst)
+    }
+
     func removePlacePhoto(_ l: SuiteLocation, index: Int) async {
         do { keep(try await api.removePlaceImage(id: l.id, index: index)) } catch { placeError(error, "The photo wasn't removed · try again") }
     }

@@ -54,6 +54,12 @@ public enum SaveFileName {
         base(title: t.title.isEmpty ? t.caption : t.title, prompt: t.prompt, id: t.id, index: t.index, date: t.createdAt) + "." + ext
     }
 
+    /// A place photo's file (Places tab · Save to Mac): "mias-apartment-3f2a1b9c-2.jpg", the place, its id and the photo's
+    /// number (1-based).
+    public static func forPlacePhoto(place: String, id: String, number: Int, ext: String) -> String {
+        base(title: place, id: id, index: number) + "." + (ext.isEmpty ? "jpg" : ext.lowercased())
+    }
+
     /// A name safe to write: no path separators or characters Finder dislikes, not hidden, not empty, at most 120 characters
     /// before the extension.
     public static func sanitized(_ name: String, fallback: String = "muse") -> String {

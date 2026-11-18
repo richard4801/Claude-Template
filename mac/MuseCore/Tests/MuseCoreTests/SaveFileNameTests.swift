@@ -27,6 +27,15 @@ final class SaveFileNameTests: XCTestCase {
         XCTAssertEqual(SaveFileName.base(title: "Pier", id: "", index: 3, date: 0), "pier-3")
     }
 
+    /// Places tab · Save to Mac (ci_2cc7832459f5): the place, its id and the photo's number; never a hidden or path name.
+    func testPlacePhotoNames() {
+        let n = SaveFileName.forPlacePhoto(place: "Mia's café", id: "loc_demo_cafe", number: 2, ext: "JPG")
+        XCTAssertTrue(n.hasSuffix("-2.jpg"), n)
+        XCTAssertFalse(n.contains("/"))
+        XCTAssertNotEqual(n, SaveFileName.forPlacePhoto(place: "Mia's café", id: "loc_demo_cafe", number: 3, ext: "jpg"))
+        XCTAssertTrue(SaveFileName.forPlacePhoto(place: "", id: "", number: 1, ext: "").hasSuffix(".jpg"))
+    }
+
     func testSanitizedNeverEscapesTheFolder() {
         XCTAssertEqual(SaveFileName.sanitized("a/b:c.mp4"), "a-b-c.mp4")
         XCTAssertEqual(SaveFileName.sanitized("..hidden.mp4"), "hidden.mp4")

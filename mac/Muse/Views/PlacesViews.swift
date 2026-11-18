@@ -98,6 +98,8 @@ struct PlaceDetail: View {
     @State private var editingWords = false
     @State private var making: PlacePhotoMode?
     @State private var dropTargeted = false
+    /// The photo under the pointer: its Save to Mac button shows (always in review shots).
+    @State private var hoveredPhoto: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -176,14 +178,26 @@ struct PlaceDetail: View {
                     MediaFrame(ref: img.image, ratio: 4.0 / 3.0) {
                         if i == place.cover { StateTag("Cover", .onMedia) }
                     }
+                    // Save to Mac (ci_2cc7832459f5): on the photo while the pointer is over it, and in its menu.
+                    .overlay(alignment: .bottomTrailing) {
+                        if hoveredPhoto == i || SnapshotRunner.dir != nil {
+                            OutfitTileButton(icon: "download-simple", title: "Save to Mac") { store.savePlacePhoto(place, index: i) }
+                                .help("Save this photo to Downloads › MUSE")
+                                .padding(Space.s2)
+                        }
+                    }
                     Text(img.source.caption).scaled(t.scale.caption, t.roles.ink2).lineLimit(1)
                 }
+                .onHover { hoveredPhoto = $0 ? i : (hoveredPhoto == i ? nil : hoveredPhoto) }
                 .contextMenu {
+                    Button("Save to Mac") { store.savePlacePhoto(place, index: i) }
                     if i != place.cover { Button("Make cover") { Task { await store.updatePlace(place, PlacePatch(cover: i)) } } }
+                    Divider()
                     Button("Remove photo", role: .destructive) { Task { await store.removePlacePhoto(place, index: i) } }
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(img.source.caption)\(i == place.cover ? ", cover" : "")")
+                .accessibilityAction(named: Text("Save to Mac")) { store.savePlacePhoto(place, index: i) }
                 .accessibilityAction(named: Text("Make cover")) { Task { await store.updatePlace(place, PlacePatch(cover: i)) } }
                 .accessibilityAction(named: Text("Remove photo")) { Task { await store.removePlacePhoto(place, index: i) } }
             }

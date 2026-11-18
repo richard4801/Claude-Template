@@ -740,7 +740,7 @@ extension AppStore {
 
     /// Downloads `src` into `folder` (default ~/Downloads/MUSE) as `fileName`, or "name (2).ext" when that exists: never
     /// over another file (ci_7972a1d67e72).
-    func downloadVideo(_ src: URL, fileName: String, folder: URL? = nil) async throws -> URL {
+    func downloadVideo(_ src: URL, fileName: String, folder: URL? = nil, what: String = "video") async throws -> URL {
         let fm = FileManager.default
         guard let dir = folder ?? fm.urls(for: .downloadsDirectory, in: .userDomainMask).first?.appendingPathComponent("MUSE", isDirectory: true) else {
             throw ApiError("export_failed", "Can't find the Downloads folder")
@@ -750,7 +750,7 @@ extension AppStore {
         do {
             tmp = try await URLSession.shared.download(from: src).0
         } catch {
-            throw ApiError("download_failed", "Couldn't download the video")
+            throw ApiError("download_failed", "Couldn't download the \(what)")
         }
         return try SaveFileName.moveUnique(tmp, named: fileName, into: dir)
     }
