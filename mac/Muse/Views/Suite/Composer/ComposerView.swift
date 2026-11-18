@@ -126,6 +126,7 @@ struct ComposerView: View {
         .onChange(of: s.swapVariant) { _, _ in store.suiteComposerChanged() }
         .onChange(of: store.clip?.id) { _, _ in store.suiteComposerChanged() }
         .onChange(of: s.composerSlots.slots) { _, _ in store.suiteComposerChanged() }
+        .onChange(of: s.photo) { _, _ in store.suiteComposerChanged() } // Photo's Size, Photos, preset and references
         // Saved rigs for the Setup rail's Rigs row; a model's default rig when she is @-mentioned (fills Auto rows only).
         .task(id: store.serverKey) { await store.loadSavedRigs() }
         .onChange(of: s.composer.tokens.characterId) { _, new in

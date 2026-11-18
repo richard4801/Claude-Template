@@ -51,7 +51,8 @@ public enum ComposerDrafts {
         }
         if let s = d.sent { extra["sent"] = s } // images sent (the server reads the draft's choice)
         if d.tool == .photo {
-            return SuiteDraft(tool: "photo", count: photo?.count, rig: SuiteRig(d.settings), tokens: encode(d.tokens), extra: extra)
+            // Size and Photos as the pills show them, so a sync never puts back a shape or count Claude changed.
+            return SuiteDraft(tool: "photo", aspect: photo?.shownAspect, count: photo?.count, rig: SuiteRig(d.settings), tokens: encode(d.tokens), extra: extra)
         }
         return SuiteDraft(tool: d.tool.rawValue, quality: d.quality, aspect: d.aspect, duration: Double(d.duration), takes: d.takes, sound: d.sound,
                           speaking: d.speaking.value, rig: SuiteRig(d.settings), tokens: encode(d.tokens), extra: extra)
@@ -62,7 +63,7 @@ public enum ComposerDrafts {
         var out = d
         if let t = ComposerTool(rawValue: s.tool) { out.tool = t }
         if let q = s.quality { out.quality = q }
-        if let a = s.aspect { out.aspect = a }
+        if let a = s.aspect, s.tool != "photo" { out.aspect = a } // Photo's size is its Size pill (PhotoDraft.aspect)
         if let du = s.duration { out.duration = Int(du.rounded()) }
         if let tk = s.takes { out.takes = tk }
         if let so = s.sound { out.sound = so }

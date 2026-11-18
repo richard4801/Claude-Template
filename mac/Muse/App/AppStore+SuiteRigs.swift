@@ -18,6 +18,7 @@ extension AppStore {
         openTool(restored.tool)
         if restored.tool == .photo {
             if let n = d.count { suite.photo.count = n }
+            if let a = d.aspect { suite.photo.aspect = a == "9:16" ? nil : a }
             if case .string(let p)? = d.extra["presetId"] { suite.photo.presetId = p }
         }
         if restored.tokens.characterId != suite.composer.tokens.characterId { suite.restoredCharacterId = restored.tokens.characterId }

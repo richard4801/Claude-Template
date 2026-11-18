@@ -30,6 +30,8 @@ final class SuiteClaudeBridge {
     var revision = 0
     /// The composer as the shared draft last had it (nil: not synced yet). The owner's edits are what differs from it.
     var synced: ComposerDraft?
+    /// Photo's own pills (Size, Photos) as the shared draft last had them; the owner's changes are what differs.
+    var syncedPhoto: PhotoDraft?
     /// The screen (SuiteScreen: the request Generate would send and every input) as last sent, without its time.
     var syncedScreen: JSONValue?
     /// What the composer couldn't take from Claude's last draft, with the reasons.
@@ -303,13 +305,22 @@ extension AppStore {
         }
         let r = SuiteAssistDraft.apply(draft, to: before, options: suiteDraftOptions)
         var changed = remixChanged + r.changed
+        // Photo: Claude's Size and Photos go to the Photo pills (ci_90b52f873b5a: 1:1 · 2 photos were put back).
+        let photoBefore = suite.photo
+        var rejected = r.rejected
+        if before.tool == .photo {
+            let p = SuiteAssistDraft.applyPhoto(draft, to: suite.photo, aspects: photoAspects.map(\.id))
+            if p.photo != suite.photo { suite.photo = p.photo }
+            changed += p.changed
+            rejected += p.rejected
+        }
         // Reference images Claude added (a pose, style, location or outfit): chips in the composer.
         let refs = SuiteAssistDraft.references(d)
         if refs != refsBefore {
             c.references = refs
             if refs.count > refsBefore.count || !refs.isEmpty { changed.append("References") }
         }
-        c.rejected = r.rejected
+        c.rejected = rejected
         // Swap / Recast's Background, set by Claude (suite_set_draft background): the panel takes it like the model.
         let swapBefore = suite.swap
         if before.tool == .swap || before.tool == .recast, case .string(let b)? = d.raw["background"], let bg = SwapBackground(rawValue: b), bg != suite.swap.background {
@@ -329,6 +340,7 @@ extension AppStore {
             showToast(text, action: "Undo") { [weak self] in
                 guard let self else { return }
                 self.suite.composer = before
+                self.suite.photo = photoBefore
                 self.suite.swap = swapBefore
                 self.suite.remix = remixBefore
                 self.suite.swapVariant = variantBefore
@@ -340,8 +352,9 @@ extension AppStore {
             }
         }
         c.synced = suite.composer
+        c.syncedPhoto = suite.photo
         // Values the composer refused: the shared draft goes back to what the composer shows, so Claude sees it.
-        if !r.rejected.isEmpty { c.synced = nil; suiteComposerChanged() }
+        if !rejected.isEmpty { c.synced = nil; c.syncedPhoto = nil; suiteComposerChanged() }
     }
 
     /// New Swap: the clip Claude set as the video (GET /v1/clips/{id}).
@@ -512,10 +525,13 @@ extension AppStore {
         let c = suite.claude
         guard let api = suiteAssistAPI, let a = c.assist else { return }
         let mine = suite.composer
+        let minePhoto = suite.photo
         let screenKey = suiteScreen(at: nil)
-        guard mine != c.synced || c.refsDirty || screenKey != c.syncedScreen else { return }
-        // The draft's references ride along (the composer doesn't hold them); a removed one is left out.
-        var draft = SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(mine))
+        let photoDirty = mine.tool == .photo && minePhoto != c.syncedPhoto
+        guard mine != c.synced || photoDirty || c.refsDirty || screenKey != c.syncedScreen else { return }
+        // The draft's references ride along (the composer doesn't hold them); a removed one is left out. Photo's draft
+        // carries its Size and Photos pills.
+        var draft = SuiteAssistDraft.with(c.references, in: ComposerDrafts.draft(mine, photo: mine.tool == .photo ? minePhoto : nil))
         // New Swap (beta): the draft is the remix (tool "remix", the clip, the toggles, the trim and the model).
         if isNewSwap { for (k, v) in RemixDraftSync.fields(suite.remix, clipId: clip?.id) { draft.raw[k] = v } }
         // Everything on screen: the clip, guides and slot pictures, the request Generate would send (server suite/screen.ts).
@@ -525,6 +541,7 @@ extension AppStore {
             c.assist = n
             c.revision = max(c.revision, n.revision)
             c.synced = mine
+            c.syncedPhoto = minePhoto
             c.syncedScreen = screenKey
             c.refsDirty = false
             updateSuiteAsk(n)
@@ -537,7 +554,12 @@ extension AppStore {
             c.revision = max(c.revision, latest.revision)
             updateSuiteAsk(latest)
             if merged != suite.composer { suite.composer = merged }
+            if mine.tool == .photo, let d = latest.draft, suite.photo == (c.syncedPhoto ?? suite.photo) {
+                let p = SuiteAssistDraft.applyPhoto(d, to: suite.photo, aspects: photoAspects.map(\.id)).photo
+                if p != suite.photo { suite.photo = p }
+            }
             c.synced = theirs
+            c.syncedPhoto = suite.photo
             await pushSuiteDraft(attempt: attempt + 1)
         } catch {
             // Not shown: the next edit tries again, and each chat message carries the composer anyway.
@@ -591,7 +613,8 @@ extension AppStore {
             inputs = SuiteScreen.inputs(suite.composerSlots.slots) + SuiteScreen.photoReferences(suite.photo.references)
             request = nil
             let p = suite.photo
-            settings = ["count": .number(Double(p.count)), "preset": p.presetId.map { .string($0) } ?? .null, "photoModel": p.imageModel.map { .string($0) } ?? .null]
+            settings = ["count": .number(Double(p.count)), "aspect": .string(p.shownAspect), "preset": p.presetId.map { .string($0) } ?? .null,
+                        "photoModel": p.imageModel.map { .string($0) } ?? .null]
         default:
             if let g = SuiteScreen.guide(suite.composer.directed) { inputs.append(g) }
             if tool == .extend, let src = suite.composer.extend.source {

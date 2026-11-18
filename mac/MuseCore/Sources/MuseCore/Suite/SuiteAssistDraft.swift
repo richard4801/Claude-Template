@@ -77,7 +77,8 @@ public enum SuiteAssistDraft {
                 refuse("Quality", q, "isn't one of the composer's qualities")
             }
         }
-        if let a = draft.aspect, a != current.aspect {
+        // Photo's size is the Size pill (PhotoDraft.aspect, applyPhoto), not the video bar's shape.
+        if tool != .photo, let a = draft.aspect, a != current.aspect {
             let shapes = cat.aspectRatios.isEmpty ? ComposerBar.shapes : cat.aspectRatios
             if shapes.contains(a) { out.aspect = a } else { refuse("Shape", a, "isn't offered; use \(shapes.joined(separator: ", "))") }
         }
@@ -247,6 +248,36 @@ public enum SuiteAssistDraft {
             if let s = p.text, let last = joined.last?.text { joined[joined.count - 1] = .text(last + s) } else { joined.append(p) }
         }
         return PromptTokens(joined)
+    }
+
+    // MARK: Apply (Draft → Photo's own pills)
+
+    /// Claude's Photo draft laid over the Photo pills: Size (`aspect`) and Photos (`count`). Values the pills don't offer
+    /// are left as they were, with the reason. `aspects`: the Size pill's shapes (the estimate's, else PhotoDraft.aspects).
+    public static func applyPhoto(_ draft: SuiteDraft, to current: PhotoDraft, aspects: [String])
+        -> (photo: PhotoDraft, changed: [String], rejected: [SuiteDraftRejection]) {
+        var out = current
+        var changed: [String] = []
+        var rejected: [SuiteDraftRejection] = []
+        guard draft.tool == "photo" else { return (current, [], []) }
+        let shapes = aspects.isEmpty ? PhotoDraft.aspects : aspects
+        if let a = draft.aspect, a != current.shownAspect {
+            if shapes.contains(a) {
+                out.aspect = a == "9:16" ? nil : a
+                changed.append("Size")
+            } else {
+                rejected.append(SuiteDraftRejection(field: "Size", value: a, reason: "isn't offered; use \(shapes.joined(separator: ", "))"))
+            }
+        }
+        if let n = draft.count, n != current.count {
+            if PhotoDraft.counts.contains(n) {
+                out.count = n
+                changed.append("Photos")
+            } else {
+                rejected.append(SuiteDraftRejection(field: "Photos", value: "\(n)", reason: "is outside 1–\(PhotoRequest.maxCount)"))
+            }
+        }
+        return (out, changed, rejected)
     }
 
     // MARK: What changed

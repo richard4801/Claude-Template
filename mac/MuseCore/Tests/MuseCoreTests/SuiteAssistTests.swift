@@ -72,6 +72,34 @@ final class SuiteAssistTests: XCTestCase {
 
     // MARK: The composer patch
 
+    /// ci_90b52f873b5a: Claude's Photo draft (1:1, 2 photos) goes to Photo's own Size and Photos pills, not the video bar,
+    /// and the Photo draft the Mac syncs carries them, so a sync never puts back 9:16 or its own count.
+    func testClaudesPhotoSizeAndCountReachThePhotoPills() async throws {
+        let a = try await api()
+        let o = try await options(a)
+        let composer = ComposerDraft(tool: .photo)
+        let d = SuiteDraft(tool: "photo", aspect: "1:1", count: 2)
+        // The video bar's shape is left alone on Photo.
+        XCTAssertEqual(SuiteAssistDraft.apply(d, to: composer, options: o).composer.aspect, composer.aspect)
+        let r = SuiteAssistDraft.applyPhoto(d, to: PhotoDraft(), aspects: [])
+        XCTAssertEqual(r.photo.shownAspect, "1:1")
+        XCTAssertEqual(r.photo.count, 2)
+        XCTAssertEqual(r.changed, ["Size", "Photos"])
+        XCTAssertTrue(r.rejected.isEmpty)
+        // 9:16 is the pill's default (nil); values the pills don't offer stay, with the reason.
+        XCTAssertNil(SuiteAssistDraft.applyPhoto(SuiteDraft(tool: "photo", aspect: "9:16"), to: r.photo, aspects: []).photo.aspect)
+        let bad = SuiteAssistDraft.applyPhoto(SuiteDraft(tool: "photo", aspect: "21:9", count: 9), to: r.photo, aspects: ["9:16", "1:1"])
+        XCTAssertEqual(bad.photo, r.photo)
+        XCTAssertEqual(bad.rejected.map(\.field), ["Size", "Photos"])
+        // Another tool's draft changes nothing here.
+        XCTAssertEqual(SuiteAssistDraft.applyPhoto(SuiteDraft(tool: "shot", aspect: "1:1", count: 2), to: PhotoDraft(), aspects: []).photo, PhotoDraft())
+        // The Mac's Photo draft carries what the pills show.
+        let sent = ComposerDrafts.draft(composer, photo: r.photo)
+        XCTAssertEqual(sent.aspect, "1:1")
+        XCTAssertEqual(sent.count, 2)
+        XCTAssertEqual(ComposerDrafts.draft(composer, photo: PhotoDraft()).aspect, "9:16")
+    }
+
     func testAValidDraftFillsTheComposerAndNamesTheRows() async throws {
         let o = try await options(try await api())
         let character = try XCTUnwrap(o.characters.first)

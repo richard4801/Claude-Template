@@ -50,5 +50,11 @@ final class ComposerDraftsTests: XCTestCase {
         XCTAssertEqual(draft.tool, "photo")
         XCTAssertEqual(draft.count, 3)
         XCTAssertEqual(draft.extra["presetId"], .string("tpl_window"))
+        XCTAssertEqual(draft.aspect, "9:16", "the Size pill as shown")
+        // Reuse settings: a Photo take's size goes back to the Size pill, never the video bar's shape.
+        var video = ComposerDraft()
+        video.aspect = "16:9"
+        p.aspect = "1:1"
+        XCTAssertEqual(ComposerDrafts.restore(ComposerDrafts.draft(d, photo: p), into: video).aspect, "16:9")
     }
 }
