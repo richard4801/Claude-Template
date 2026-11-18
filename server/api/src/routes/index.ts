@@ -48,7 +48,7 @@ import { previewLayouts } from '../suite/previewLayouts.js'; // the take viewer'
 import { placeSetting, resolvePlace } from '../suite/locations.js';
 import { freePhotoPrompt, PhotoRequestSchema, photoAspects, photoButton, photoSize, photoFilter, photoRigCheck, stillRig, type StillRig } from '../suite/photo.js'; // AI suite Photo tool (workstream 3)
 import { draftOf, RigSchema, type Draft } from '../suite/drafts.js';
-import { assistOf, liveClaudeReferences, referencesOf } from '../suite/assist.js';
+import { assistOf, heldPhoto, liveClaudeReferences, referencesOf } from '../suite/assist.js';
 import { modelChoice } from '../engines/service.js'; // WS13: model choice everywhere
 import type { StepOverrides } from '../images/steps.js'; // WS13
 import { mediaProfile } from '../lib/resources.js';
@@ -1285,8 +1285,11 @@ export async function registerRoutes(app: FastifyInstance, ctx: Ctx) {
   // ------------------------------------------------------------------ AI suite · Photo tool (workstream 3)
   // Photoshoot on the composer (plans/api.md "Photo tool"): the shoot pipeline above with the composer's rig compiled for
   // a still (suite/photo.ts). Same count, pricing and bill as a shoot; `/v1/shoots` stays for older clients.
-  const photoPlan = async (u: AuthUser, body: unknown) => {
-    const r = PhotoRequestSchema.safeParse(body ?? {});
+  const photoPlan = async (u: AuthUser, body0: unknown) => {
+    // Claude's size / count on the person's Photo draft, for an app whose pills didn't take them (ci_90b52f873b5a).
+    const raw = (body0 && typeof body0 === 'object' ? body0 : {}) as Record<string, unknown>;
+    const body = { ...raw, ...(await heldPhoto(ctx, u, raw)) };
+    const r = PhotoRequestSchema.safeParse(body);
     if (!r.success) throw badRequest(`Invalid photo: ${r.error.issues[0]?.path.join('.')} ${r.error.issues[0]?.message}`);
     const p = r.data, graded = photoFilter(p);
     // References Claude added to the composer's draft (suite_add_reference) count too, after the ones sent (max 3). A

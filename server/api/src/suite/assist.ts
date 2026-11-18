@@ -205,7 +205,8 @@ export function photoRequestOf(d: Draft): Record<string, unknown> {
 export function remixRequestOf(d: Draft) {
   const x = d as Record<string, unknown>;
   const req = withScreen({
-    mode: 'remix' as const, prompt: '',
+    // The composer's words (suite_set_draft {prompt}): they join the toggles' words under CHANGE (ci_0145b51a080f).
+    mode: 'remix' as const, prompt: promptText(tokensOf(d)),
     ...(x.remix && typeof x.remix === 'object' ? { remix: x.remix } : {}),
     ...(Array.isArray(x.range) ? { range: x.range } : {}),
     ...(typeof x.engineModel === 'string' ? { engineModel: x.engineModel, ...(typeof x.resolution === 'string' ? { resolution: x.resolution } : {}) } : {}),
@@ -335,6 +336,7 @@ export class SuiteAssist {
     if (Object.keys(byTool).length) incoming.sentByTool = byTool; else delete incoming.sentByTool;
     // Claude's start / end frames: the apps don't send them back (the request's frames win once the person changes that slot).
     if (!('frames' in incoming) && prev.frames) incoming.frames = prev.frames;
+    holdPhoto(prev, incoming, tool);
     return this.view(await this.save(r, { draft: parseDraft(incoming), revision: r.revision + 1 }));
   }
 
@@ -342,7 +344,7 @@ export class SuiteAssist {
   async rewrite(u: AuthUser, id: string, fn: (d: Record<string, unknown>) => Record<string, unknown>) {
     const r = await this.row(u, id);
     // The person undid Claude's change: the app's next sync showing the old value is theirs, not an echo (see patch).
-    const { claudeSet: _echo, ...d } = fn({ ...(r.draft as Record<string, unknown>) });
+    const { claudeSet: _echo, photoHold: _hold, ...d } = fn({ ...(r.draft as Record<string, unknown>) });
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
   }
   /** suite_set_draft: Claude's changes, checked against the composer's visible options. */
@@ -437,6 +439,12 @@ export class SuiteAssist {
     const fields: ClaudeSet['fields'] = {};
     for (const k of ECHO_FIELDS) if (!same(before[k], (d as Record<string, unknown>)[k])) fields[k] = { before: before[k], after: (d as Record<string, unknown>)[k] };
     if (Object.keys(fields).length) d.claudeSet = { tool: d.tool, fields } satisfies ClaudeSet; else delete d.claudeSet;
+    // Photo's size and count (ci_90b52f873b5a): held until the app's own value changes (see holdPhoto).
+    if (d.tool === 'photo') {
+      const hold = { ...((before.tool === 'photo' ? before.photoHold : undefined) as PhotoHold | undefined) };
+      for (const k of PHOTO_HELD) if (b[k] !== undefined) hold[k] = { after: b[k], app: hold[k]?.app ?? appValue(before, k) };
+      if (Object.keys(hold).length) d.photoHold = hold; else delete d.photoHold;
+    } else delete d.photoHold;
     return this.view(await this.save(r, { draft: parseDraft(d), revision: r.revision + 1 }));
   }
 
@@ -579,6 +587,49 @@ export class SuiteAssist {
     await this.save(r, { pending: list });
     return p;
   }
+}
+
+/**
+ * Photo's size and count as Claude set them (ci_90b52f873b5a): the Mac's Photo composer doesn't take them from the draft
+ * (its Size and Photos pills keep their own values) and its draft never carries the size, so every sync put its 9:16 and
+ * count back. Claude's value stands while the app's own value is still the one it had when Claude set it; the person
+ * changing that pill (or the app showing Claude's value) ends the hold. `app` is the app's value then (its screen's
+ * request first, else its draft's).
+ */
+const PHOTO_HELD = ['aspect', 'count'] as const;
+type PhotoHold = Partial<Record<(typeof PHOTO_HELD)[number], { after: unknown; app: unknown }>>;
+function appValue(d: Record<string, unknown>, k: (typeof PHOTO_HELD)[number]) {
+  const s = screenOf(d as Draft)?.request?.[k];
+  return s !== undefined ? s : d[k];
+}
+function holdPhoto(prev: Record<string, unknown>, incoming: Record<string, unknown>, tool: string) {
+  const hold = (prev.tool === 'photo' && tool === 'photo' ? prev.photoHold : undefined) as PhotoHold | undefined;
+  delete incoming.photoHold;
+  if (!hold) return;
+  const keep: PhotoHold = {};
+  for (const k of PHOTO_HELD) {
+    const h = hold[k];
+    if (!h) continue;
+    const now = appValue(incoming, k);
+    if (same(now, h.app) && !same(now, h.after)) { incoming[k] = h.after; keep[k] = h; continue; }
+    // The app shows Claude's value now, or the person picked another: theirs from here on.
+    if (now === undefined) delete incoming[k]; else incoming[k] = now;
+  }
+  if (Object.keys(keep).length) incoming.photoHold = keep;
+}
+/** A Photo run from an app that doesn't take Claude's size / count (see PhotoHold): Claude's while the app's is unchanged. */
+export async function heldPhoto(ctx: Ctx, u: AuthUser, body: Record<string, unknown>): Promise<{ aspect?: string; count?: number }> {
+  const own = (body.draft ?? null) as Record<string, unknown> | null;
+  if (own?.photoHold) return {}; // the draft with Claude itself (suite_estimate): already Claude's values
+  const [r] = await ctx.db.select().from(suiteAssists).where(and(eq(suiteAssists.studioId, u.studioId), eq(suiteAssists.userId, u.id))).orderBy(desc(suiteAssists.updatedAt)).limit(1);
+  if (!r || Date.now() - r.updatedAt > LIVE_ASSIST_MS) return {};
+  const d = r.draft as Draft & { photoHold?: PhotoHold };
+  if (d.tool !== 'photo' || !d.photoHold || !samePrompt(promptText(tokensOf(d)), String(body.prompt ?? ''))) return {};
+  const out: { aspect?: string; count?: number } = {};
+  const a = d.photoHold.aspect, c = d.photoHold.count;
+  if (a && typeof a.after === 'string' && same(body.aspect, a.app)) out.aspect = a.after;
+  if (c && typeof c.after === 'number' && same(body.count, c.app)) out.count = c.after;
+  return out;
 }
 
 /** Fields the app's first sync could echo back from before Claude's change. */

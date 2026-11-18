@@ -8,9 +8,11 @@
 //   take a video natively gets the clip another way (as a reference video, as frames, or not at all for a words-only
 //   model), and the plan says exactly what MUSE did. Refused only when it can't run at all (provider not set up, off).
 import type { ImageRef } from '../db/schema.js';
+import { applySent, sameImage, type Resolved } from '../images/sent.js';
 import { DEFAULT_TEXTS, type PromptTexts } from '../prompt/library.js';
 import { run } from '../prompt/scripts/builders.js';
 import { sanitizeDirection } from '../prompt/engine.js';
+import { stripMoveTokens } from './camera.js';
 import { billedSeconds, extraPerTake, joinTokens, perSecond, planRefSent, token, type Character, type RemixToggles, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
 import { MODELS, customModelsOf, modelById, refFor, type EditDo, type EditToggle, type ModelSpec, type ProviderId } from './registry.js';
 
@@ -273,6 +275,17 @@ export function remixWords(x: RemixToggles, her: Character | null, texts: Prompt
   return { text: parts.join(' ').replace(/\.\./g, '.'), removed };
 }
 
+/**
+ * The person's words for a New Swap: the composer's prompt (suite_set_draft {prompt}, the app's text box) and the toggles'
+ * direction, joined (ci_0145b51a080f: the prompt was stored but never reached the built prompt). They go under CHANGE in
+ * every mode, sanitised against her look in remixWords, as Extend does with its words.
+ */
+export function withPromptWords(x: RemixToggles, prompt?: string | null): RemixToggles {
+  const words = stripMoveTokens([prompt, x.direction].map(w => (w ?? '').trim()).filter(Boolean).join(' '), []).trim();
+  if (!words) { const { direction: _d, ...rest } = x; return rest; }
+  return { ...x, direction: words };
+}
+
 /** Each turned-on toggle's missing piece, in plain words (null when complete). */
 export function remixIncomplete(x: RemixToggles): string | null {
   if (!togglesOn(x).length) return 'Turn on a change: Background, Outfit, Character or Look & light';
@@ -293,7 +306,7 @@ export function keptWords(x: RemixToggles) {
 }
 
 export function buildRemixPlan(r: ShotRequest, x: RemixToggles, p: RemixPick, people: RemixPeople, clip: { key: string; seconds: number },
-  o: { texts?: PromptTexts; priceScale?: number }): ShotPlan {
+  o: { texts?: PromptTexts; priceScale?: number; /** The images-sent choice (images/sent.ts): the request's, the draft's. */ sent?: Resolved | null }): ShotPlan {
   const t = o.texts ?? DEFAULT_TEXTS;
   const m = p.model, style = m.camera.refStyle, route = p.support.route;
   const notes: string[] = [...p.support.notes];
@@ -311,17 +324,36 @@ export function buildRemixPlan(r: ShotRequest, x: RemixToggles, p: RemixPick, pe
   const personStill = route === 'edit' && !!m.edit!.needsCharacter && x.character?.kind !== 'model';
   const room = route === 'text' ? 0 : Math.max(0, pictureRoom(m, route) - (fr?.stills ?? 0) - (personStill ? 1 : 0));
   const filled = fillImages(groups, room);
-  if (filled.dropped.length && room > 0 && !notes.some(n => n.includes('picture'))) notes.push(`${name(m)} takes ${room} ${room === 1 ? 'picture' : 'pictures'} here: left out ${filled.dropped.join(', ')}`);
+  const refOf = (kind: Group['kind'] | 'other', label: string, image: ImageRef) =>
+    ({ kind, label, role: kind === 'background' ? 'location' : kind === 'product' ? 'outfit' : kind === 'other' ? 'prop' : 'character', image });
+  const auto = filled.groups.flatMap(g => g.images.map(img => refOf(g.kind, img.label, img.image)));
+  // Images sent (ci_f5f8d64b4c57): Claude's or the person's list (set_sent_images) replaces MUSE's pick, order kept,
+  // within the model's picture room; the run sends exactly this list and the prompt's tokens follow it.
+  const view = applySent(auto.map(planRefSent), o.sent, room);
+  const chosen = view.changed ? view.images.map(x => {
+    const g = groups.find(gr => gr.images.some(i => sameImage(i.image, x.image)));
+    const own = g?.images.find(i => sameImage(i.image, x.image));
+    if (g && own) return refOf(g.kind, own.label, x.image);
+    // Not one of MUSE's pictures: by its role (her, the outfit, the place); anything else is an extra reference.
+    const kind: Group['kind'] | 'other' = x.role === 'person' && her ? 'character' : x.role === 'outfit' && outfitSet ? 'outfit'
+      : x.role === 'location' && groups.some(gr => gr.kind === 'background') ? 'background' : 'other';
+    const label = kind === 'character' ? (/^(face|body)/.test(x.label) ? x.label : `body, ${x.label}`) : kind === 'outfit' ? (x.label.startsWith('outfit') ? x.label : `outfit, ${x.label}`) : x.label;
+    return refOf(kind, label, x.image);
+  }) : auto;
+  if (!view.changed && filled.dropped.length && room > 0 && !notes.some(n => n.includes('picture'))) notes.push(`${name(m)} takes ${room} ${room === 1 ? 'picture' : 'pictures'} here: left out ${filled.dropped.join(', ')}`);
+  if (view.changed) notes.push(`images sent: ${view.changedBy === 'claude' ? 'chosen by Claude' : 'your choice'} (${chosen.length} of ${room})`);
   const refs: { label: string; role: string; image: ImageRef }[] = [];
-  const tokensOf: Partial<Record<Group['kind'], string[]>> = {};
-  const labelsOf: Partial<Record<Group['kind'], string[]>> = {};
-  for (const g of filled.groups) {
-    tokensOf[g.kind] = g.images.map(img => { refs.push({ label: img.label, role: g.kind === 'background' ? 'location' : g.kind === 'product' ? 'outfit' : 'character', image: img.image }); return token(style, 'image', refs.length); });
-    labelsOf[g.kind] = g.images.map(img => img.label);
+  const tokensOf: Partial<Record<Group['kind'] | 'other', string[]>> = {};
+  const labelsOf: Partial<Record<Group['kind'] | 'other', string[]>> = {};
+  for (const c of chosen) {
+    refs.push({ label: c.label, role: c.role, image: c.image });
+    (tokensOf[c.kind] ??= []).push(token(style, 'image', refs.length));
+    (labelsOf[c.kind] ??= []).push(c.label);
   }
   // Pictures that didn't fit are said in words, so the change still reaches the model.
   const extra: string[] = [];
-  const sent = new Set(filled.groups.filter(g => g.images.length).map(g => g.kind));
+  const sent = new Set(chosen.map(c => c.kind));
+  if (tokensOf.other?.length) extra.push(`Also use ${joinTokens(tokensOf.other)} as ${tokensOf.other.length === 1 ? 'a reference' : 'references'}.`);
   if (her && !sent.has('character')) extra.push(`Person: ${her.name}, ${her.look}.`);
   if (outfitSet && !sent.has('outfit')) extra.push(`Outfit: ${outfitSet.description || outfitSet.name}.`);
   if (x.outfit?.kind === 'product' && !sent.has('product')) extra.push(`Outfit: the garment ${x.outfit.name ? `"${x.outfit.name}"` : 'from the product photo'}.`);
@@ -374,7 +406,7 @@ export function buildRemixPlan(r: ShotRequest, x: RemixToggles, p: RemixPick, pe
     audio: false, takes: r.takes, seed: m.seed ? r.seed : undefined, prompt, params: {},
     images: { middle: [], refs }, videos: videoIn ? [{ video: { key: clip.key, seconds: used }, use: 'source' }] : [], speaking: false, separationUsd: 0,
     perSec, billedPerTake: billed, extraPerTake: perRun, estimate, camera: { moves: [], notes: [], usesGuide: false }, notes,
-    sentImages: { images: refs.map(planRefSent), changed: false, max: Math.max(room, refs.length) },
+    sentImages: view.changed ? view : { images: refs.map(planRefSent), changed: false, max: room },
     remix: { keepAudio, restoreAudio: keepAudio, range: span.trimmed || span.needed ? [span.from, span.needed ? span.from + span.max : span.to] : null,
       clipSeconds: clip.seconds, toggles: togglesOn(x), why: p.why, tested: m.edit?.tested ?? true, route, sourceKey: clip.key,
       ...(fr ? { frames: fr } : {}), ...(personStill ? { personStill: true } : {}),

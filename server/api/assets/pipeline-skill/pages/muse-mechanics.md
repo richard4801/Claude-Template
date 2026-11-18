@@ -8,6 +8,6 @@ Updated 2026-11-16 by the coordinator; items marked (changed) differ from what t
 - (changed) Imports from file or link: up to 60 min / 2 GB. Swap/Recast still take ≤ ~30 s at use.
 - (changed) Blend modes: normal, multiply, screen, overlay, softLight, darken, lighten, add, **difference, exclusion**.
 - (changed) Template library: `edit_templates` (list), `edit_template_apply` (with `dryRun` first; paid ones ask for Approve), `edit_template_save` (save a recipe from a selection or spec). Use a template before writing a new script; save a new proven recipe as a template (ask the owner first).
-- (changed) `save_to_mac` saves a take/upload/outfit picture to the Mac at original quality for local work.
+- (changed) `save_to_mac` saves a take/upload/outfit picture/place photo (imageId img_…, placeId + photo) to the Mac at original quality for local work.
 - `auto_captions` always draws its captions: read the times, then undo that entry. [89]
 - 16 overlay tracks max; templates that need many copies say how many tracks they need.

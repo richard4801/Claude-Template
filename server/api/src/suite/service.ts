@@ -20,7 +20,7 @@ import { shotLook } from './looks.js';
 import { compileCamera } from './compile.js';
 import { buildExtendPlan, pickExtend } from './extend.js';
 import { buildRecastPlan, pickRecast } from './recast.js';
-import { buildRemixPlan, outputSeconds, pictureRoom, pickRemix, remixGroup, REMIX_GROUPS, remixIncomplete, remixModels, remixSpan, remixView, sourceLimits, togglesOn } from './remix.js';
+import { buildRemixPlan, withPromptWords, outputSeconds, pictureRoom, pickRemix, remixGroup, REMIX_GROUPS, remixIncomplete, remixModels, remixSpan, remixView, sourceLimits, togglesOn } from './remix.js';
 import { z } from 'zod';
 import { placeSetting, resolvePlace } from './locations.js';
 import { billedSeconds, buildPlan, FALLBACK_KEY, modelName as specName, perSecond, RemixSchema, needOf, pickAdapted, pickModel, refusalLine, shotLabel, ShotRequestSchema, type Character, type Need, type Pick as ModelPick, type Refusal, type ShotPlan, type ShotRequest, type SuitePrefs } from './plan.js';
@@ -502,7 +502,8 @@ export class SuiteService {
    */
   private async remixPlan(u: AuthUser, r: ShotRequest) {
     if (!r.clipId) throw badRequest('New Swap needs the video (clipId)');
-    const x = r.remix ?? {};
+    // The composer's prompt joins the toggles' words (ci_0145b51a080f), in every mode.
+    const x = withPromptWords(r.remix ?? {}, r.prompt);
     const missing = remixIncomplete(x);
     if (missing) throw new ApiError(400, missing.startsWith('Turn on') ? 'remix_empty' : 'remix_incomplete', missing);
     const [clip] = await this.ctx.db.select().from(clips).where(and(eq(clips.id, r.clipId), eq(clips.studioId, u.studioId)));
@@ -529,7 +530,9 @@ export class SuiteService {
     }
     if (x.outfit?.kind === 'outfit' && !(her?.outfit ?? outfitOnly)?.images.length) throw badRequest('Outfit: this outfit has no pictures yet');
     const texts = await this.ctx.prompts.texts(u.studioId);
-    const plan = buildRemixPlan(r, x, pick, { her, outfitOnly }, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale });
+    // Images sent (ci_f5f8d64b4c57): the request's choice, else the composer draft's (set_sent_images), as the estimate shows.
+    const plan = buildRemixPlan(r, x, pick, { her, outfitOnly }, { key: clip.storageKey, seconds: clip.durationSec }, { texts, priceScale: prefs.models?.[pick.model.id]?.priceScale,
+      sent: await sentImagesOf(this.ctx).forRequest(u, r) });
     await this.livePrice(plan, prefs);
     return { swap: false as const, plan, pick: { model: pick.model, resolution: pick.model.resolutions.find(z => z.id === plan.resolution)!, seconds: plan.seconds, tried: [] }, prefs,
       tried: pick.tried.map(t => ({ ...t, resolution: '' })), talk: { speaking: false, source: 'default' as const } };
@@ -544,7 +547,8 @@ export class SuiteService {
       : r.background === 'photo' && (r.backgroundImage?.asset || r.backgroundImage?.url) ? { mode: 'photo' as const, image: r.backgroundImage as { asset?: string; url?: string } } : undefined;
     const remix = { character: { kind: 'model' as const, modelId: who.modelId }, ...(who.outfitId ? { outfit: { kind: 'outfit' as const, outfitId: who.outfitId } } : {}),
       ...(background ? { background } : {}), ...(!background && words ? { direction: words } : {}) };
-    return { ...r, mode: 'remix', cast: undefined, engineModel: model, remix: remix as ShotRequest['remix'] };
+    // The words are in the toggles now (background words or direction): not joined in a second time.
+    return { ...r, mode: 'remix', cast: undefined, engineModel: model, prompt: '', direction: undefined, remix: remix as ShotRequest['remix'] };
   }
 
   /**

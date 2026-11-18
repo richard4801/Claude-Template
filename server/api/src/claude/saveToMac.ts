@@ -6,7 +6,9 @@
 // keys and credential paths are refused here and there.
 import { and, eq } from 'drizzle-orm';
 import type { AuthUser, Ctx } from '../ctx.js';
-import { outfits, takes, uploads, type ImageRef } from '../db/schema.js';
+import { generatedImages, outfits, takes, uploads, type ImageRef } from '../db/schema.js';
+import { suiteLocations } from '../suite/schema.js';
+import { imagesOf, coverOf } from '../suite/locations.js';
 import { ApiError, badRequest } from '../errors.js';
 import { isSecretPath, permissionsOf, type SaveRequest } from './permissions.js';
 
@@ -89,6 +91,8 @@ export class SaveToMac {
   /** An upload of the studio (an attached image or video, a sound, an Edit upload). */
   async upload(u: Pick<AuthUser, 'studioId'>, id: string): Promise<Source> {
     const [r] = await this.ctx.db.select().from(uploads).where(and(eq(uploads.id, id), eq(uploads.studioId, u.studioId)));
+    // A picture MUSE made (img_…: a place photo …) named as an upload (ci_a64576ec3d2d): saved the same way.
+    if (!r && /^img_/.test(id)) return this.generated(u, id);
     if (!r) throw new ApiError(404, 'not_found', `${id} is not an upload of this studio (deleted, or not an upload id)`);
     if (r.state !== 'ready') throw new ApiError(409, 'not_ready', `${id} hasn't finished uploading yet`);
     const kind = r.contentType.split('/')[0] ?? 'file';
@@ -114,14 +118,44 @@ export class SaveToMac {
       ...(p.contentType ? { contentType: p.contentType } : {}), ...(p.bytes ? { bytes: p.bytes } : {}) };
   }
 
-  /** What Claude named → the file to save (exactly one of takeId, uploadId, outfitId). */
+  /** A picture MUSE made for this studio (img_…): a place photo, a character or outfit picture, as stored. */
+  async generated(u: Pick<AuthUser, 'studioId'>, id: string): Promise<Source> {
+    const [g] = await this.ctx.db.select().from(generatedImages).where(and(eq(generatedImages.id, id), eq(generatedImages.studioId, u.studioId)));
+    if (!g) throw new ApiError(404, 'not_found', `${id} is not a picture of this studio (deleted, or not a picture id) · a place's photos: placeId (+ photo)`);
+    const [place] = g.purpose === 'place_photo' && g.refId
+      ? await this.ctx.db.select({ name: suiteLocations.name }).from(suiteLocations).where(and(eq(suiteLocations.id, g.refId), eq(suiteLocations.studioId, u.studioId)))
+      : [];
+    const p = await this.ofRef(u.studioId, g.image);
+    if (!p) throw new ApiError(409, 'not_ready', `${id} isn't stored yet`);
+    const what = place ? `the place photo of ${place.name}` : `the ${g.purpose.replace(/_/g, ' ')} picture`;
+    return { url: p.url, fileName: fileNameFor({ title: place ? `${place.name} place` : g.purpose.replace(/_/g, ' '), id: g.id, ext: extOf(p.key, p.contentType, 'png') }), what: `${what} (${g.id})`,
+      ...(p.contentType ? { contentType: p.contentType } : {}), ...(p.bytes ? { bytes: p.bytes } : {}) };
+  }
+
+  /** A place's photo (her world's places and the studio's): `photo` is its number from 1 (default the cover). */
+  async place(u: Pick<AuthUser, 'studioId'>, id: string, photo: unknown): Promise<Source> {
+    const [r] = await this.ctx.db.select().from(suiteLocations).where(and(eq(suiteLocations.id, id), eq(suiteLocations.studioId, u.studioId)));
+    if (!r) throw new ApiError(404, 'not_found', `${id} is not a place of this studio (deleted, or not a place id)`);
+    const imgs = imagesOf(r);
+    if (!imgs.length) throw new ApiError(404, 'no_picture', `${r.name} has no photo yet`);
+    if (photo !== undefined && photo !== null && (typeof photo !== 'number' || !Number.isInteger(photo) || photo < 1)) throw badRequest('photo: the place photo\'s number, from 1');
+    if (typeof photo === 'number' && photo > imgs.length) throw new ApiError(404, 'no_picture', `${r.name} has ${imgs.length} photo${imgs.length === 1 ? '' : 's'}`);
+    const n = typeof photo === 'number' ? photo : Math.min(Math.max(0, r.cover ?? 0), imgs.length - 1) + 1;
+    const ref = typeof photo === 'number' ? imgs[n - 1]! : coverOf(r)!;
+    const p = await this.ofRef(u.studioId, ref as ImageRef);
+    if (!p) throw new ApiError(409, 'not_ready', `${r.name}'s photo ${n} isn't stored yet`);
+    return { url: p.url, fileName: fileNameFor({ title: `${r.name} place`, id: r.id, index: n, ext: extOf(p.key, p.contentType, 'jpg') }), what: `${r.name}'s photo ${n} (place ${r.id})`,
+      ...(p.contentType ? { contentType: p.contentType } : {}), ...(p.bytes ? { bytes: p.bytes } : {}) };
+  }
+
+  /** What Claude named → the file to save (exactly one of takeId, uploadId, outfitId, imageId, placeId). */
   async source(u: Pick<AuthUser, 'studioId'>, a: Record<string, unknown>): Promise<Source> {
     const id = (k: string) => (typeof a[k] === 'string' && (a[k] as string).trim() ? (a[k] as string).trim() : '');
-    const given = (['takeId', 'uploadId', 'outfitId'] as const).filter(k => id(k));
-    if (given.length !== 1) throw badRequest('Name one file: takeId (a take\'s video or photo), uploadId, or outfitId (+ picture)');
+    const given = (['takeId', 'uploadId', 'outfitId', 'imageId', 'placeId'] as const).filter(k => id(k));
+    if (given.length !== 1) throw badRequest('Name one file: takeId (a take\'s video or photo), uploadId, outfitId (+ picture), imageId (a picture MUSE made, img_…) or placeId (+ photo)');
     const k = given[0]!, v = id(k);
     if (!/^[A-Za-z0-9_-]{1,80}$/.test(v)) throw badRequest(`${k}: an id`);
-    return k === 'takeId' ? this.take(u, v) : k === 'uploadId' ? this.upload(u, v) : this.outfit(u, v, a.picture);
+    return k === 'takeId' ? this.take(u, v) : k === 'uploadId' ? this.upload(u, v) : k === 'imageId' ? this.generated(u, v) : k === 'placeId' ? this.place(u, v, a.photo) : this.outfit(u, v, a.picture);
   }
 }
 
@@ -131,7 +165,7 @@ export const saveToMacOf = (ctx: Ctx) => { let s = services.get(ctx); if (!s) { 
 /** save_to_mac (owner and members): a studio file saved to the person's Mac, after they approve (or into an allowed folder). */
 export const SAVE_TOOL = {
   name: 'save_to_mac', scope: 'edit:read', title: 'Save a file to this Mac (asks first)',
-  description: 'Free. Saves a studio file to the person\'s Mac in original quality so you can work on it locally (ffmpeg, scripts, other apps): a take\'s video or photo (takeId), an upload (uploadId), or a saved outfit\'s full-size picture (outfitId + picture: front (default), threeQuarter, side, back, face, faceThreeQuarter, profile). '
+  description: 'Free. Saves a studio file to the person\'s Mac in original quality so you can work on it locally (ffmpeg, scripts, other apps): a take\'s video or photo (takeId), an upload (uploadId), a saved outfit\'s full-size picture (outfitId + picture: front (default), threeQuarter, side, back, face, faceThreeQuarter, profile), a picture MUSE made such as a generated place photo (imageId, img_…), or a place\'s photo (placeId + photo: its number from 1, default the cover). '
     + `folder: where on the Mac (default ${DEFAULT_SAVE_FOLDER}); the Mac saves only into Downloads, Desktop, Documents, Movies, Pictures, ~/MUSE or a folder the person always allowed, and never over another file (a second copy is "name (2).mp4"). `
     + 'The person approves a card ("Save … to …?") unless that folder is always allowed. Answers within 40 s: {status: "done", path, bytes} (use path with your file and shell tools), {status: "failed", error}, or {status: "waiting_for_approval" | "downloading", saveTicket, percent?, message}: then call save_to_mac {saveTicket} again (each call waits up to 40 s) until done, and tell the person what the message says.',
   inputSchema: { type: 'object', properties: {
@@ -139,6 +173,9 @@ export const SAVE_TOOL = {
     uploadId: { type: 'string', maxLength: 80, description: 'An upload (an attached image or video, a sound)' },
     outfitId: { type: 'string', maxLength: 80, description: 'A saved outfit' },
     picture: { type: 'string', enum: [...OUTFIT_PICTURES], description: 'With outfitId: which picture (default front)' },
+    imageId: { type: 'string', maxLength: 80, description: 'A picture MUSE made for this studio (img_…), e.g. a generated place photo' },
+    placeId: { type: 'string', maxLength: 80, description: 'A place (her world or the studio\'s): one of its photos' },
+    photo: { type: 'integer', minimum: 1, maximum: 8, description: 'With placeId: which photo, from 1 (default the cover)' },
     folder: { type: 'string', maxLength: 512, description: `A folder on the Mac, absolute or ~/… (default ${DEFAULT_SAVE_FOLDER})` },
     saveTicket: { type: 'string', maxLength: 120, description: 'To follow a save already asked for' },
   }, additionalProperties: false },
